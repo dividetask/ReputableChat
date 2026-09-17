@@ -54,16 +54,14 @@ module ReputableChat
            secret: ENV.fetch("SESSION_SECRET") { SecureRandom.hex(64) },
            cookie_options: { same_site: :strict, http_only: true, secure: ENV["RACK_ENV"] == "production" }
 
+    # Loaded once at require time rather than memoized on first request:
+    # config.ru freezes the app class, and a lazy `@defaults ||=` raises
+    # FrozenError on the first real request while passing every unfrozen test.
+    DEFAULTS = YAML.safe_load_file(File.join(opts[:root], "config", "reputation.yml")).freeze
+    EMOTES   = YAML.safe_load_file(File.join(opts[:root], "config", "emotes.yml")).freeze
+
     class << self
       attr_accessor :store, :origin
-
-      def defaults
-        @defaults ||= YAML.safe_load_file(File.join(opts[:root], "config", "reputation.yml"))
-      end
-
-      def emotes
-        @emotes ||= YAML.safe_load_file(File.join(opts[:root], "config", "emotes.yml"))
-      end
     end
 
     def store = self.class.store
@@ -84,8 +82,8 @@ module ReputableChat
         # The client does the reputation maths, so it needs the parameters.
         # Serving them (rather than baking them into the JS) is what lets a
         # default change reach every user who never pinned that setting.
-        r.get("defaults") { self.class.defaults }
-        r.get("emotes")   { self.class.emotes }
+        r.get("defaults") { DEFAULTS }
+        r.get("emotes")   { EMOTES }
         r.post("session")   { open_session(r) }
         r.post("register")  { register(r) }
 

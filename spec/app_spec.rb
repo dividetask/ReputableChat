@@ -244,3 +244,58 @@ class AppSpec < Minitest::Test
     assert_includes csp, "frame-ancestors 'none'"
   end
 end
+
+# config.ru freezes the app class. Anything that lazily memoizes on first
+# request raises FrozenError in production while passing every unfrozen test,
+# so the frozen path gets its own coverage.
+class FrozenAppSpec < Minitest::Test
+  include Rack::Test::Methods
+
+  # A subclass, so freezing does not leak into the rest of the suite. Note the
+  # ordering this depends on, which config.ru also relies on: store and origin
+  # must be assigned BEFORE the class is frozen, since they are class-level
+  # accessors.
+  FROZEN = Class.new(ReputableChat::App) do
+    self.store  = ReputableChat::Store::Database.new("sqlite:/")
+    self.origin = "http://example.test"
+  end.freeze
+
+  def app = FROZEN.app
+
+  def test_serves_reputation_defaults_to_the_client
+    get "/api/defaults"
+
+    assert_equal 200, last_response.status
+    config = JSON.parse(last_response.body)
+
+    assert_equal "0.09", config.dig("constants", "k")
+    assert_equal "0.0004", config.dig("vote_curve", "a")
+    assert_equal 8, config.dig("seed", "min_words")
+    assert_equal "argon2id", config.dig("seed", "kdf", "algorithm")
+  end
+
+  def test_serves_emote_polarity
+    get "/api/emotes"
+
+    assert_equal 200, last_response.status
+    emotes = JSON.parse(last_response.body)
+
+    assert_operator emotes["positive"].size, :>, emotes["negative"].size,
+                    "positive emotes should outnumber negative ones by design"
+  end
+
+  def test_serves_the_wordlist
+    get "/wordlist.txt"
+
+    assert_equal 200, last_response.status
+    assert_equal 2048, last_response.body.split("\n").size
+  end
+
+  def test_security_headers_are_present_on_api_responses
+    get "/api/defaults"
+
+    assert_includes last_response.headers["Content-Security-Policy"], "default-src 'self'"
+    assert_equal "DENY", last_response.headers["X-Frame-Options"]
+    assert_equal "nosniff", last_response.headers["X-Content-Type-Options"]
+  end
+end
