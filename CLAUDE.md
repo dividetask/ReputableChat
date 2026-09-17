@@ -28,19 +28,6 @@ bundle exec rake spec     # full suite
 bundle exec rake curve    # print current curve, ladder and safety window
 ```
 
-## Before changing config/reputation.yml
-
-The values in there are coupled. The rule "a report from three hops away blocks
-someone you liked once, but two likes outweigh it" requires:
-
-```
-curve(1) < k³ < curve(2)      i.e.   A < k³ < 4A
-```
-
-so `k`, `max_hops`, `A`, `B` and `cap` cannot be tuned independently.
-`spec/reputation_rules_spec.rb` asserts this directly. **If that spec goes red
-after a config change, the config change is what to reconsider**, not the test.
-
 See [docs/project/reputation.md](docs/project/reputation.md).
 
 ## Things that break silently
