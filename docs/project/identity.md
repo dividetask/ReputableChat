@@ -1,0 +1,99 @@
+# Identity
+
+There is no username at login and no password in the usual sense. A seed phrase
+*is* the account: it derives a keypair, and the public half is the identity.
+
+## Seed phrases
+
+- **BIP39 English wordlist**, 2048 words, 11 bits each. Chosen because it is
+  well tested, has vetted translations, and guarantees the first four letters
+  identify a word — which makes type-ahead reliable and removes spelling as a
+  failure mode.
+- **Minimum 8 words.** 88 bits total: 80 entropy plus an 8-bit checksum.
+- Longer seeds are accepted; each extra word adds 11 bits.
+- The word count is hashed alongside the entropy, so seeds of different lengths
+  cannot collide.
+
+### Why 8 and not 6
+
+Public keys are public and the derivation is public, so an attacker does not
+attack one account — they grind candidate seeds and check each against **every
+registered key at once**. The expected cost of breaking *someone* is `2^E / N`,
+not `2^E`.
+
+Normally a per-user salt defeats this, but a usernameless login has nothing to
+salt with. The seed is the only input. That leaves entropy and KDF cost as the
+only levers.
+
+At 10M users, against an attacker sustaining 10⁷ Argon2id guesses/sec:
+
+| words | entropy after checksum | time to break someone |
+|---|---|---|
+| 6 | 58 | ~1 hour |
+| 7 | 69 | ~81 days |
+| **8** | **80** | **~457 years** |
+| 9 | 91 | ~900,000 years |
+
+The cliff is steep because each word is 11 bits. Seven words was the original
+target and is too thin — 81 days shrinks every year as hardware improves and the
+user count grows.
+
+**Argon2id is mandatory at every length.** Without a memory-hard KDF, even 8
+words falls in days. Raising the work factor cannot substitute for entropy:
+doubling it takes 7 words from 81 days to 162.
+
+### Checksum
+
+8 bits, so roughly 1 typo in 256 still validates. Because a valid-but-
+unregistered seed leads to account creation, a mistyped login that happens to
+pass the checksum would otherwise silently make a new empty account and leave
+the user thinking they had lost everything. The UI therefore warns explicitly
+before creating an account and makes it a second deliberate action.
+
+### Recovery
+
+There is none. Losing the seed loses the account and all of its reputation,
+permanently. The UI says so at generation time.
+
+## Keys
+
+`Argon2id(seed) → 32 bytes → Ed25519 keypair`.
+
+The private key is a **non-extractable WebCrypto key**. This is the reason for
+using WebCrypto over a pure-JS Ed25519 library: a non-extractable key can sign
+but its bytes cannot be read back out, by the page or by anything injected into
+it.
+
+Two layers keep it away from other sites:
+
+- **Origin isolation** — no other site can reach this origin's IndexedDB.
+- **A strict CSP** (`lib/reputable_chat/app.rb`) — keeps injected script inside
+  this origin from using the key while a session is live.
+
+It is stored in IndexedDB rather than held in memory only. Memory-only dies on
+every page refresh, and a refresh is not a log off; IndexedDB survives refresh
+and is cleared on explicit logout, which matches "stays until you log off" more
+literally. The seed itself is never stored and never transmitted.
+
+## Login
+
+Challenge–response:
+
+1. Client asks for a nonce. The server issues a single-use, 5-minute one.
+2. Client signs `{purpose, pubkey, nonce, origin, ts}`.
+3. Server verifies the signature, the freshness of `ts`, and claims the nonce.
+
+The nonce is claimed **after** signature verification, so a failed signature
+does not burn the challenge.
+
+`purpose` and `origin` are in the signed payload deliberately. Without them a
+signature harvested by one server could be replayed against another to
+authenticate as that user — which matters enormously once this federates, and
+costs nothing to get right now.
+
+## Usernames
+
+Not unique, and deliberately so. Reputation attaches to the **key**, never the
+name. That makes impersonation trivial unless the UI shows key-derived identity
+everywhere, so a fingerprint is rendered next to every name from the first
+screen onward.

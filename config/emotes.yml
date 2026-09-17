@@ -1,0 +1,36 @@
+# Emote polarity.
+#
+# A "like" is a positive emote on one of a user's comments. Net votes for a
+# user is the sum of polarities across every emote placed on their comments,
+# fed to vote_curve in reputation.yml.
+#
+# Almost everything is positive. Negative is deliberately a short list: a
+# negative emote is a real signal, not a way to express mild disagreement.
+# Neutral emotes are reactions that carry no reputational weight at all.
+
+positive:
+  - "\U0001F44D"   # thumbs up
+  - "❤️" # red heart
+  - "\U0001F602"   # joy
+  - "\U0001F389"   # party popper
+  - "\U0001F64F"   # folded hands
+  - "\U0001F525"   # fire
+  - "\U0001F4AF"   # hundred points
+  - "\U0001F62E"   # open mouth
+  - "✅"       # check mark
+  - "\U0001F44F"   # clapping hands
+  - "\U0001F60A"   # smiling face
+  - "\U0001F91D"   # handshake
+  - "\U0001F4A1"   # light bulb
+  - "\U0001F9E0"   # brain
+  - "⭐"       # star
+  - "\U0001F680"   # rocket
+
+negative:
+  - "\U0001F44E"   # thumbs down
+  - "\U0001F921"   # clown face
+  - "\U0001F6A9"   # triangular flag
+
+neutral:
+  - "\U0001F440"   # eyes
+  - "\U0001F914"   # thinking face

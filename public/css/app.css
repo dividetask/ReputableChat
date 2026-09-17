@@ -1,0 +1,44 @@
+:root {
+  --bg: #14161a; --panel: #1c1f26; --text: #e6e8ec; --muted: #9aa3b2;
+  --accent: #6ea8fe; --warn: #f0b429; --danger: #e5484d; --line: #2a2f3a;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--text);
+  font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+#app { max-width: 760px; margin: 0 auto; padding: 24px 16px; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 20px; }
+.hidden { display: none; }
+h1 { margin: 0 0 4px; font-size: 22px; }
+label { display: block; margin: 14px 0 4px; font-size: 13px; color: var(--muted); }
+textarea, input[type=text] {
+  width: 100%; padding: 10px; background: #0f1115; color: var(--text);
+  border: 1px solid var(--line); border-radius: 6px; font-family: ui-monospace, monospace;
+}
+button {
+  padding: 9px 16px; border: 0; border-radius: 6px; background: var(--accent);
+  color: #0b1020; font-weight: 600; cursor: pointer;
+}
+button:disabled { opacity: .45; cursor: not-allowed; }
+button.secondary { background: transparent; color: var(--muted); border: 1px solid var(--line); }
+.row { display: flex; gap: 10px; margin-top: 14px; }
+.hint { color: var(--muted); font-size: 13px; }
+.status { min-height: 20px; font-size: 13px; margin: 10px 0 0; }
+.status.error { color: var(--danger); }
+.status.ok { color: #46c17c; }
+.warn { color: var(--warn); font-size: 13px; border-left: 3px solid var(--warn); padding-left: 10px; }
+.suggestions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.suggestions button { background: var(--line); color: var(--text); font-weight: 400; padding: 4px 10px; font-size: 13px; }
+pre { background: #0f1115; padding: 12px; border-radius: 6px; white-space: pre-wrap; word-break: break-word; }
+.chat-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+.messages { height: 55vh; overflow-y: auto; border: 1px solid var(--line); border-radius: 6px; padding: 10px; }
+.msg { padding: 7px 4px; border-bottom: 1px solid var(--line); }
+.msg:last-child { border-bottom: 0; }
+.msg .who { font-weight: 600; }
+.msg .fp { color: var(--muted); font-family: ui-monospace, monospace; font-size: 12px; margin-left: 6px; }
+/* Low-positive reputation: readable, but clearly marked as unvouched-for. */
+.msg.grey { opacity: .45; }
+.msg.grey .who::after { content: " · untrusted"; color: var(--warn); font-weight: 400; font-size: 12px; }
+#composer { display: flex; gap: 8px; margin-top: 12px; }
+#composer input { flex: 1; }

@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ReputableChat</title>
+<link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+<main id="app">
+  <section id="login" class="panel">
+    <h1>ReputableChat</h1>
+    <p class="hint">There is no username here. Your seed phrase <em>is</em> your account.</p>
+
+    <label for="seed">Seed phrase</label>
+    <textarea id="seed" rows="3" autocomplete="off" autocapitalize="off"
+              spellcheck="false" placeholder="eight or more words"></textarea>
+    <div id="suggestions" class="suggestions"></div>
+    <p id="seed-status" class="status"></p>
+
+    <div class="row">
+      <button id="unlock" disabled>Unlock</button>
+      <button id="generate" class="secondary">Generate a new seed</button>
+    </div>
+
+    <div id="new-seed" class="hidden">
+      <p class="warn">Write this down now. Nobody can recover it for you — losing it
+         loses the account and all of its reputation, permanently.</p>
+      <pre id="new-seed-words"></pre>
+    </div>
+
+    <div id="register" class="hidden">
+      <p class="warn">This seed isn't registered yet. If you meant to sign in to an
+         existing account, check for a mistyped or swapped word before continuing —
+         creating an account here gives you a new, empty one.</p>
+      <label for="username">Display name</label>
+      <input id="username" type="text" maxlength="64" autocomplete="off">
+      <p class="hint">Names are not unique. People are identified by the
+         fingerprint next to their name, never by the name itself.</p>
+      <button id="create">Create this account</button>
+    </div>
+  </section>
+
+  <section id="chat" class="panel hidden">
+    <header class="chat-header">
+      <span id="me"></span>
+      <button id="logout" class="secondary">Log off</button>
+    </header>
+    <div id="messages" class="messages"></div>
+    <form id="composer">
+      <input id="body" type="text" maxlength="4000" autocomplete="off" placeholder="Say something">
+      <button type="submit">Send</button>
+    </form>
+    <p id="chat-status" class="status"></p>
+  </section>
+</main>
+
+<script src="/js/vendor-argon2.umd.min.js"></script>
+<script type="module" src="/js/app.js"></script>
+</body>
+</html>
