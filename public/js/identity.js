@@ -138,6 +138,7 @@ export const PURPOSE = {
   LOGIN: "reputablechat:login:v1",
   MESSAGE: "reputablechat:message:v1",
   CONFIG: "reputablechat:config:v1",
+  PRIVATE_CONFIG: "reputablechat:private-config:v1",
 };
 
 // These must match lib/reputable_chat/cryptography/payload.rb exactly.
@@ -151,4 +152,22 @@ export function messagePayload({ author, room, seq, prev, body, ts }) {
 
 export function configPayload({ pubkey, version, profile, ratings, ts }) {
   return { purpose: PURPOSE.CONFIG, pubkey, version, profile, ratings, ts };
+}
+
+export function privateConfigPayload({ pubkey, version, settings, voted, ts }) {
+  return { purpose: PURPOSE.PRIVATE_CONFIG, pubkey, version, settings, voted, ts };
+}
+
+// Verifies a blob the server handed back against a public key.
+export async function verifyBlob(pubkey, blob) {
+  try {
+    const key = await crypto.subtle.importKey(
+      "jwk", { kty: "OKP", crv: "Ed25519", x: pubkey }, "Ed25519", false, ["verify"],
+    );
+    return await crypto.subtle.verify(
+      "Ed25519", key, fromB64url(blob.signature), new TextEncoder().encode(blob.payload),
+    );
+  } catch {
+    return false;
+  }
 }

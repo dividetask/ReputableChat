@@ -87,6 +87,11 @@ module ReputableChat
         r.post("register")  { register(r) }
         r.post("image")     { upload_image(r) }
 
+        r.on "private-config" do
+          r.get { own_private_config(r) }
+          r.put { store_private_config(r) }
+        end
+
         r.on "config" do
           r.post("batch") { config_batch(r) }
           r.put { store_config(r) }
@@ -172,6 +177,35 @@ module ReputableChat
       bad_request(r, "bad pubkeys") unless pubkeys
 
       { "configs" => store.config_blobs(pubkeys).map { |row| present_config(row) } }
+    end
+
+    # Takes no pubkey -- it uses the session's. Asking for somebody else's
+    # private config is not expressible through this route, rather than being
+    # a check that has to stay correct.
+    def own_private_config(r)
+      { "config" => present_config(store.private_config(current_pubkey(r))) }
+    end
+
+    def store_private_config(r)
+      pubkey   = current_pubkey(r)
+      version  = Params.integer(r.params["version"], min: 1) or bad_request(r, "bad version")
+      settings = Params.settings(r.params["settings"])       or bad_request(r, "bad settings")
+      voted    = Params.voted(r.params["voted"] || [])       or bad_request(r, "bad voted list")
+      sig      = Params.signature(r.params["signature"])     or bad_request(r, "bad signature")
+      ts       = Params.integer(r.params["ts"])              or bad_request(r, "bad timestamp")
+
+      payload = Cryptography::Payload.private_config(
+        pubkey: pubkey, version: version, settings: settings, voted: voted, issued_at: ts
+      )
+      verify!(r, pubkey, sig, payload)
+
+      result = store.store_private_config(
+        pubkey: pubkey, version: version,
+        payload: Cryptography::Canonical.dump(payload), signature: sig
+      )
+      r.halt(409, { "error" => "version is not newer than the stored one" }) if result == :stale
+
+      { "stored" => true, "version" => version }
     end
 
     def store_config(r)

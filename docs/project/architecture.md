@@ -43,9 +43,32 @@ the UI shows a key fingerprint beside every name.
 
 Actions, not scores — see the end of [reputation.md](reputation.md) for why.
 
-**Private** (the user's own settings): reputation config overrides, UI
-preferences, notes. Currently thin; the split exists in the data model from day
-one so that moving things into it later is not a migration.
+**Private** (signed, served to nobody but its owner):
+
+```json
+{ "purpose":  "reputablechat:private-config:v1",
+  "pubkey":   "...",
+  "version":  3,
+  "ts":       1710000000,
+  "settings": { "display": { "show_unrated": true } },
+  "voted":    ["<message signature>", "..."] }
+```
+
+`settings` is a sparse override tree mirroring `config/reputation.yml` — the
+user layer of the three described under **Config layering** in
+[reputation.md](reputation.md). `voted` is which comments have already been
+emoted on, so one-vote-per-comment survives moving to another device.
+
+The server holds it so it cannot be lost, and validates only that `settings` is
+a bounded structure of scalars — it never interprets the contents.
+
+The read route takes **no pubkey**: it uses the session's. Serving someone
+else's private config is not expressible through the API rather than being a
+check that has to stay correct.
+
+**Signed, not encrypted.** This is private from other users, not from the
+server operator, who can read it. Making it opaque to the server means
+encrypting under a key derived from the seed — worth doing, not done.
 
 `version` is a monotonic counter **inside the signed payload**. Without it the
 server could serve an old copy of someone's config to hide a report, and the
@@ -76,7 +99,8 @@ Three shapes, each domain-separated. `lib/reputable_chat/cryptography/payload.rb
 |---|---|
 | `reputablechat:login:v1` | purpose, pubkey, nonce, origin, ts |
 | `reputablechat:message:v1` | purpose, author, room, seq, prev, ts, body |
-| `reputablechat:config:v1` | purpose, pubkey, version, ratings, ts |
+| `reputablechat:config:v1` | purpose, pubkey, version, profile, ratings, ts |
+| `reputablechat:private-config:v1` | purpose, pubkey, version, settings, voted, ts |
 
 `room` in the message payload stops a message being replanted in a different
 channel. `seq` and `prev` chain an author's messages so the server cannot
@@ -126,7 +150,10 @@ public/js/
 
 ## Not built yet
 
-- Client-side config signature verification (`session.verify_signatures`)
+- Client-side verification of *other people's* configs
+  (`session.verify_signatures`). Your own private config is already verified,
+  since detecting tampering is why it is signed.
+- Encrypting the private config so the server cannot read it
 - WebSocket delivery — messages currently poll every 4s
 - Private config contents beyond the placeholder
 - Federation between servers. The payload domain separation is already in place

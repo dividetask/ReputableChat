@@ -8,15 +8,13 @@ import { Reputation, Graph, toNumber } from "./reputation.js";
 import { Session } from "./session.js";
 
 const ROOM = "general";
-const VOTED_KEY = "reputablechat.voted";
-const PREFS_KEY = "reputablechat.prefs";
 const PUBKEY = /^[A-Za-z0-9_-]{42,44}$/;
 const $ = (id) => document.getElementById(id);
 
 const state = {
   config: null, emotes: null, me: null, profile: null, version: 0,
   ratings: {}, graph: new Graph(), reputation: null, session: null,
-  seq: 0, voted: new Set(), viewing: null, prefs: { showUnrated: false },
+  seq: 0, voted: new Set(), viewing: null, settings: {}, privateVersion: 0,
 };
 
 async function api(path, options = {}) {
@@ -40,49 +38,62 @@ function status(el, message, kind = "") {
 // fingerprint is all that stands between a user and a convincing impersonator.
 const fingerprint = (pubkey) => pubkey.slice(0, 8);
 
-// Per-viewer convenience only, so localStorage is the right home. Wrapped
-// because it throws in private windows and with site data blocked.
-function loadVoted() {
-  try {
-    return new Set(JSON.parse(localStorage.getItem(VOTED_KEY) || "[]"));
-  } catch {
-    return new Set();
+// --- private config ----------------------------------------------------
+//
+// Settings and the voted list live on the server so they survive a new device,
+// and are signed so tampering with them is detectable. Note that signed is not
+// encrypted: this is private from other users, not from the server operator.
+
+function deepMerge(base, overrides) {
+  const merged = { ...base };
+
+  for (const [key, value] of Object.entries(overrides || {})) {
+    const nested = value && typeof value === "object" && !Array.isArray(value);
+    merged[key] = nested ? deepMerge(base?.[key] || {}, value) : value;
   }
+
+  return merged;
 }
 
-function saveVoted() {
-  try {
-    localStorage.setItem(VOTED_KEY, JSON.stringify([...state.voted]));
-  } catch {
-    /* nothing to do: double-vote protection degrades, nothing breaks */
-  }
-}
-
-// show_unrated is a per-viewer preference, not something anyone else reads, so
-// localStorage is its right home. It moves to the private config once that
-// exists.
-function loadPrefs() {
-  try {
-    return { showUnrated: false, ...JSON.parse(localStorage.getItem(PREFS_KEY) || "{}") };
-  } catch {
-    return { showUnrated: false };
-  }
-}
-
-function savePrefs() {
-  try {
-    localStorage.setItem(PREFS_KEY, JSON.stringify(state.prefs));
-  } catch {
-    /* the preference just will not persist */
-  }
-}
-
-// The viewer's preference is layered over the server defaults, which is the
+// The viewer's pinned settings layered over the server defaults, which is the
 // same shape the config system uses everywhere else.
 function buildReputation() {
-  return new Reputation({
-    ...state.config,
-    display: { ...state.config.display, show_unrated: state.prefs.showUnrated },
+  return new Reputation(deepMerge(state.config, state.settings));
+}
+
+async function loadPrivateConfig() {
+  const { config } = await api("/api/private-config");
+
+  state.settings = {};
+  state.voted = new Set();
+  state.privateVersion = 0;
+  if (!config) return;
+
+  // Verified even though the MVP takes other people's configs on trust --
+  // detecting tampering is the entire reason this one is signed.
+  if (!(await identity.verifyBlob(state.me.pubkey, config))) {
+    return status($("chat-status"),
+                  "Your saved settings did not verify and were ignored.", "error");
+  }
+
+  const payload = JSON.parse(config.payload);
+  state.privateVersion = payload.version || 0;
+  state.settings = payload.settings || {};
+  state.voted = new Set(payload.voted || []);
+}
+
+async function publishPrivateConfig() {
+  state.privateVersion += 1;
+  const ts = Math.floor(Date.now() / 1000);
+  const voted = [...state.voted];
+  const payload = identity.privateConfigPayload({
+    pubkey: state.me.pubkey, version: state.privateVersion,
+    settings: state.settings, voted, ts,
+  });
+
+  await send("PUT", "/api/private-config", {
+    version: state.privateVersion, settings: state.settings, voted, ts,
+    signature: await identity.sign(state.me, payload),
   });
 }
 
@@ -272,8 +283,9 @@ async function fetchConfigs(pubkeys) {
 async function enterChat() {
   $("login").classList.add("hidden");
   $("chat").classList.remove("hidden");
-  state.voted = loadVoted();
 
+  await loadPrivateConfig();
+  state.reputation = buildReputation();
   await loadOwnConfig();
   await loadNetwork();
   rebuildSession();
@@ -371,12 +383,12 @@ async function emote_(message, polarity) {
   state.ratings[message.author] = { ...current, net_votes: current.net_votes + polarity };
 
   state.voted.add(message.signature);
-  saveVoted();
 
   try {
     // Buckets do not move for emotes until the next login, by design; the
     // refresh only repaints the comment as voted.
     await publishConfig();
+    await publishPrivateConfig();
     refreshMessages();
   } catch (error) {
     status($("chat-status"), error.message, "error");
@@ -427,7 +439,7 @@ function showProfile(pubkey) {
     $("my-username").value = state.profile.username;
     $("my-message").value = state.profile.message || "";
     $("my-key").value = pubkey;
-    $("show-unrated").checked = state.prefs.showUnrated;
+    $("show-unrated").checked = Boolean(state.settings.display?.show_unrated);
     $("add-key").value = "";
   } else {
     $("profile-icon").src = profile.icon ? `/images/${profile.icon}` : "";
@@ -493,9 +505,11 @@ async function addByKey() {
 
 // Rebuilds rather than just re-rendering: the bucket a user lands in depends on
 // the setting, so everyone has to be sorted again.
-function toggleUnrated() {
-  state.prefs.showUnrated = $("show-unrated").checked;
-  savePrefs();
+async function toggleUnrated() {
+  state.settings = deepMerge(state.settings, {
+    display: { show_unrated: $("show-unrated").checked },
+  });
+  await publishPrivateConfig();
 
   state.reputation = buildReputation();
   rebuildSession();
@@ -503,7 +517,7 @@ function toggleUnrated() {
 
   const count = state.session.in("tolerated").length;
   status($("profile-status"),
-         state.prefs.showUnrated
+         $("show-unrated").checked
            ? `Showing unrated users — ${count} in Tolerated now.`
            : "Hiding unrated users again.",
          "ok");
@@ -583,7 +597,6 @@ async function saveProfile() {
 
 async function boot() {
   [state.config, state.emotes] = await Promise.all([api("/api/defaults"), api("/api/emotes")]);
-  state.prefs = loadPrefs();
   state.reputation = buildReputation();
   await seed.loadWordlist();
 
@@ -600,7 +613,8 @@ async function boot() {
   $("profile-save").addEventListener("click", () => saveProfile().catch((e) => status($("profile-status"), e.message, "error")));
   $("copy-key").addEventListener("click", copyKey);
   $("add-friend").addEventListener("click", () => addByKey().catch((e) => status($("profile-status"), e.message, "error")));
-  $("show-unrated").addEventListener("change", toggleUnrated);
+  $("show-unrated").addEventListener("change",
+    () => toggleUnrated().catch((e) => status($("profile-status"), e.message, "error")));
 
   $("generate").addEventListener("click", async () => {
     const phrase = await seed.generate(state.config.seed.min_words);

@@ -6,9 +6,10 @@ module ReputableChat
     # was made for, so a harvested signature cannot be replayed against another
     # server or replanted in another channel.
     module Payload
-      LOGIN   = "reputablechat:login:v1"
-      MESSAGE = "reputablechat:message:v1"
-      CONFIG  = "reputablechat:config:v1"
+      LOGIN          = "reputablechat:login:v1"
+      MESSAGE        = "reputablechat:message:v1"
+      CONFIG         = "reputablechat:config:v1"
+      PRIVATE_CONFIG = "reputablechat:private-config:v1"
 
       module_function
 
@@ -41,6 +42,24 @@ module ReputableChat
       # `version` is a monotonic counter. Without it the server could serve an
       # old copy of someone's config to hide a report from you and the
       # signature would still verify perfectly.
+      # The owner's own settings and state. Signed for the same reason the
+      # public config is: the server holds it so it cannot be lost, and the
+      # signature is what proves it came back unaltered.
+      #
+      # Signed, not encrypted -- this is private from other users, not from the
+      # server operator, who can read it. Making it opaque to the server means
+      # encrypting it under a key derived from the seed.
+      def private_config(pubkey:, version:, settings:, voted:, issued_at:)
+        {
+          "purpose"  => PRIVATE_CONFIG,
+          "pubkey"   => pubkey,
+          "version"  => version.to_i,
+          "settings" => settings,
+          "voted"    => voted,
+          "ts"       => issued_at.to_i
+        }
+      end
+
       # `profile` is signed alongside the ratings so a display name, bio and
       # icon cannot be altered by the server. The icon is a content-addressed
       # filename, so what is signed is really the image itself.

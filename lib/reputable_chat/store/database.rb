@@ -55,6 +55,16 @@ module ReputableChat
           Integer  :updated_at, null: false
         end
 
+        # Served only to its owner. The read path takes no pubkey at all -- it
+        # uses the session's -- so asking for someone else's is not expressible.
+        @db.create_table?(:private_configs) do
+          String   :pubkey, primary_key: true
+          Integer  :version, null: false
+          String   :payload, text: true, null: false
+          String   :signature, null: false
+          Integer  :updated_at, null: false
+        end
+
         @db.create_table?(:messages) do
           primary_key :id
           String   :author, null: false, index: true
@@ -129,6 +139,25 @@ module ReputableChat
           @db[:configs].where(pubkey: pubkey).update(row)
         else
           @db[:configs].insert(row)
+        end
+        :ok
+      end
+
+      # --- private configs ---------------------------------------------------
+
+      def private_config(pubkey) = @db[:private_configs].where(pubkey: pubkey).first
+
+      def store_private_config(pubkey:, version:, payload:, signature:)
+        existing = private_config(pubkey)
+        return :stale if existing && version <= existing[:version]
+
+        row = { pubkey: pubkey, version: version, payload: payload,
+                signature: signature, updated_at: now }
+
+        if existing
+          @db[:private_configs].where(pubkey: pubkey).update(row)
+        else
+          @db[:private_configs].insert(row)
         end
         :ok
       end

@@ -82,7 +82,42 @@ module ReputableChat
       { "username" => username, "message" => bio, "icon" => image }
     end
 
-  # A ratings map is passed through to storage unparsed, but its shape is
+    MAX_SETTING_KEYS   = 100
+    MAX_SETTING_DEPTH  = 4
+    MAX_SETTING_STRING = 256
+    MAX_VOTED          = 50_000
+
+    # A sparse override tree mirroring config/reputation.yml. The server checks
+    # only that it is a bounded structure of scalars -- it never interprets the
+    # contents, which stay the client's business.
+    def settings(value, depth: MAX_SETTING_DEPTH)
+      return nil unless value.is_a?(Hash)
+      return nil if value.size > MAX_SETTING_KEYS || depth.zero?
+
+      value.each do |key, item|
+        return nil unless key.is_a?(String) && key.bytesize <= 64
+
+        case item
+        when Hash                      then return nil unless settings(item, depth: depth - 1)
+        when String                    then return nil if item.bytesize > MAX_SETTING_STRING
+        when Numeric, true, false, nil then next
+        else return nil
+        end
+      end
+
+      value
+    end
+
+    # Signatures of the comments this user has already emoted on, so one vote
+    # per comment survives moving to another device.
+    def voted(value)
+      return nil unless value.is_a?(Array)
+      return nil if value.size > MAX_VOTED
+
+      value.all? { |entry| signature(entry) } ? value : nil
+    end
+
+    # A ratings map is passed through to storage unparsed, but its shape is
     # still checked so a malformed blob cannot be stored and then break every
     # client that fetches it.
     def ratings(value, max_entries: 10_000)
