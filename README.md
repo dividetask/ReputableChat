@@ -14,11 +14,21 @@ chat UI is a working skeleton.
 ```bash
 bundle install
 bundle exec rake spec      # test suite
-bundle exec rake curve     # print the curve, ladder and safety window
-ORIGIN=https://chat.example bundle exec puma
+bundle exec puma           # http://localhost:9292
 ```
 
-`ORIGIN` is covered by login signatures — a mismatch rejects every login.
+`bundle exec rake curve` prints the curve, ladder weights and safety window.
+
+### Deploying
+
+Set `ORIGIN` to the public URL the server is reached at. It travels inside the
+signed login payload, so if it does not match the origin the browser signs,
+every login is rejected as a bad signature. It defaults to
+`http://localhost:9292`, which is what puma serves locally.
+
+```bash
+ORIGIN=https://chat.example bundle exec puma
+```
 
 ## How reputation works
 
