@@ -77,6 +77,20 @@ module ReputableChat
           unique %i[author seq]
         end
 
+        # One reaction per person per message, enforced here rather than
+        # trusted from the client.
+        @db.create_table?(:emotes) do
+          primary_key :id
+          String   :author, null: false
+          String   :room, null: false, index: true
+          String   :message, null: false, index: true
+          String   :emote, null: false
+          String   :payload, text: true, null: false
+          String   :signature, null: false
+          Integer  :received_at, null: false
+          unique %i[author message]
+        end
+
         @db.create_table?(:nonces) do
           String   :nonce, primary_key: true
           Integer  :issued_at, null: false
@@ -141,6 +155,23 @@ module ReputableChat
           @db[:configs].insert(row)
         end
         :ok
+      end
+
+      # --- emotes -------------------------------------------------------------
+
+      def store_emote(author:, room:, message:, emote:, payload:, signature:)
+        @db[:emotes].insert(
+          author: author, room: room, message: message, emote: emote,
+          payload: payload, signature: signature, received_at: now
+        )
+        :ok
+      rescue Sequel::UniqueConstraintViolation
+        :duplicate
+      end
+
+      def room_emotes(room, limit: 5_000)
+        @db[:emotes].where(room: room).order(:id).limit(limit)
+                    .select(:author, :message, :emote).all
       end
 
       # --- private configs ---------------------------------------------------

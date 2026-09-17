@@ -15,6 +15,7 @@ const state = {
   config: null, emotes: null, me: null, profile: null, version: 0,
   ratings: {}, graph: new Graph(), reputation: null, session: null,
   seq: 0, voted: new Set(), viewing: null, settings: {}, privateVersion: 0,
+  reactions: new Map(),
 };
 
 async function api(path, options = {}) {
@@ -297,13 +298,18 @@ async function enterChat() {
 
 async function refreshMessages() {
   let messages;
+  let emotes;
   try {
-    ({ messages } = await api(`/api/room/${ROOM}/messages`));
+    [{ messages }, { emotes }] = await Promise.all([
+      api(`/api/room/${ROOM}/messages`),
+      api(`/api/room/${ROOM}/emotes`),
+    ]);
   } catch (error) {
     return status($("chat-status"), error.message, "error");
   }
 
-  await fetchConfigs([...new Set(messages.map((m) => m.author))]);
+  await fetchConfigs([...new Set([...messages.map((m) => m.author), ...emotes.map((e) => e.author)])]);
+  state.reactions = tallyReactions(emotes);
   render(messages);
   state.seq = Math.max(0, ...messages.filter((m) => m.author === state.me.pubkey).map((m) => m.seq));
 }
@@ -340,53 +346,111 @@ function render(messages) {
     body.textContent = payload.body; // textContent, never innerHTML
 
     row.append(who, fp, body);
-    if (!mine) row.append(emoteBar(message));
+    row.append(reactionBar(message));
     list.append(row);
   }
 
   list.scrollTop = list.scrollHeight;
 }
 
+// message signature -> emote -> the people who gave it.
+//
+// Reactions from blocked people are dropped, so a pile of spam accounts cannot
+// inflate a count. Counts are therefore per-viewer, like everything else here.
+function tallyReactions(emotes) {
+  const tally = new Map();
+
+  for (const { message, emote, author } of emotes) {
+    if (author !== state.me.pubkey && state.session.bucketOf(author) === "blocked") continue;
+
+    if (!tally.has(message)) tally.set(message, new Map());
+    const perEmote = tally.get(message);
+
+    if (!perEmote.has(emote)) perEmote.set(emote, new Set());
+    perEmote.get(emote).add(author);
+  }
+
+  return tally;
+}
+
+function polarityOf(emote) {
+  if (state.emotes.negative.includes(emote)) return -1;
+  if (state.emotes.neutral?.includes(emote)) return 0;
+  return 1;
+}
+
 function displayName(pubkey) {
   return state.profiles?.get(pubkey)?.username || "someone";
 }
 
-function emoteBar(message) {
+// Reactions a message actually has, always visible with their counts, plus a
+// picker that only appears on hover or keyboard focus (see .actions in the
+// stylesheet). An emote nobody gave is not shown.
+function reactionBar(message) {
   const bar = document.createElement("div");
-  bar.className = "emotes";
-  const choices = [...state.emotes.positive.slice(0, 6), ...state.emotes.negative];
+  bar.className = "reactions";
+  const reacted = state.voted.has(message.signature);
 
-  for (const emote of choices) {
-    const polarity = state.emotes.negative.includes(emote) ? -1 : 1;
-    const button = document.createElement("button");
-    button.type = "button";
-    button.textContent = emote;
-    if (state.voted.has(message.signature)) button.classList.add("voted");
-    button.addEventListener("click", () => emote_(message, polarity));
-    bar.append(button);
+  for (const [emote, people] of state.reactions.get(message.signature) || []) {
+    const pill = document.createElement("button");
+    pill.type = "button";
+    pill.className = "pill";
+    if (people.has(state.me.pubkey)) pill.classList.add("mine");
+    pill.disabled = reacted;
+    pill.title = `${people.size} ${people.size === 1 ? "person" : "people"}`;
+    pill.textContent = `${emote} ${people.size}`;
+    pill.addEventListener("click", () => react(message, emote));
+    bar.append(pill);
+  }
+
+  const actions = document.createElement("span");
+  actions.className = "actions";
+
+  if (!reacted) {
+    for (const emote of [...state.emotes.positive.slice(0, 6), ...state.emotes.negative]) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = emote;
+      button.title = "React";
+      button.addEventListener("click", () => react(message, emote));
+      actions.append(button);
+    }
   }
 
   const report = document.createElement("button");
   report.type = "button";
   report.textContent = "report";
   report.addEventListener("click", () => reportUser(message.author));
-  bar.append(report);
+  actions.append(report);
 
+  bar.append(actions);
   return bar;
 }
 
-// One vote per comment. The signature is its id.
-async function emote_(message, polarity) {
+// One reaction per comment, which the server enforces too. The message
+// signature is its id.
+async function react(message, emote) {
   if (state.voted.has(message.signature)) return;
 
-  const current = state.ratings[message.author] || { friend: false, reported: false, net_votes: 0 };
-  state.ratings[message.author] = { ...current, net_votes: current.net_votes + polarity };
-
-  state.voted.add(message.signature);
+  const ts = Math.floor(Date.now() / 1000);
+  const payload = identity.emotePayload({
+    author: state.me.pubkey, room: ROOM, message: message.signature, emote, ts,
+  });
 
   try {
+    await post(`/api/room/${ROOM}/emote`, {
+      message: message.signature, emote, ts,
+      signature: await identity.sign(state.me, payload),
+    });
+
+    const current = state.ratings[message.author] || { friend: false, reported: false, net_votes: 0 };
+    state.ratings[message.author] = {
+      ...current, net_votes: current.net_votes + polarityOf(emote),
+    };
+    state.voted.add(message.signature);
+
     // Buckets do not move for emotes until the next login, by design; the
-    // refresh only repaints the comment as voted.
+    // refresh only repaints the reaction counts.
     await publishConfig();
     await publishPrivateConfig();
     refreshMessages();

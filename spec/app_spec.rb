@@ -312,6 +312,81 @@ class AppSpec < Minitest::Test
     assert_equal 409, last_response.status
   end
 
+  # --- emotes ------------------------------------------------------------
+
+  # Taken from the app rather than hand-escaped, so these stay real emotes if
+  # config/emotes.yml changes.
+  FIRST_EMOTE  = ReputableChat::App::ALLOWED_EMOTES.first
+  SECOND_EMOTE = ReputableChat::App::ALLOWED_EMOTES[1]
+
+  def emote_body(message:, emote: FIRST_EMOTE, room: "general", key: nil)
+    ts = Time.now.to_i
+    payload = Payload.emote(author: @pubkey, room: room, message: message, emote: emote, issued_at: ts)
+    signature = key ? Sig.encode(key.sign(Canon.bytes(payload))) : sign(payload)
+    { "message" => message, "emote" => emote, "ts" => ts, "signature" => signature }
+  end
+
+  def a_message_signature = "m" * 86
+
+  def test_stores_an_emote_and_serves_it_back
+    log_in
+    post_json "/api/room/general/emote", emote_body(message: a_message_signature)
+    assert_equal 200, last_response.status
+
+    get "/api/room/general/emotes"
+    stored = json["emotes"]
+
+    assert_equal 1, stored.size
+    assert_equal a_message_signature, stored.first["message"]
+    assert_equal FIRST_EMOTE, stored.first["emote"]
+    assert_equal @pubkey, stored.first["author"], "the author is needed to show whether you reacted"
+  end
+
+  # One reaction per person per message, enforced server-side rather than
+  # trusted from the client.
+  def test_one_reaction_per_person_per_message
+    log_in
+    body = emote_body(message: a_message_signature)
+
+    post_json "/api/room/general/emote", body
+    assert_equal 200, last_response.status
+
+    post_json "/api/room/general/emote", emote_body(message: a_message_signature, emote: SECOND_EMOTE)
+    assert_equal 409, last_response.status, "a different emote is still a second reaction"
+  end
+
+  # An arbitrary string must never be storable, or it renders back to everyone.
+  def test_rejects_an_emote_outside_the_published_set
+    log_in
+
+    post_json "/api/room/general/emote", emote_body(message: a_message_signature, emote: "<img onerror=x>")
+
+    assert_equal 400, last_response.status
+  end
+
+  def test_rejects_an_emote_signed_for_another_room
+    log_in
+
+    post_json "/api/room/general/emote", emote_body(message: a_message_signature, room: "elsewhere")
+
+    assert_equal 400, last_response.status
+  end
+
+  def test_rejects_an_emote_signed_by_someone_else
+    log_in
+
+    post_json "/api/room/general/emote",
+              emote_body(message: a_message_signature, key: Ed25519::SigningKey.generate)
+
+    assert_equal 400, last_response.status
+  end
+
+  def test_emoting_requires_a_session
+    post_json "/api/room/general/emote", emote_body(message: a_message_signature)
+
+    assert_equal 401, last_response.status
+  end
+
   def test_rejects_a_bad_room_name
     log_in
 

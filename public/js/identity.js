@@ -139,6 +139,7 @@ export const PURPOSE = {
   MESSAGE: "reputablechat:message:v1",
   CONFIG: "reputablechat:config:v1",
   PRIVATE_CONFIG: "reputablechat:private-config:v1",
+  EMOTE: "reputablechat:emote:v1",
 };
 
 // These must match lib/reputable_chat/cryptography/payload.rb exactly.
@@ -152,6 +153,10 @@ export function messagePayload({ author, room, seq, prev, body, ts }) {
 
 export function configPayload({ pubkey, version, profile, ratings, ts }) {
   return { purpose: PURPOSE.CONFIG, pubkey, version, profile, ratings, ts };
+}
+
+export function emotePayload({ author, room, message, emote, ts }) {
+  return { purpose: PURPOSE.EMOTE, author, room, message, emote, ts };
 }
 
 export function privateConfigPayload({ pubkey, version, settings, voted, ts }) {

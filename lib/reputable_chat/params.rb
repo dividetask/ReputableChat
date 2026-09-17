@@ -82,6 +82,14 @@ module ReputableChat
       { "username" => username, "message" => bio, "icon" => image }
     end
 
+    # An emote must be one the server actually publishes, so an arbitrary
+    # string can never be stored and rendered back to everyone.
+    def emote(value, allowed:)
+      return nil unless value.is_a?(String)
+
+      allowed.include?(value) ? value : nil
+    end
+
     MAX_SETTING_KEYS   = 100
     MAX_SETTING_DEPTH  = 4
     MAX_SETTING_STRING = 256

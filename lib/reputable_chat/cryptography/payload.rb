@@ -10,6 +10,7 @@ module ReputableChat
       MESSAGE        = "reputablechat:message:v1"
       CONFIG         = "reputablechat:config:v1"
       PRIVATE_CONFIG = "reputablechat:private-config:v1"
+      EMOTE          = "reputablechat:emote:v1"
 
       module_function
 
@@ -42,6 +43,20 @@ module ReputableChat
       # `version` is a monotonic counter. Without it the server could serve an
       # old copy of someone's config to hide a report from you and the
       # signature would still verify perfectly.
+      # One person's reaction to one message. `message` is that message's
+      # signature, which is unique. `room` is carried for the same reason a
+      # message carries it: so a reaction cannot be transplanted elsewhere.
+      def emote(author:, room:, message:, emote:, issued_at:)
+        {
+          "purpose" => EMOTE,
+          "author"  => author,
+          "room"    => room,
+          "message" => message,
+          "emote"   => emote,
+          "ts"      => issued_at.to_i
+        }
+      end
+
       # The owner's own settings and state. Signed for the same reason the
       # public config is: the server holds it so it cannot be lost, and the
       # signature is what proves it came back unaltered.

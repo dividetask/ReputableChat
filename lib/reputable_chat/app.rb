@@ -56,6 +56,7 @@ module ReputableChat
     # FrozenError on the first real request while passing every unfrozen test.
     DEFAULTS = YAML.safe_load_file(File.join(opts[:root], "config", "reputation.yml")).freeze
     EMOTES   = YAML.safe_load_file(File.join(opts[:root], "config", "emotes.yml")).freeze
+    ALLOWED_EMOTES = EMOTES.values_at("positive", "negative", "neutral").compact.flatten.freeze
 
     class << self
       attr_accessor :store, :images, :origin
@@ -102,7 +103,9 @@ module ReputableChat
           room = Params.room(room_name) or bad_request(r, "bad room")
 
           r.get("messages") { { "messages" => store.room_messages(room).map { |m| present_message(m) } } }
+          r.get("emotes")   { { "emotes" => store.room_emotes(room) } }
           r.post("message") { post_message(r, room) }
+          r.post("emote")   { post_emote(r, room) }
         end
       end
     end
@@ -250,6 +253,27 @@ module ReputableChat
       r.halt(409, { "error" => "that sequence number is already used" }) if result == :duplicate
 
       { "stored" => true, "seq" => seq }
+    end
+
+    def post_emote(r, room)
+      author  = current_pubkey(r)
+      message = Params.signature(r.params["message"]) or bad_request(r, "bad message")
+      choice  = Params.emote(r.params["emote"], allowed: ALLOWED_EMOTES) or bad_request(r, "unknown emote")
+      sig     = Params.signature(r.params["signature"]) or bad_request(r, "bad signature")
+      ts      = Params.integer(r.params["ts"]) or bad_request(r, "bad timestamp")
+
+      payload = Cryptography::Payload.emote(
+        author: author, room: room, message: message, emote: choice, issued_at: ts
+      )
+      verify!(r, author, sig, payload)
+
+      result = store.store_emote(
+        author: author, room: room, message: message, emote: choice,
+        payload: Cryptography::Canonical.dump(payload), signature: sig
+      )
+      r.halt(409, { "error" => "you have already reacted to that message" }) if result == :duplicate
+
+      { "stored" => true }
     end
 
     # --- helpers ----------------------------------------------------------

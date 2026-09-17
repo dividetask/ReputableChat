@@ -101,6 +101,7 @@ Three shapes, each domain-separated. `lib/reputable_chat/cryptography/payload.rb
 | `reputablechat:message:v1` | purpose, author, room, seq, prev, ts, body |
 | `reputablechat:config:v1` | purpose, pubkey, version, profile, ratings, ts |
 | `reputablechat:private-config:v1` | purpose, pubkey, version, settings, voted, ts |
+| `reputablechat:emote:v1` | purpose, author, room, message, emote, ts |
 
 `room` in the message payload stops a message being replanted in a different
 channel. `seq` and `prev` chain an author's messages so the server cannot
@@ -110,6 +111,23 @@ separately and unsigned.
 
 Edits and deletes will be new signed records referencing the original, never
 mutations — a mutated record no longer matches its signature.
+
+## Reactions
+
+A reaction is its own signed record naming the message it reacts to (by that
+message's signature) and the room, so it cannot be transplanted. One per person
+per message, enforced by a unique constraint rather than trusted from the
+client, and the emote must be one the server publishes in `config/emotes.yml` —
+an arbitrary string would otherwise be stored and rendered back to everyone.
+
+The client tallies them per message and **drops reactions from blocked
+accounts**, so a pile of spam accounts cannot inflate a count. Counts are
+therefore per-viewer, like everything else here.
+
+Reactions are also folded into the reacting user's public config as
+`net_votes`, which is what reputation reads. The records are the display form;
+the aggregate is the reputation form. They can in principle disagree, since
+nothing forces a client to publish both.
 
 ## Canonical serialization
 
@@ -154,6 +172,7 @@ public/js/
   (`session.verify_signatures`). Your own private config is already verified,
   since detecting tampering is why it is signed.
 - Encrypting the private config so the server cannot read it
+- Removing a reaction; currently a reaction is final
 - WebSocket delivery — messages currently poll every 4s
 - Private config contents beyond the placeholder
 - Federation between servers. The payload domain separation is already in place

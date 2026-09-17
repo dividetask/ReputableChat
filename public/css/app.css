@@ -43,12 +43,32 @@ pre { background: #0f1115; padding: 12px; border-radius: 6px; white-space: pre-w
 #composer { display: flex; gap: 8px; margin-top: 12px; }
 #composer input { flex: 1; }
 
-.msg .emotes { margin-top: 4px; display: flex; gap: 4px; flex-wrap: wrap; }
-.msg .emotes button {
-  background: transparent; border: 1px solid var(--line); color: var(--text);
-  padding: 1px 6px; font-size: 13px; font-weight: 400; border-radius: 4px;
+/* Reactions a message actually has, always visible with their counts. */
+.msg { position: relative; }
+.msg .reactions { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 4px; }
+.msg .pill {
+  background: var(--line); border: 1px solid transparent; color: var(--text);
+  padding: 1px 7px; font-size: 13px; font-weight: 400; border-radius: 10px;
 }
-.msg .emotes button.voted { border-color: var(--accent); }
+.msg .pill.mine { border-color: var(--accent); background: #1e2a3d; }
+.msg .pill:disabled { cursor: default; opacity: 1; }
+
+/* The picker only appears on hover, or on keyboard focus so it stays
+   reachable without a mouse. Positioned absolutely so revealing it never
+   shifts the messages below. */
+.msg .actions {
+  position: absolute; top: -12px; right: 6px;
+  display: flex; gap: 2px; padding: 3px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .45);
+  visibility: hidden;
+}
+.msg:hover .actions, .msg:focus-within .actions { visibility: visible; }
+.msg .actions button {
+  background: transparent; border: 0; color: var(--text);
+  padding: 2px 5px; font-size: 14px; font-weight: 400; border-radius: 4px;
+}
+.msg .actions button:hover { background: var(--line); }
 .msg .who { cursor: pointer; text-decoration: underline dotted; }
 #profile-icon { border-radius: 8px; background: #0f1115; object-fit: cover; }
 #breakdown { margin-top: 14px; font-family: ui-monospace, monospace; font-size: 12px; }
