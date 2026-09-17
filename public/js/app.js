@@ -203,16 +203,16 @@ function render(messages) {
   list.replaceChildren();
 
   for (const message of messages) {
-    const verdict = message.author === state.me.pubkey
-      ? "normal"
-      : state.reputation.visibility(state.me.pubkey, message.author, state.graph);
+    const bucket = message.author === state.me.pubkey
+      ? "trusted"
+      : state.reputation.bucket(state.me.pubkey, message.author, state.graph);
 
-    // Hidden means hidden: unrated and net-negative people do not render.
-    if (verdict === "hidden") continue;
+    // Blocked means blocked: unrated and net-negative people do not render.
+    if (bucket === "blocked") continue;
 
     const payload = JSON.parse(message.payload);
     const row = document.createElement("div");
-    row.className = `msg ${verdict}`;
+    row.className = `msg ${bucket}`;
 
     const who = document.createElement("span");
     who.className = "who";

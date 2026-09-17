@@ -38,9 +38,9 @@ class ReputationRulesSpec < Minitest::Test
   def test_ladder_weights
     l = engine(store).ladder
 
-    assert_equal dec("0.91"),       l.weight(0)
-    assert_equal dec("0.00066339"), l.weight(3)
-    assert_in_delta 0.09, l.stranger_ceiling.to_f, 1e-6
+    assert_equal dec("0.9"),        l.weight(0)
+    assert_equal dec("0.0009"),     l.weight(3)
+    assert_in_delta 0.1, l.stranger_ceiling.to_f, 1e-6
   end
 
   # RULE (the coupling): the report-visibility rule below only holds while
@@ -61,11 +61,11 @@ class ReputationRulesSpec < Minitest::Test
     graph.report("c", TARGET)
 
     graph.like(VIEWER, TARGET, 1)
-    assert_equal :hidden, engine(graph).visibility(viewer: VIEWER, target: TARGET),
+    assert_equal :blocked, engine(graph).bucket(viewer: VIEWER, target: TARGET),
                  "one like must lose to a depth-3 report"
 
     graph.like(VIEWER, TARGET, 2)
-    assert_equal :grey, engine(graph).visibility(viewer: VIEWER, target: TARGET),
+    assert_equal :tolerated, engine(graph).bucket(viewer: VIEWER, target: TARGET),
                  "two likes must outweigh a depth-3 report"
   end
 
@@ -75,31 +75,31 @@ class ReputationRulesSpec < Minitest::Test
     graph = store.chain(VIEWER, "a")
 
     assert_equal dec("0"), engine(graph).effective(viewer: VIEWER, target: "stranger")
-    assert_equal :hidden, engine(graph).visibility(viewer: VIEWER, target: "stranger")
+    assert_equal :blocked, engine(graph).bucket(viewer: VIEWER, target: "stranger")
   end
 
   # RULE: this is the bug that drove the "hidden unless above zero" decision --
   # reporting someone must never move them from hidden to visible.
   def test_a_report_never_increases_visibility
     graph = store.chain(VIEWER, "a", "b", "c")
-    before = engine(graph).visibility(viewer: VIEWER, target: TARGET)
+    before = engine(graph).bucket(viewer: VIEWER, target: TARGET)
 
     graph.report("c", TARGET)
-    after = engine(graph).visibility(viewer: VIEWER, target: TARGET)
+    after = engine(graph).bucket(viewer: VIEWER, target: TARGET)
 
-    assert_equal :hidden, before
-    assert_equal :hidden, after, "a report must not make an unrated user visible"
+    assert_equal :blocked, before
+    assert_equal :blocked, after, "a report must not make an unrated user visible"
   end
 
-  # RULE: grey is low-positive only; anything at or below zero is hidden.
-  def test_grey_band_is_low_positive_only
+  # RULE: Tolerated is low-positive only; anything at or below zero is Blocked.
+  def test_tolerated_band_is_low_positive_only
     e = engine(store)
 
-    assert_equal :hidden, e.classify(dec("-0.0001"))
-    assert_equal :hidden, e.classify(dec("0"))
-    assert_equal :grey,   e.classify(dec("0.0001"))
-    assert_equal :grey,   e.classify(dec("0.049"))
-    assert_equal :normal, e.classify(dec("0.05"))
+    assert_equal :blocked, e.classify(dec("-0.0001"))
+    assert_equal :blocked, e.classify(dec("0"))
+    assert_equal :tolerated,   e.classify(dec("0.0001"))
+    assert_equal :tolerated, e.classify(dec("0.009"))
+    assert_equal :trusted,   e.classify(dec("0.01"))
   end
 
   # RULE: a report is absolute within one rater -- it overrides however many of
@@ -107,7 +107,7 @@ class ReputationRulesSpec < Minitest::Test
   def test_report_overrides_the_same_raters_likes
     graph = store.rate(VIEWER, TARGET, net_votes: 500, reported: true)
 
-    assert_equal dec("-0.91"), engine(graph).effective(viewer: VIEWER, target: TARGET)
+    assert_equal dec("-0.9"), engine(graph).effective(viewer: VIEWER, target: TARGET)
   end
 
   # RULE: across raters a report is only -1 in the mean, so it is outvoteable.
@@ -118,15 +118,15 @@ class ReputationRulesSpec < Minitest::Test
     graph.report("a", TARGET)
     graph.friend("b", TARGET)
 
-    assert_equal :hidden, engine(graph).visibility(viewer: VIEWER, target: TARGET),
+    assert_equal :blocked, engine(graph).bucket(viewer: VIEWER, target: TARGET),
                  "one friendship must not outvote a report"
 
     graph.friend("c", TARGET)
-    assert_equal :hidden, engine(graph).visibility(viewer: VIEWER, target: TARGET),
+    assert_equal :blocked, engine(graph).bucket(viewer: VIEWER, target: TARGET),
                  "two friendships tie a report, and a tie is hidden"
 
     graph.friend("d", TARGET)
-    assert_equal :grey, engine(graph).visibility(viewer: VIEWER, target: TARGET),
+    assert_equal :trusted, engine(graph).bucket(viewer: VIEWER, target: TARGET),
                  "three friendships must outvote a report"
   end
 
@@ -136,7 +136,7 @@ class ReputationRulesSpec < Minitest::Test
     graph = store.rate(VIEWER, "a", net_votes: -5)
     graph.friend("a", TARGET)
 
-    assert_equal :hidden, engine(graph).visibility(viewer: VIEWER, target: TARGET)
+    assert_equal :blocked, engine(graph).bucket(viewer: VIEWER, target: TARGET)
     refute engine(graph).reachable_depths(VIEWER).key?(TARGET)
   end
 
@@ -155,8 +155,8 @@ class ReputationRulesSpec < Minitest::Test
     assert_equal expected, engine(graph).effective(viewer: VIEWER, target: TARGET)
   end
 
-  # RULE: the traversal stops at max_depth.
-  def test_traversal_respects_max_depth
+  # RULE: the traversal stops at max_hops.
+  def test_traversal_respects_max_hops
     people = ["viewer"] + (1..12).map { |i| "p#{i}" }
     graph = store.chain(*people)
 
@@ -164,21 +164,58 @@ class ReputationRulesSpec < Minitest::Test
     assert_equal 7, depths.values.max
   end
 
+  # RULE: the traversal also stops at max_configs, whichever limit comes first.
+  # A positive-only graph still branches, so seven hops is unbounded without it.
+  def test_traversal_respects_max_configs
+    graph = store
+    # Fan out widely: 20 contacts, each friending 20 more.
+    (1..20).each do |i|
+      graph.friend(VIEWER, "a#{i}")
+      (1..20).each { |j| graph.friend("a#{i}", "b#{i}-#{j}") }
+    end
+
+    unbounded = engine(graph).reachable_depths(VIEWER)
+    assert_operator unbounded.size, :>, 50, "this graph should exceed the cap"
+
+    capped = engine(graph, "ladder" => { "max_configs" => 50 })
+    assert_operator capped.reachable_depths(VIEWER).size, :<=, 50
+  end
+
+  # RULE: the unrated are Blocked by default -- that is how new accounts and
+  # spam accounts both start, and it is the whole sybil defense.
+  def test_unrated_are_blocked_unless_the_user_opts_in
+    graph = store.chain(VIEWER, "a")
+
+    assert_equal :blocked, engine(graph).bucket(viewer: VIEWER, target: "newcomer")
+
+    opted_in = engine(graph, "display" => { "show_unrated" => true })
+    assert_equal :tolerated, opted_in.bucket(viewer: VIEWER, target: "newcomer"),
+                 "show_unrated should surface the unrated"
+  end
+
+  # RULE: opting into the unrated must not also surface the net-negative.
+  def test_show_unrated_does_not_reveal_reported_users
+    graph = store.chain(VIEWER, "a").report("a", TARGET)
+    opted_in = engine(graph, "display" => { "show_unrated" => true })
+
+    assert_equal :blocked, opted_in.bucket(viewer: VIEWER, target: TARGET)
+  end
+
   # RULE: a user's own pinned config wins; a blank one tracks the default.
   def test_user_config_overrides_are_layered
     graph = store.chain(VIEWER, "a", "b", "c").report("c", TARGET).like(VIEWER, TARGET, 2)
 
-    assert_equal :grey, engine(graph).visibility(viewer: VIEWER, target: TARGET)
+    assert_equal :tolerated, engine(graph).bucket(viewer: VIEWER, target: TARGET)
 
     # Pinning a shallower curve changes only this user's view. 0.0001 is below
     # the legal window's floor of A > k**3 / 4, so for this user two likes no
     # longer clear a depth-3 report -- which is the window doing its job.
     pinned = engine(graph, "vote_curve" => { "a" => "0.0001" })
-    assert_equal :hidden, pinned.visibility(viewer: VIEWER, target: TARGET),
+    assert_equal :blocked, pinned.bucket(viewer: VIEWER, target: TARGET),
                  "a user who pins a curve below the legal window loses to the report"
 
     blank = engine(graph, "vote_curve" => { "a" => nil })
-    assert_equal :grey, blank.visibility(viewer: VIEWER, target: TARGET),
+    assert_equal :tolerated, blank.bucket(viewer: VIEWER, target: TARGET),
                  "a blank value must track the default"
   end
 end

@@ -14,7 +14,7 @@ and tested. The chat UI is a working skeleton.
 
 ```bash
 bundle install
-bundle exec rake spec      # 50 tests
+bundle exec rake spec      # 57 tests
 bundle exec puma           # http://localhost:9292
 ```
 
@@ -25,53 +25,57 @@ signatures, so a mismatch rejects every login.
 ORIGIN=https://chat.example bundle exec puma
 ```
 
-`bundle exec rake curve` prints the current reputation curve, ladder weights and
-the safety window described below.
+`bundle exec rake curve` prints the current curve, ladder weights and safety
+window.
 
-## How reputation works, briefly
+## How reputation works
 
-Rating someone yourself counts for 0.91 of their score. The people you rate
-positively contribute 0.0819 between them, the people *they* rate 0.007371, and
-so on out to seven steps, with the weights summing to 1.
+Your own rating of someone is worth 0.9 of their score. The entire rest of the
+network is worth the remaining 0.1, split by distance: the people you rated
+contribute 0.09 between them, the people *they* rated 0.009, and so on out to
+seven hops.
 
-The practical consequence is that **anyone you have not personally rated is
-capped at 0.09** and renders greyed out — readable, but visibly unvouched-for.
-That is intended. A chat full of grey strangers is what makes friending them and
-liking their comments worth doing.
+Everyone lands in one of three buckets at login:
 
-Below zero, nothing renders at all. The unrated sit at exactly zero, so new
-accounts start invisible — which is also the entire sybil defense: keys are free
-to generate, but a fresh one is worth nothing until somebody vouches for it.
+| bucket | score | shown as |
+|---|---|---|
+| Trusted | ≥ 0.01 | normal |
+| Tolerated | > 0 | greyed, marked untrusted |
+| Blocked | ≤ 0 | not shown at all |
 
-Full design, and the reasoning behind each number:
+Two consequences worth knowing. Depth 2 tops out at 0.009, so **Trusted means
+you rated them or someone you rated did** — nobody further out reaches it.
+And the unrated sit at exactly 0, so **new accounts start invisible**: that is
+the sybil defense, since keys are free to generate but worth nothing until
+somebody vouches. Users who want to see the unrated can set `show_unrated`.
 
-- [docs/project/reputation.md](docs/project/reputation.md)
-- [docs/project/identity.md](docs/project/identity.md)
-- [docs/project/architecture.md](docs/project/architecture.md)
+Full design:
+[reputation](docs/project/reputation.md) ·
+[identity](docs/project/identity.md) ·
+[architecture](docs/project/architecture.md)
 
 ## Before you retune anything
 
 `config/reputation.yml` is meant to be tuned, with one catch. The rule *"a
-report from three steps away hides someone you liked once, but two likes
+report from three hops away blocks someone you liked once, but two likes
 outweigh it"* ties the vote curve to the ladder decay:
 
 ```
-curve(1) < k³ < curve(2)
+curve(1) < k³ < curve(2)      i.e.   A < k³ < 4A
 ```
 
-So `k`, `max_depth`, `A`, `B` and `cap` are **not** independent — changing one
-can silently flip a distant report from hiding someone to not.
+So `k`, `max_hops`, `A`, `B` and `cap` are **not** independent — changing one
+can silently flip a distant report from blocking someone to not.
 `spec/reputation_rules_spec.rb` asserts the rule and fails if a retune breaks
 it. If that test goes red after a config change, reconsider the config change.
 
 ## Security notes
 
-- Seeds are 8+ BIP39 words (80 bits) stretched through Argon2id. Both numbers
-  are load-bearing: a usernameless login has no salt, so attackers grind seeds
-  against every registered key at once. [Why 8 and not 6.](docs/project/identity.md)
+- Seeds are 8+ BIP39 words (80 bits of entropy) stretched through Argon2id.
 - Private keys are non-extractable WebCrypto keys in IndexedDB. The seed is
   never stored and never transmitted.
-- The server verifies every signature before storing anything and never sees a
-  private key.
 - Login and message signatures are bound to purpose, origin and room, so they
   cannot be replayed elsewhere.
+- **The MVP client does not verify config signatures** (`verify_signatures:
+  false`). Until that is flipped on, a malicious server can fabricate ratings.
+  The verification path exists; it is one config key.

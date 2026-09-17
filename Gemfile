@@ -8,7 +8,6 @@ gem "puma", "~> 8.0"
 gem "sequel", "~> 5.0"
 gem "sqlite3", "~> 2.0"
 gem "ed25519", "~> 1.4"
-gem "dentaku", "~> 4.0"
 gem "bigdecimal", "~> 3.1"
 
 group :test do

@@ -39,14 +39,17 @@ export class Reputation {
     this.b = toFixed(curve.b);
     this.cap = toFixed(curve.cap);
     this.k = toFixed(config.constants.k);
-    this.maxDepth = Number(config.ladder.max_depth);
+    this.maxHops = Number(config.ladder.max_hops);
+    this.maxConfigs = Number(config.ladder.max_configs);
     this.friendValue = toFixed(config.actions.friend.value);
-    this.visibleAbove = toFixed(config.display.visible_if_above);
-    this.greyBelow = toFixed(config.display.grey_if_below);
+    this.minRating = toFixed(config.gate.min_rating);
+    this.visibleAbove = toFixed(config.display.visible_above);
+    this.trustedAt = toFixed(config.display.trusted_at);
+    this.showUnrated = Boolean(config.display.show_unrated);
 
     this.weights = [];
     let weight = SCALE - this.k; // (1 - k)
-    for (let depth = 0; depth <= this.maxDepth; depth++) {
+    for (let depth = 0; depth <= this.maxHops; depth++) {
       this.weights.push(weight);
       weight = mul(weight, this.k);
     }
@@ -81,21 +84,23 @@ export class Reputation {
     return value;
   }
 
-  // Breadth-first, gated at every hop. Reaching depth d means every link on
-  // the path was rated above zero by the person one step closer in. Each
-  // person is counted once, at their shortest distance, so someone reachable
-  // by two paths does not vote twice.
+  // Breadth-first, gated at every hop. Reaching a hop means every link on the
+  // path was rated above the gate by the person one step closer in. Each
+  // person is counted once, at their shortest distance. The walk also stops at
+  // maxConfigs -- a positive-only graph still branches, so seven hops is
+  // unbounded in practice.
   reachableDepths(viewer, graph) {
     const depths = new Map([[viewer, 0]]);
     let frontier = [viewer];
 
-    for (let depth = 0; depth < this.maxDepth; depth++) {
+    for (let depth = 0; depth < this.maxHops; depth++) {
       const next = [];
 
       for (const rater of frontier) {
         for (const [subject, rating] of Object.entries(graph.ratingsBy(rater) || {})) {
+          if (depths.size >= this.maxConfigs) return depths;
           if (depths.has(subject)) continue;
-          if (this.ratingValue(rating) <= 0n) continue;
+          if (this.ratingValue(rating) <= this.minRating) continue;
 
           depths.set(subject, depth + 1);
           next.push(subject);
@@ -136,17 +141,19 @@ export class Reputation {
     return total;
   }
 
-  // Hidden unless strictly above zero. That covers both the unrated (who sit
-  // at exactly zero) and anyone the network is net-negative on, and it is what
-  // stops a distant report from making someone MORE visible than staying
-  // unrated would. Grey is low-positive only.
-  classify(effective) {
-    if (effective <= this.visibleAbove) return "hidden";
-    if (effective < this.greyBelow) return "grey";
-    return "normal";
+  // Blocked at or below zero -- that covers the unrated (who sit at exactly
+  // zero) and anyone the network is net-negative on, and it is what stops a
+  // distant report from making someone MORE visible than staying unrated
+  // would. showUnrated opts into seeing the unrated; it never reveals the
+  // net-negative.
+  classify(effective, rated = true) {
+    if (!rated && this.showUnrated && effective === 0n) return "tolerated";
+    if (effective <= this.visibleAbove) return "blocked";
+    if (effective < this.trustedAt) return "tolerated";
+    return "trusted";
   }
 
-  visibility(viewer, target, graph) {
+  bucket(viewer, target, graph) {
     return this.classify(this.effective(viewer, target, graph));
   }
 }

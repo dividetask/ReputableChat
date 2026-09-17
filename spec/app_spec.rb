@@ -268,7 +268,7 @@ class FrozenAppSpec < Minitest::Test
     assert_equal 200, last_response.status
     config = JSON.parse(last_response.body)
 
-    assert_equal "0.09", config.dig("constants", "k")
+    assert_equal "0.1", config.dig("constants", "k")
     assert_equal "0.0004", config.dig("vote_curve", "a")
     assert_equal 8, config.dig("seed", "min_words")
     assert_equal "argon2id", config.dig("seed", "kdf", "algorithm")

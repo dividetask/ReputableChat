@@ -18,12 +18,12 @@ task :curve do
   config = ReputableChat::Config.load
   engine = ReputableChat::Reputation::Engine.new(config: config, store: ReputableChat::Store::Memory.new)
 
-  puts "k = #{engine.ladder.k.to_s('F')}   max_depth = #{engine.ladder.max_depth}"
-  puts "stranger ceiling = #{engine.ladder.stranger_ceiling.to_s('F')}"
+  puts "k = #{engine.ladder.k.to_s('F')}   max_hops = #{engine.ladder.max_hops}"
+  puts "stranger ceiling = #{engine.ladder.stranger_ceiling.to_s('F')}   max_configs = #{engine.ladder.max_configs}"
   puts "cap reached at #{engine.curve.saturation_point} net votes"
   puts
-  puts "depth  weight"
-  (0..engine.ladder.max_depth).each { |d| puts format("%5d  %s", d, engine.ladder.weight(d).to_s("F")) }
+  puts "hops   weight"
+  (0..engine.ladder.max_hops).each { |d| puts format("%5d  %s", d, engine.ladder.weight(d).to_s("F")) }
   puts
   puts "votes  value"
   [1, 2, 3, 5, 10, 20, 30, 36].each { |n| puts format("%5d  %s", n, engine.curve.value(n).to_s("F")) }

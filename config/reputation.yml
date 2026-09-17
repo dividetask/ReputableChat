@@ -1,108 +1,67 @@
-# Default reputation parameters.
+# Reputation parameters.
 #
-# Every numeric value is a STRING. YAML would otherwise parse them as binary
-# floats, and 0.1 / 0.001 / 0.09 are not exactly representable in binary. All
-# arithmetic runs through BigDecimal so that values which should land exactly
-# on zero do, rather than on 1e-17 — that matters because visibility is decided
-# by `effective > 0`.
-#
-# A user's own config may override any of these. A key that is absent or blank
-# in a user's config tracks the default here, so changing this file moves every
-# user who never pinned that setting. A key a user has set explicitly is theirs
-# forever.
+# Numbers are quoted strings so YAML cannot coerce them to binary floats before
+# BigDecimal sees them. A user's own config may override any key; a blank or
+# absent key tracks the default here, an explicitly set one is theirs for good.
 
 precision:
-  # Decimal places carried through the traversal. A single like at depth 7 is
-  # ~1e-12, so this needs headroom well past that or deep contributions round
-  # away to nothing and the traversal below that depth is wasted work.
   scale: 18
 
 constants:
-  # Ladder decay. Also the ceiling for anyone you have not personally rated:
-  # the depths below 0 sum to exactly k.
-  #
-  # DO NOT retune without reading docs/project/reputation.md — k is welded to
-  # the vote curve by the report-visibility rule, which requires
-  # curve(1) < k**3 < curve(2). At k = 0.10 that held with 1.4% margin; 0.09
-  # centres it at ~40%. spec/reputation_rules_spec.rb fails if this breaks.
-  k: "0.09"
+  # Ladder decay. Your own rating is worth (1-k), the whole rest of the network
+  # worth k. Coupled to the vote curve: requires A < k**3 < 4A.
+  k: "0.1"
 
 ladder:
-  max_depth: 7
-  # vars: depth, + everything in `constants`
-  weight: "(1 - k) * k ** depth"
+  max_hops: 7
+  # Traversal also stops here, whichever limit is reached first.
+  max_configs: 5000
+
+gate:
+  # Only configs of people rated above this are read.
+  min_rating: "0"
 
 actions:
   friend:
     value: "0.5"
   report:
-    # Absolute within a single rater: reporting someone makes that rater's
-    # rating -1 regardless of how many of their comments the rater liked.
-    # Across raters it is just -1 in the mean, so roughly three friendships at
-    # the same depth outvote one report. See docs/project/reputation.md.
+    # Absolute within one rater, only -1 in the mean across raters.
     value: "-1.0"
-    absolute: true
 
 vote_curve:
-  # Net positive-emote count maps to a rating through  sign(x) * (A*x^2 + B*|x|),
-  # clamped to +/- cap. Quadratic growth means the first few emotes are nearly
-  # weightless and later ones bite progressively harder.
-  #
-  # B is available but defaults to 0. curve(2)/curve(1) is (4A+2B)/(A+B), which
-  # is 4 at B=0 and falls toward 2 as B grows -- and that ratio is the margin on
-  # the report-visibility rule below, so raising B narrows it.
-  #
-  # A is constrained by that rule to (0.000182, 0.000729): it needs
-  # curve(1) = A  <  k**3 = 0.000729  <  curve(2) = 4A.
-  # 0.0004 sits near the geometric centre of that window.
-  #
-  #   1 vote -> 0.0004    3 votes -> 0.0036    20 votes -> 0.16
-  #   2 votes -> 0.0016  10 votes -> 0.04      36 votes -> cap
-  shape: quadratic         # quadratic | custom
+  # sign(x) * min(cap, A*x^2 + B*|x|)
+  # A is pinned to (k**3/4, k**3) by the report rule. B > 0 narrows that window.
   cap: "0.5"
   a: "0.0004"
   b: "0"
-  # shape: custom uses this instead. vars: net, cap, a, b
-  formula: ~
-
-# How a rater's published rating becomes a contribution at their depth.
-# vars: rating, rater_trust, weight, depth, + constants
-#
-# `rating * weight` is the current design: your rating of someone is a gate,
-# not a multiplier. Switching to `rating * rater_trust * weight` restores the
-# earlier multiplicative model in one line.
-contribution: "rating * weight"
-
-# Mean over the people who actually rated the target at that depth, NOT over
-# everyone at that depth with non-raters counted as zero.
-aggregate: mean_of_raters
-
-gate:
-  # Whose config gets read. Applied by the parent at each hop, so reaching
-  # depth d means every link on the path was positively rated.
-  # vars: parent_rating, viewer_effective, depth
-  read_config_if: "parent_rating > 0"
 
 display:
-  # Hidden unless strictly above zero. That covers both the unrated (who sit at
-  # exactly 0) and anyone the network is net-negative on, and it is what stops
-  # a distant report from making someone MORE visible than being unrated does.
-  # Grey is low-positive only.
-  visible_if_above: "0"
-  grey_if_below: "0.05"
+  # Blocked at or below this, Tolerated above it, Trusted at trusted_at.
+  visible_above: "0"
+  # Depth 2 tops out at 0.009, so Trusted means you rated them or someone you
+  # rated did.
+  trusted_at: "0.01"
+  # Show users nobody has rated. Off by default - unrated is how new accounts
+  # and spam accounts both start.
+  show_unrated: false
+
+session:
+  # MVP only: configs are taken on trust. Flip on to verify every signature.
+  verify_signatures: false
+  # Reports that move someone to Blocked mid-session without recalculating,
+  # as hops => how many reporters at that distance are needed.
+  report_blocks:
+    "0": 1
+    "1": 1
+    "2": 2
 
 seed:
   wordlist: bip39-english
-  # 8 words x 11 bits = 88 total, 80 entropy + 8 checksum.
-  # 7 words is ~69 bits after checksum: about 81 days to break an arbitrary
-  # account at 10M users. 8 words is ~457 years. See docs/project/identity.md.
+  # 8 words = 80 bits of entropy after the checksum. See docs/project/identity.md.
   min_words: 8
   checksum_bits: 8
   kdf:
     algorithm: argon2id
-    # Mandatory, not optional. Usernameless login means there is no salt, so
-    # an attacker grinds seeds against every registered key at once. Without a
-    # memory-hard KDF even 8 words falls in days.
     memory_kib: 65536
     iterations: 3
     parallelism: 1

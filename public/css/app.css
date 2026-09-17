@@ -37,8 +37,8 @@ pre { background: #0f1115; padding: 12px; border-radius: 6px; white-space: pre-w
 .msg:last-child { border-bottom: 0; }
 .msg .who { font-weight: 600; }
 .msg .fp { color: var(--muted); font-family: ui-monospace, monospace; font-size: 12px; margin-left: 6px; }
-/* Low-positive reputation: readable, but clearly marked as unvouched-for. */
-.msg.grey { opacity: .45; }
-.msg.grey .who::after { content: " · untrusted"; color: var(--warn); font-weight: 400; font-size: 12px; }
+/* Tolerated: readable, but clearly marked as unvouched-for. */
+.msg.tolerated { opacity: .45; }
+.msg.tolerated .who::after { content: " · untrusted"; color: var(--warn); font-weight: 400; font-size: 12px; }
 #composer { display: flex; gap: 8px; margin-top: 12px; }
 #composer input { flex: 1; }

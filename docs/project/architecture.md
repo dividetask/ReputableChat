@@ -15,8 +15,12 @@ Signed blobs go out exactly as they came in. Re-serializing them server-side
 would only create a way to break signatures.
 
 Reputation is subjective, so it belongs on the client, which fetches signed
-configs and does the maths itself. The client verifies every config and every
-message against its author's key — the server is not trusted to have done it.
+configs and does the maths itself.
+
+**MVP caveat:** `session.verify_signatures` is `false`, so the client currently
+takes configs on trust. Until it is flipped on, a malicious server can
+fabricate ratings and put anyone in any bucket. The verification path is
+written and tested; enabling it is one config key.
 
 ## Public and private config
 
@@ -102,6 +106,7 @@ public/js/
 
 ## Not built yet
 
+- Client-side config signature verification (`session.verify_signatures`)
 - WebSocket delivery — messages currently poll every 4s
 - Emote UI; `config/emotes.yml` is defined and served but nothing places them
 - Friend/report UI; ratings are computed and verified but not yet editable

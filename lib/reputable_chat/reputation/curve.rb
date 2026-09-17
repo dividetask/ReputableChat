@@ -4,15 +4,12 @@ require "bigdecimal"
 
 module ReputableChat
   module Reputation
-    # Maps a net emote count to a rating contribution.
+    # Maps a net emote count to a rating: sign(x) * min(cap, A*x^2 + B*|x|).
     #
-    #   value(x) = sign(x) * min(cap, A*x^2 + B*|x|)
-    #
-    # Quadratic so that the first few emotes are nearly weightless and later
-    # ones bite progressively harder. The sign is applied to the magnitude
-    # rather than fed through the polynomial -- A*x^2 is positive for negative
-    # x, so plugging a negative count straight in would make dislikes read as
-    # likes.
+    # Quadratic so the first few emotes are nearly weightless and later ones
+    # bite progressively harder. The sign is applied to the magnitude rather
+    # than fed through the polynomial -- A*x^2 is positive for negative x, so a
+    # negative count would otherwise read as a positive one.
     class Curve
       ZERO = BigDecimal("0")
 
@@ -23,12 +20,7 @@ module ReputableChat
         @a     = config.decimal("vote_curve.a")
         @b     = config.decimal("vote_curve.b")
         @scale = config.scale
-        @shape = config.fetch("vote_curve.shape").to_s
         @cache = {}
-
-        return if @shape == "quadratic"
-
-        raise ArgumentError, "unsupported vote_curve.shape: #{@shape.inspect}"
       end
 
       def value(net_votes)

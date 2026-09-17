@@ -57,17 +57,17 @@ a positive one.
 ## The ladder
 
 ```
-weight(d) = (1 - k) * k^d          k = 0.09, depths 0..7
+weight(d) = (1 - k) * k^d          k = 0.1, hops 0..7
 ```
 
-| depth | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
+| hops | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
 |---|---|---|---|---|---|---|---|---|
-| weight | 0.91 | 0.0819 | 0.007371 | 0.00066339 | 5.97e-5 | 5.37e-6 | 4.84e-7 | 4.35e-8 |
+| weight | 0.9 | 0.09 | 0.009 | 0.0009 | 9e-5 | 9e-6 | 9e-7 | 9e-8 |
 
 These sum to 1, so an effective reputation is always inside −1..+1 with no
 clamping. Depth 0 takes `1-k` of the total, which means **the ceiling for anyone
-you have never personally rated is exactly `k`** — 0.09. That is intended:
-strangers are meant to sit in the grey band, and the pressure that creates to
+you have never personally rated is exactly `k`** — 0.1. That is intended:
+strangers are meant to sit in the Tolerated band, and the pressure that creates to
 friend people or like their comments is the point of the app.
 
 Effective reputation is the weighted sum over depths of the mean rating at that
@@ -76,32 +76,44 @@ that depth, not over everyone at that depth with non-raters counted as zero.
 
 ## Traversal
 
-Breadth-first from the viewer, gated at every hop by `parent_rating > 0`.
-Reaching depth `d` means every link on the path was rated above zero by the
+Breadth-first from the viewer, gated at every hop by `gate.min_rating`.
+Reaching hop `d` means every link on the path was rated above the gate by the
 person one step closer in; a single non-positive link and the whole branch
 beyond it goes unread.
+
+The walk stops at `max_hops` **or** `max_configs`, whichever comes first. A
+positive-only graph still branches, so seven hops is unbounded in practice — at
+30 positive ratings each that is 27,000 configs by hop 3 and 810,000 by hop 4.
+`max_configs` is what makes the walk terminate on a real graph.
 
 Each person is counted once, at their **shortest** distance. Someone reachable
 by two paths does not get to vote twice. Nobody contributes to their own score.
 
 Your rating of someone is a **gate, not a multiplier**. A contact you rated
 +0.001 carries exactly the same weight in judging strangers as one you friended
-and maxed out. The multiplicative alternative is one line in the config:
+and maxed out.
 
-```yaml
-contribution: "rating * rater_trust * weight"
-```
+## The three buckets
 
-## Visibility
+Computed once at login, then used for the session.
 
-```
-effective > 0        →  visible
-effective < 0.05     →  grey (readable, marked untrusted)
-otherwise            →  normal
-```
+| bucket | score |
+|---|---|
+| Trusted | >= `trusted_at` (0.01) |
+| Tolerated | > 0 |
+| Blocked | <= 0 |
 
-**Hidden unless strictly above zero.** This covers the unrated (who sit at
+**Blocked unless strictly above zero.** This covers the unrated (who sit at
 exactly 0) and anyone the network is net-negative on.
+
+Because hop 2 tops out at 0.009, just under `trusted_at`, **Trusted means you
+rated them or someone you rated did**. Nobody at three hops or beyond reaches
+it however well-regarded they are. That sits right on the boundary, so it flips
+if `k` moves.
+
+`show_unrated` lets a user opt into seeing users nobody has rated — necessary
+for anyone willing to wade through the muck and vouch for newcomers. It surfaces
+only the unrated, never the net-negative.
 
 That rule exists because of a real bug in an earlier design. When visibility was
 purely threshold-based, an unrated spammer scored 0 and was hidden — but the
@@ -120,10 +132,11 @@ curve(1)  <  k³  <  curve(2)
    A      < 0.000729 <  4A
 ```
 
-which pins `A` to the window **(0.000182, 0.000729)**. `A = 0.0004` sits near its
-geometric centre, giving margins of 45% and 120% of the report's weight.
+which pins `A` to the window **(0.00025, 0.001)**. At `A = 0.0004` the margins
+are symmetric: one like lands 0.00054 below the line and two likes 0.00054
+above it, each 60% of the report's weight.
 
-This means **`k`, `max_depth`, `A`, `B` and `cap` are no longer independent**.
+This means **`k`, `max_hops`, `A`, `B` and `cap` are no longer independent**.
 Changing any one of them can silently flip a distant report from hiding someone
 to not. `spec/reputation_rules_spec.rb` asserts the rule directly and fails the
 build if a retune breaks it — if that test goes red after a config change, the
@@ -139,7 +152,7 @@ because visibility turns on `effective > 0`: in binary floating point, values
 that should cancel to exactly zero land on ±1e-17 and flip people across that
 line at random.
 
-Scale interacts with `max_depth`. A single like at depth 7 is ~1e-12, so too
+Scale interacts with `max_hops`. A single like at depth 7 is ~1e-12, so too
 small a scale rounds deep contributions away and makes the deeper traversal
 wasted work.
 
