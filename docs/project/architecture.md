@@ -101,12 +101,14 @@ fixtures and compares the bytes, and is the thing that catches that.
 ## Layout
 
 ```
+config/server.yml         origin, database and image paths (env overrides)
 config/reputation.yml     tunable reputation parameters (the defaults layer)
 config/emotes.yml         which emotes count positive, negative, neutral
 config/bip39-english.txt  wordlist; one source of truth, served at /wordlist.txt
 
 lib/reputable_chat/
   app.rb                  Roda routes, CSP, sessions
+  server_config.rb        config/server.yml, with env winning
   config.rb               three-layer config resolution
   params.rb               input validation
   cryptography/           canonical, payload, signature, seed (reference impl)

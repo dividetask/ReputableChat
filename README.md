@@ -21,14 +21,25 @@ bundle exec puma           # http://localhost:9292
 
 ### Deploying
 
-Set `ORIGIN` to the public URL the server is reached at. It travels inside the
-signed login payload, so if it does not match the origin the browser signs,
-every login is rejected as a bad signature. It defaults to
-`http://localhost:9292`, which is what puma serves locally.
+Server settings live in `config/server.yml`:
 
-```bash
-ORIGIN=https://chat.example bundle exec puma
+```yaml
+origin: "https://chat.example"
+database_url: "sqlite://data/reputablechat.db"
+image_root: "data/images"
 ```
+
+`origin` is the public URL the server is reached at. It travels inside the
+signed login payload, so if it does not match the origin the browser signs,
+every login is rejected as a bad signature.
+
+Each key can be overridden by the matching environment variable (`ORIGIN`,
+`DATABASE_URL`, `IMAGE_ROOT`) for deployments that inject configuration rather
+than edit files.
+
+`SESSION_SECRET` is environment-only, since `config/server.yml` is in the
+repository. Without it a random secret is generated at boot — fine locally, but
+it signs everyone out on every restart.
 
 ## How reputation works
 

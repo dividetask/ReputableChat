@@ -1,0 +1,21 @@
+# Server settings.
+#
+# Each key can be overridden by the matching environment variable (ORIGIN,
+# DATABASE_URL, IMAGE_ROOT). The environment wins, so deployment tooling can
+# inject a value without editing a file baked into an image; this file is the
+# default for everything else.
+
+# The public URL this server is reached at.
+#
+# It travels inside the signed login payload, so it must match the origin the
+# browser signs or every login is rejected as a bad signature. Change it when
+# you deploy -- the default is what puma serves locally.
+origin: "http://localhost:9292"
+
+database_url: "sqlite://data/reputablechat.db"
+image_root: "data/images"
+
+# SESSION_SECRET is deliberately absent: it is a secret and this file is in the
+# repository. Set it in the environment when you deploy. Without it a random
+# one is generated at boot, which is fine locally but signs everyone out on
+# every restart.
