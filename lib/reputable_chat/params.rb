@@ -2,8 +2,9 @@
 
 module ReputableChat
   # Input validation. Everything from a client is checked for type, length and
-  # shape before it reaches crypto, the database, or a payload builder. Helpers
-  # return nil rather than raising, so a handler can reject in one place.
+  # shape before it reaches cryptography, the database, or a payload builder.
+  # Helpers return nil rather than raising, so a handler can reject in one
+  # place.
   module Params
     # Control characters have no business in a username, room name or message
     # body. Tab, newline and carriage return are allowed through for bodies.

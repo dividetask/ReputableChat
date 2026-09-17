@@ -5,9 +5,9 @@ require "json"
 require "yaml"
 require "securerandom"
 require_relative "params"
-require_relative "crypto/signature"
-require_relative "crypto/canonical"
-require_relative "crypto/payload"
+require_relative "cryptography/signature"
+require_relative "cryptography/canonical"
+require_relative "cryptography/payload"
 require_relative "store/database"
 require_relative "store/images"
 
@@ -118,9 +118,9 @@ module ReputableChat
       fresh = (Time.now.to_i - issued_at).abs <= Store::Database::CLOCK_SKEW
       bad_request(r, "stale timestamp") unless fresh
 
-      payload = Crypto::Payload.login(pubkey: pubkey, nonce: nonce, origin: origin, issued_at: issued_at)
+      payload = Cryptography::Payload.login(pubkey: pubkey, nonce: nonce, origin: origin, issued_at: issued_at)
 
-      unless Crypto::Signature.verify(pubkey_b64: pubkey, signature_b64: signature, payload: payload)
+      unless Cryptography::Signature.verify(pubkey_b64: pubkey, signature_b64: signature, payload: payload)
         r.halt(401, { "error" => "signature did not verify" })
       end
 
@@ -182,14 +182,14 @@ module ReputableChat
       sig     = Params.signature(r.params["signature"])     or bad_request(r, "bad signature")
       ts      = Params.integer(r.params["ts"])              or bad_request(r, "bad timestamp")
 
-      payload = Crypto::Payload.config(
+      payload = Cryptography::Payload.config(
         pubkey: pubkey, version: version, profile: profile, ratings: ratings, issued_at: ts
       )
       verify!(r, pubkey, sig, payload)
 
       result = store.store_config(
         pubkey: pubkey, version: version,
-        payload: Crypto::Canonical.dump(payload), signature: sig
+        payload: Cryptography::Canonical.dump(payload), signature: sig
       )
       r.halt(409, { "error" => "version is not newer than the stored one" }) if result == :stale
 
@@ -204,14 +204,14 @@ module ReputableChat
       ts     = Params.integer(r.params["ts"]) or bad_request(r, "bad timestamp")
       prev   = r.params["prev"].nil? ? nil : Params.signature(r.params["prev"])
 
-      payload = Crypto::Payload.message(
+      payload = Cryptography::Payload.message(
         author: author, room: room, seq: seq, prev: prev, body: body, issued_at: ts
       )
       verify!(r, author, sig, payload)
 
       result = store.store_message(
         author: author, room: room, seq: seq, prev: prev,
-        payload: Crypto::Canonical.dump(payload), signature: sig
+        payload: Cryptography::Canonical.dump(payload), signature: sig
       )
       r.halt(409, { "error" => "that sequence number is already used" }) if result == :duplicate
 
@@ -221,7 +221,7 @@ module ReputableChat
     # --- helpers ----------------------------------------------------------
 
     def verify!(r, pubkey, signature, payload)
-      return if Crypto::Signature.verify(pubkey_b64: pubkey, signature_b64: signature, payload: payload)
+      return if Cryptography::Signature.verify(pubkey_b64: pubkey, signature_b64: signature, payload: payload)
 
       r.halt(400, { "error" => "signature did not verify" })
     end

@@ -1,5 +1,5 @@
 // Deterministic serialization for signed payloads. Must produce byte-identical
-// output to lib/reputable_chat/crypto/canonical.rb or every signature fails;
+// output to lib/reputable_chat/cryptography/canonical.rb or every signature fails;
 // spec/canonical_parity_spec.rb checks that they agree.
 
 function normalize(value) {

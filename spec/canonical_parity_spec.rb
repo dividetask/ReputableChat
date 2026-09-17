@@ -1,14 +1,14 @@
 # frozen_string_literal: true
 
 require_relative "spec_helper"
-require "reputable_chat/crypto/canonical"
+require "reputable_chat/cryptography/canonical"
 require "open3"
 
 # The browser signs bytes and the server verifies bytes. If these two
 # serializers ever disagree by even one character, every signature in the
 # system silently stops verifying. This test is the thing that catches that.
 class CanonicalParitySpec < Minitest::Test
-  Canonical = ReputableChat::Crypto::Canonical
+  Canonical = ReputableChat::Cryptography::Canonical
 
   FIXTURES = File.expand_path("fixtures/canonical_vectors.json", __dir__)
   SCRIPT   = File.expand_path("canonical_parity.mjs", __dir__)

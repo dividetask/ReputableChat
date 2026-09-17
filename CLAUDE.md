@@ -45,12 +45,12 @@ See [docs/project/reputation.md](docs/project/reputation.md).
 
 ## Things that break silently
 
-- **Canonical serialization.** `lib/reputable_chat/crypto/canonical.rb` and
+- **Canonical serialization.** `lib/reputable_chat/cryptography/canonical.rb` and
   `public/js/canonical.js` must produce identical bytes. If they drift, every
   signature in the system stops verifying with no obvious cause.
   `spec/canonical_parity_spec.rb` guards this — always run it after touching
   either file.
-- **Signed payload shapes.** `crypto/payload.rb` and the `*Payload` helpers in
+- **Signed payload shapes.** `cryptography/payload.rb` and the `*Payload` helpers in
   `public/js/identity.js` must stay in lockstep for the same reason.
 - **The seed derivation domain.** Changing `seed.kdf.domain` in
   `config/reputation.yml` changes every derived key, which strands every

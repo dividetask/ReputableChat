@@ -6,7 +6,7 @@ to comments, and report bad actors. Those judgements propagate through the
 social graph, weighted by distance, and decide what each person sees — so "who
 is worth reading" is answered per viewer rather than globally.
 
-**Status: early.** Reputation, identity and crypto are built and tested. The
+**Status: early.** Reputation, identity and cryptography are built and tested. The
 chat UI is a working skeleton.
 
 ## Running it

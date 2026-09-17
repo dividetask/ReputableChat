@@ -3,7 +3,7 @@
 require "digest"
 
 module ReputableChat
-  module Crypto
+  module Cryptography
     # BIP39 wordlist encoding and checksum.
     #
     # The server never sees a seed -- this exists as the reference

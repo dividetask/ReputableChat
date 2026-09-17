@@ -3,7 +3,7 @@
 require "json"
 
 module ReputableChat
-  module Crypto
+  module Cryptography
     # Deterministic serialization for signed payloads: sorted keys, no whitespace,
     # UTF-8. Must produce byte-identical output to public/js/canonical.js or every
     # signature fails.

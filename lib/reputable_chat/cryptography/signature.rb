@@ -5,7 +5,7 @@ require "base64"
 require_relative "canonical"
 
 module ReputableChat
-  module Crypto
+  module Cryptography
     # Ed25519 verification. The server only verifies; private keys exist solely in
     # the browser.
     module Signature

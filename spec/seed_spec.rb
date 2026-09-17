@@ -1,12 +1,12 @@
 # frozen_string_literal: true
 
 require_relative "spec_helper"
-require "reputable_chat/crypto/seed"
+require "reputable_chat/cryptography/seed"
 require "securerandom"
 
 # Shared vectors: public/js/seed.js must produce identical results.
 class SeedSpec < Minitest::Test
-  Seed = ReputableChat::Crypto::Seed
+  Seed = ReputableChat::Cryptography::Seed
 
   def test_wordlist_is_the_canonical_bip39_english_list
     assert_equal 2048, Seed.wordlist.size

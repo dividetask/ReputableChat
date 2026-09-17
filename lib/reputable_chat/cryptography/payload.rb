@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 module ReputableChat
-  module Crypto
+  module Cryptography
     # The signed payload shapes. Each names its purpose and the origin or room it
     # was made for, so a harvested signature cannot be replayed against another
     # server or replanted in another channel.

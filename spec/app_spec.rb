@@ -4,17 +4,17 @@ require_relative "spec_helper"
 require "rack/test"
 require "ed25519"
 require "reputable_chat/app"
-require "reputable_chat/crypto/signature"
-require "reputable_chat/crypto/payload"
+require "reputable_chat/cryptography/signature"
+require "reputable_chat/cryptography/payload"
 require "tmpdir"
 require "digest"
 
 class AppSpec < Minitest::Test
   include Rack::Test::Methods
 
-  Sig     = ReputableChat::Crypto::Signature
-  Payload = ReputableChat::Crypto::Payload
-  Canon   = ReputableChat::Crypto::Canonical
+  Sig     = ReputableChat::Cryptography::Signature
+  Payload = ReputableChat::Cryptography::Payload
+  Canon   = ReputableChat::Cryptography::Canonical
 
   ORIGIN = "http://example.test"
 

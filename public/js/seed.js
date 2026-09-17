@@ -1,5 +1,5 @@
 // BIP39 wordlist encoding and checksum. Mirrors
-// lib/reputable_chat/crypto/seed.rb.
+// lib/reputable_chat/cryptography/seed.rb.
 
 const BITS_PER_WORD = 11;
 const CHECKSUM_BITS = 8;

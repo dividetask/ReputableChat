@@ -140,7 +140,7 @@ export const PURPOSE = {
   CONFIG: "reputablechat:config:v1",
 };
 
-// These must match lib/reputable_chat/crypto/payload.rb exactly.
+// These must match lib/reputable_chat/cryptography/payload.rb exactly.
 export function loginPayload({ pubkey, nonce, origin, ts }) {
   return { purpose: PURPOSE.LOGIN, pubkey, nonce, origin, ts };
 }

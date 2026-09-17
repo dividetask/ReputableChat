@@ -69,7 +69,7 @@ script-bearing document, not an image.
 
 ## Signed payloads
 
-Three shapes, each domain-separated. `lib/reputable_chat/crypto/payload.rb` and
+Three shapes, each domain-separated. `lib/reputable_chat/cryptography/payload.rb` and
 `public/js/identity.js` must agree exactly.
 
 | purpose | fields |
@@ -93,7 +93,7 @@ The browser signs bytes and the server verifies bytes, so both must produce
 byte-identical output: sorted keys, no whitespace, UTF-8, floats refused
 outright (they have no single textual form across languages).
 
-`lib/reputable_chat/crypto/canonical.rb` and `public/js/canonical.js` are the
+`lib/reputable_chat/cryptography/canonical.rb` and `public/js/canonical.js` are the
 two halves. **If they ever disagree by one character, every signature silently
 stops verifying** — `spec/canonical_parity_spec.rb` runs both over shared
 fixtures and compares the bytes, and is the thing that catches that.
@@ -109,15 +109,16 @@ lib/reputable_chat/
   app.rb                  Roda routes, CSP, sessions
   config.rb               three-layer config resolution
   params.rb               input validation
-  crypto/                 canonical, payload, signature, seed (reference impl)
-  reputation/             curve, ladder, rating, engine
-  store/                  database (Sequel), memory (tests)
+  cryptography/           canonical, payload, signature, seed (reference impl)
+  reputation/             curve, ladder, rating, engine, session
+  store/                  database (Sequel), images (content-addressed), memory
 
 public/js/
-  canonical.js            must match crypto/canonical.rb byte for byte
-  seed.js                 must match crypto/seed.rb
+  canonical.js            must match cryptography/canonical.rb byte for byte
+  seed.js                 must match cryptography/seed.rb
   identity.js             Argon2id, non-extractable keys, signing
   reputation.js           mirrors reputation/ in BigInt fixed-point
+  session.js              mirrors reputation/session.rb
   app.js                  UI wiring
 ```
 
