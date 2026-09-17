@@ -1,9 +1,6 @@
-// Deterministic serialization for anything that gets signed.
-//
-// The browser signs bytes and the server verifies bytes, so both sides have to
-// produce byte-identical output for the same object or every signature fails.
-// This mirrors lib/reputable_chat/crypto/canonical.rb -- the two must be
-// changed together, and spec/canonical_parity_spec.rb checks that they agree.
+// Deterministic serialization for signed payloads. Must produce byte-identical
+// output to lib/reputable_chat/crypto/canonical.rb or every signature fails;
+// spec/canonical_parity_spec.rb checks that they agree.
 
 function normalize(value) {
   if (Array.isArray(value)) return value.map(normalize);

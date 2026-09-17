@@ -4,13 +4,9 @@ require "json"
 
 module ReputableChat
   module Crypto
-    # Deterministic serialization for anything that gets signed.
-    #
-    # The browser signs bytes and the server verifies bytes, so both sides have
-    # to produce byte-identical output for the same object or every signature
-    # fails. Keys are sorted, separators carry no whitespace, output is UTF-8.
-    # This mirrors JSON.stringify over sorted keys in public/js/canonical.js --
-    # the two must be changed together.
+    # Deterministic serialization for signed payloads: sorted keys, no whitespace,
+    # UTF-8. Must produce byte-identical output to public/js/canonical.js or every
+    # signature fails.
     module Canonical
       module_function
 

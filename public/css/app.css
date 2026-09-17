@@ -42,3 +42,16 @@ pre { background: #0f1115; padding: 12px; border-radius: 6px; white-space: pre-w
 .msg.tolerated .who::after { content: " · untrusted"; color: var(--warn); font-weight: 400; font-size: 12px; }
 #composer { display: flex; gap: 8px; margin-top: 12px; }
 #composer input { flex: 1; }
+
+.msg .emotes { margin-top: 4px; display: flex; gap: 4px; flex-wrap: wrap; }
+.msg .emotes button {
+  background: transparent; border: 1px solid var(--line); color: var(--text);
+  padding: 1px 6px; font-size: 13px; font-weight: 400; border-radius: 4px;
+}
+.msg .emotes button.voted { border-color: var(--accent); }
+.msg .who { cursor: pointer; text-decoration: underline dotted; }
+#profile-icon { border-radius: 8px; background: #0f1115; object-fit: cover; }
+#breakdown { margin-top: 14px; font-family: ui-monospace, monospace; font-size: 12px; }
+#breakdown table { width: 100%; border-collapse: collapse; }
+#breakdown th, #breakdown td { text-align: left; padding: 3px 6px; border-bottom: 1px solid var(--line); }
+#breakdown th { color: var(--muted); font-weight: 400; }

@@ -9,19 +9,16 @@ require_relative "crypto/signature"
 require_relative "crypto/canonical"
 require_relative "crypto/payload"
 require_relative "store/database"
+require_relative "store/images"
 
 module ReputableChat
-  # The server does as little as it can.
-  #
-  # It never sees a seed, never holds a private key, and never computes a
-  # reputation -- reputation is subjective per viewer, so it belongs on the
-  # client, which fetches signed configs and does the maths itself. What the
-  # server does do is verify every signature before storing anything, reject
-  # rollbacks, and hand out single-use login challenges.
+  # The server does as little as it can: it verifies signatures, rejects config
+  # rollbacks, and stores signed blobs. It never sees a seed, holds a private
+  # key, or computes a reputation -- reputation is subjective per viewer, so it
+  # belongs on the client.
   class App < Roda
-    MAX_USERNAME = 64
-    MAX_BODY     = 4_000
-    MAX_BATCH    = 256
+    MAX_BODY  = 4_000
+    MAX_BATCH = 256
 
     opts[:root] = File.expand_path("../..", __dir__)
 
@@ -61,10 +58,11 @@ module ReputableChat
     EMOTES   = YAML.safe_load_file(File.join(opts[:root], "config", "emotes.yml")).freeze
 
     class << self
-      attr_accessor :store, :origin
+      attr_accessor :store, :images, :origin
     end
 
     def store = self.class.store
+    def images = self.class.images
     def origin = self.class.origin
 
     route do |r|
@@ -75,6 +73,7 @@ module ReputableChat
       # Served from config/ rather than copied into public/ so the wordlist has
       # exactly one source of truth shared with the Ruby reference.
       r.get("wordlist.txt") { serve_wordlist }
+      r.get("images", String) { |name| serve_image(name) }
 
       r.on "api" do
         r.post("challenge") { { "nonce" => store.issue_nonce } }
@@ -86,6 +85,7 @@ module ReputableChat
         r.get("emotes")   { EMOTES }
         r.post("session")   { open_session(r) }
         r.post("register")  { register(r) }
+        r.post("image")     { upload_image(r) }
 
         r.on "config" do
           r.post("batch") { config_batch(r) }
@@ -130,20 +130,32 @@ module ReputableChat
       session["pubkey"] = pubkey
       user = store.user(pubkey)
 
-      { "pubkey" => pubkey, "registered" => !user.nil?, "username" => user && user[:username] }
+      { "pubkey" => pubkey, "registered" => !user.nil? }
     end
 
     # A valid but unregistered seed reaches here. The client warns before
     # calling it -- a mistyped seed that happens to pass the checksum would
-    # otherwise silently create a new empty account.
+    # otherwise silently create a new empty account. The display name is not
+    # set here; the client publishes it in its first signed config.
     def register(r)
-      pubkey   = current_pubkey(r)
-      username = Params.string(r.params["username"], max: MAX_USERNAME) or bad_request(r, "bad username")
-
+      pubkey = current_pubkey(r)
       r.halt(409, { "error" => "already registered" }) if store.registered?(pubkey)
 
-      store.register(pubkey, username)
-      { "pubkey" => pubkey, "username" => username, "registered" => true }
+      store.register(pubkey)
+      { "pubkey" => pubkey, "registered" => true }
+    end
+
+    # The filename is derived from a SHA-256 of the bytes, and the type is
+    # sniffed from them, so nothing a client claims about an upload is trusted.
+    def upload_image(r)
+      declared = r.env["CONTENT_LENGTH"].to_i
+      r.halt(413, { "error" => "image too large" }) if declared > Store::Images::MAX_BYTES
+
+      case (result = images.store(r.body.read))
+      when :too_large   then r.halt(413, { "error" => "image too large" })
+      when :unsupported then bad_request(r, "unsupported image type")
+      else { "icon" => result }
+      end
     end
 
     def fetch_config(pubkey_param)
@@ -165,11 +177,14 @@ module ReputableChat
     def store_config(r)
       pubkey  = current_pubkey(r)
       version = Params.integer(r.params["version"], min: 1) or bad_request(r, "bad version")
+      profile = Params.profile(r.params["profile"])         or bad_request(r, "bad profile")
       ratings = Params.ratings(r.params["ratings"])         or bad_request(r, "bad ratings")
       sig     = Params.signature(r.params["signature"])     or bad_request(r, "bad signature")
       ts      = Params.integer(r.params["ts"])              or bad_request(r, "bad timestamp")
 
-      payload = Crypto::Payload.config(pubkey: pubkey, version: version, ratings: ratings, issued_at: ts)
+      payload = Crypto::Payload.config(
+        pubkey: pubkey, version: version, profile: profile, ratings: ratings, issued_at: ts
+      )
       verify!(r, pubkey, sig, payload)
 
       result = store.store_config(
@@ -236,6 +251,16 @@ module ReputableChat
       { "author" => row[:author], "seq" => row[:seq], "prev" => row[:prev],
         "payload" => row[:payload], "signature" => row[:signature],
         "received_at" => row[:received_at] }
+    end
+
+    # Content-addressed, so the bytes can never change under a given name.
+    def serve_image(name)
+      bytes = images.read(name) or response.status = 404
+      return "" unless bytes
+
+      response["Content-Type"] = images.content_type(name)
+      response["Cache-Control"] = "public, max-age=31536000, immutable"
+      bytes
     end
 
     def serve_wordlist

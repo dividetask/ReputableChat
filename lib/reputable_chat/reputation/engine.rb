@@ -7,13 +7,10 @@ require_relative "rating"
 
 module ReputableChat
   module Reputation
-    # Computes one viewer's subjective reputation for other users.
-    #
-    # Nothing here needs to agree with what another client computes -- each
-    # viewer's number is their own view of the network. BigDecimal is used not
-    # for cross-client agreement but because visibility is decided by
-    # `effective > 0`, and in binary floating point values that should cancel
-    # to exactly zero land on +/-1e-17 and flip people across that line.
+    # One viewer's subjective reputation for other users. Nothing here needs to
+    # agree with another client. BigDecimal is used because the Blocked line is
+    # `effective > 0`, and float values that should cancel to zero land on
+    # +/-1e-17 and flip people across it.
     class Engine
       ZERO = BigDecimal("0")
 
@@ -33,26 +30,46 @@ module ReputableChat
       end
 
       # Effective reputation of `target` from `viewer`'s point of view.
-      def effective(viewer:, target:)
-        return ZERO if viewer == target
+      #
+      # `depths` lets a caller supply a walk taken earlier. A Session passes
+      # the one it took at login so that later changes to other people's
+      # configs stay invisible until the next login.
+      def effective(viewer:, target:, depths: nil)
+        breakdown(viewer: viewer, target: target, depths: depths).fetch(:effective)
+      end
 
-        depths = reachable_depths(viewer)
+      # The same sum, itemised: which hop, who rated, what each contributed.
+      # `effective` is defined in terms of this so the number the UI explains
+      # cannot drift from the number it acts on.
+      def breakdown(viewer:, target:, depths: nil)
+        return { effective: ZERO, levels: [] } if viewer == target
+
+        depths ||= reachable_depths(viewer)
+        levels = []
         total  = ZERO
 
         (0..ladder.max_hops).each do |depth|
-          values = ratings_at(depths, depth, target)
-          next if values.empty?
+          raters = raters_at(depths, depth, target)
+          next if raters.empty?
 
-          mean = values.sum(ZERO) / BigDecimal(values.size)
-          total += ladder.weight(depth) * mean
+          mean         = raters.sum(ZERO) { |r| r.fetch(:rating) } / BigDecimal(raters.size)
+          weight       = ladder.weight(depth)
+          contribution = weight * mean
+          total       += contribution
+
+          levels << { hops: depth, weight: weight, raters: raters,
+                      mean: mean, contribution: contribution }
         end
 
-        total.round(@scale)
+        { effective: total.round(@scale), levels: levels }
       end
 
       # Which of the three session lists this user belongs on.
-      def bucket(viewer:, target:)
-        classify(effective(viewer: viewer, target: target), rated: rated?(viewer, target))
+      def bucket(viewer:, target:, depths: nil)
+        depths ||= reachable_depths(viewer)
+
+        classify(effective(viewer: viewer, target: target, depths: depths),
+                 rated: rated?(target, depths))
       end
 
       # :trusted | :tolerated | :blocked
@@ -107,21 +124,20 @@ module ReputableChat
 
       private
 
-      def rated?(viewer, target)
-        reachable_depths(viewer).any? do |rater, _|
-          rater != target && store.rating(rater, target)
-        end
+      def rated?(target, depths)
+        depths.any? { |rater, _| rater != target && store.rating(rater, target) }
       end
 
-      # Mean over the people who actually rated the target at this depth, not
-      # over everyone at this depth with non-raters counted as zero.
-      def ratings_at(depths, depth, target)
+      # The people who actually rated the target at this depth. The mean is
+      # taken over these, not over everyone at this depth with non-raters
+      # counted as zero.
+      def raters_at(depths, depth, target)
         depths.filter_map do |rater, rater_depth|
           next unless rater_depth == depth
           next if rater == target
 
           rating = store.rating(rater, target)
-          rating && value_of(rating)
+          rating && { pubkey: rater, rating: value_of(rating), reported: rating.reported }
         end
       end
 

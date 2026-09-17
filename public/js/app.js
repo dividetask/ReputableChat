@@ -1,37 +1,60 @@
-// UI wiring. The interesting parts live in identity.js (keys and signing) and
-// reputation.js (who is visible); this file only moves data between them.
+// UI wiring. The interesting parts live in identity.js (keys and signing),
+// reputation.js (scoring) and session.js (buckets); this file moves data
+// between them.
 
 import * as seed from "./seed.js";
 import * as identity from "./identity.js";
 import { Reputation, Graph, toNumber } from "./reputation.js";
+import { Session } from "./session.js";
 
 const ROOM = "general";
+const VOTED_KEY = "reputablechat.voted";
 const $ = (id) => document.getElementById(id);
 
-const state = { config: null, me: null, reputation: null, graph: new Graph(), seq: 0 };
+const state = {
+  config: null, emotes: null, me: null, profile: null, version: 0,
+  ratings: {}, graph: new Graph(), reputation: null, session: null,
+  seq: 0, voted: new Set(), viewing: null,
+};
 
 async function api(path, options = {}) {
-  const response = await fetch(path, {
-    credentials: "same-origin",
-    headers: options.body ? { "Content-Type": "application/json" } : {},
-    ...options,
-  });
+  const response = await fetch(path, { credentials: "same-origin", ...options });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error || `request failed (${response.status})`);
   return data;
 }
 
-const post = (path, body) => api(path, { method: "POST", body: JSON.stringify(body) });
+const send = (method, path, body) =>
+  api(path, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+
+const post = (path, body) => send("POST", path, body);
 
 function status(el, message, kind = "") {
   el.textContent = message;
   el.className = `status ${kind}`;
 }
 
-// People are identified by key, never by name -- names are not unique, so a
-// visible fingerprint is the only thing standing between a user and a
-// convincing impersonator.
+// People are identified by key, never by name — names are not unique, so the
+// fingerprint is all that stands between a user and a convincing impersonator.
 const fingerprint = (pubkey) => pubkey.slice(0, 8);
+
+// Per-viewer convenience only, so localStorage is the right home. Wrapped
+// because it throws in private windows and with site data blocked.
+function loadVoted() {
+  try {
+    return new Set(JSON.parse(localStorage.getItem(VOTED_KEY) || "[]"));
+  } catch {
+    return new Set();
+  }
+}
+
+function saveVoted() {
+  try {
+    localStorage.setItem(VOTED_KEY, JSON.stringify([...state.voted]));
+  } catch {
+    /* nothing to do: double-vote protection degrades, nothing breaks */
+  }
+}
 
 // --- seed entry --------------------------------------------------------
 
@@ -43,26 +66,22 @@ async function refreshSeedField() {
   $("unlock").disabled = reason !== null;
   status($("seed-status"), reason || `${words.length} words · looks good`, reason ? "" : "ok");
 
-  // Type-ahead on the word being typed. BIP39 guarantees four letters is
-  // enough to identify a word, so this removes spelling as a failure mode.
-  const partial = phrase.trimEnd() === phrase ? words[words.length - 1] : "";
+  const partial = phrase.endsWith(" ") ? "" : words[words.length - 1];
   const box = $("suggestions");
   box.replaceChildren();
+  if (!partial || partial.length < 2) return;
 
-  if (partial && partial.length >= 2 && !phrase.endsWith(" ")) {
-    for (const word of await seed.suggest(partial, 6)) {
-      if (word === partial) continue;
-      const button = document.createElement("button");
-      button.type = "button";
-      button.textContent = word;
-      button.addEventListener("click", () => {
-        const kept = words.slice(0, -1);
-        $("seed").value = `${[...kept, word].join(" ")} `;
-        $("seed").focus();
-        refreshSeedField();
-      });
-      box.append(button);
-    }
+  for (const word of await seed.suggest(partial, 6)) {
+    if (word === partial) continue;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = word;
+    button.addEventListener("click", () => {
+      $("seed").value = `${[...words.slice(0, -1), word].join(" ")} `;
+      $("seed").focus();
+      refreshSeedField();
+    });
+    box.append(button);
   }
 }
 
@@ -74,7 +93,7 @@ async function unlock() {
 
   try {
     const derived = await identity.deriveFromSeed($("seed").value, state.config.seed.kdf);
-    $("seed").value = ""; // the seed has done its job; do not keep it around
+    $("seed").value = ""; // the seed has done its job
     await signIn(derived);
   } catch (error) {
     status($("seed-status"), error.message, "error");
@@ -88,11 +107,12 @@ async function signIn(derived) {
   const payload = identity.loginPayload({
     pubkey: derived.pubkey, nonce, origin: window.location.origin, ts,
   });
-  const signature = await identity.sign(derived, payload);
 
-  const session = await post("/api/session", { pubkey: derived.pubkey, nonce, ts, signature });
+  const session = await post("/api/session", {
+    pubkey: derived.pubkey, nonce, ts, signature: await identity.sign(derived, payload),
+  });
 
-  state.me = { ...derived, username: session.username };
+  state.me = derived;
   await identity.remember({ privateKey: derived.privateKey, pubkey: derived.pubkey });
 
   if (session.registered) return enterChat();
@@ -105,23 +125,117 @@ async function createAccount() {
   const username = $("username").value.trim();
   if (!username) return status($("seed-status"), "pick a display name", "error");
 
-  const result = await post("/api/register", { username });
-  state.me.username = result.username;
+  await post("/api/register", {});
+  state.profile = { username, message: "", icon: null };
+  await publishConfig();
   enterChat();
 }
 
 async function logOff() {
   await identity.forget();
-  state.me = null;
   location.reload();
+}
+
+// --- config ------------------------------------------------------------
+
+// Every change to friends, reports or emote tallies is re-signed and
+// re-uploaded. The version must climb or the server rejects it as a rollback.
+async function publishConfig() {
+  state.version += 1;
+  const ts = Math.floor(Date.now() / 1000);
+  const payload = identity.configPayload({
+    pubkey: state.me.pubkey, version: state.version,
+    profile: state.profile, ratings: state.ratings, ts,
+  });
+
+  await send("PUT", "/api/config", {
+    version: state.version, profile: state.profile, ratings: state.ratings,
+    ts, signature: await identity.sign(state.me, payload),
+  });
+}
+
+function parseConfig(blob) {
+  if (!blob) return null;
+  try {
+    return JSON.parse(blob.payload);
+  } catch {
+    return null;
+  }
+}
+
+async function loadOwnConfig() {
+  const { config } = await api(`/api/config/${state.me.pubkey}`);
+  const payload = parseConfig(config);
+
+  state.version = payload ? payload.version : 0;
+  state.ratings = payload?.ratings || {};
+  state.profile = payload?.profile || { username: "anonymous", message: "", icon: null };
+}
+
+// Walks outward from the viewer, fetching a whole hop per request. Bounded by
+// max_hops and max_configs together: a positive-only graph still branches, so
+// hop count alone does not bound the fetch.
+async function loadNetwork() {
+  const { max_hops: maxHops, max_configs: maxConfigs } = state.config.ladder;
+  state.graph = new Graph();
+  state.graph.add(state.me.pubkey, state.ratings);
+  state.profiles = new Map([[state.me.pubkey, state.profile]]);
+
+  let frontier = [state.me.pubkey];
+  const seen = new Set(frontier);
+
+  for (let hop = 0; hop < maxHops && seen.size < maxConfigs; hop++) {
+    const wanted = [];
+
+    for (const rater of frontier) {
+      for (const [subject, rating] of Object.entries(state.graph.ratingsBy(rater))) {
+        if (seen.has(subject) || seen.size + wanted.length >= maxConfigs) continue;
+        if (state.reputation.ratingValue(rating) <= state.reputation.minRating) continue;
+        wanted.push(subject);
+      }
+    }
+    if (!wanted.length) break;
+
+    await fetchConfigs(wanted);
+    wanted.forEach((pubkey) => seen.add(pubkey));
+    frontier = wanted;
+  }
+}
+
+async function fetchConfigs(pubkeys) {
+  const fresh = pubkeys.filter((key) => key && !state.graph.has(key));
+  if (!fresh.length) return;
+
+  // MVP: signatures are taken on trust (session.verify_signatures). The
+  // verification path is written and tested server-side; until it runs here, a
+  // malicious server can fabricate any rating it likes.
+  const { configs } = await post("/api/config/batch", { pubkeys: fresh });
+
+  for (const blob of configs) {
+    const payload = parseConfig(blob);
+    if (!payload || payload.pubkey !== blob.pubkey) continue;
+
+    state.graph.add(blob.pubkey, payload.ratings || {});
+    state.profiles.set(blob.pubkey, payload.profile || null);
+  }
+
+  for (const key of fresh) if (!state.graph.has(key)) state.graph.add(key, {});
 }
 
 // --- chat --------------------------------------------------------------
 
-function enterChat() {
+async function enterChat() {
   $("login").classList.add("hidden");
   $("chat").classList.remove("hidden");
-  $("me").textContent = `${state.me.username || "you"} · ${fingerprint(state.me.pubkey)}`;
+  state.voted = loadVoted();
+
+  await loadOwnConfig();
+  await loadNetwork();
+  state.session = new Session(
+    state.reputation, state.me.pubkey, state.graph, state.config.session.report_blocks,
+  );
+
+  $("me").textContent = `${state.profile.username} · ${fingerprint(state.me.pubkey)}`;
   refreshMessages();
   setInterval(refreshMessages, 4000);
 }
@@ -134,68 +248,9 @@ async function refreshMessages() {
     return status($("chat-status"), error.message, "error");
   }
 
-  // Every message is verified against its author's key before it is shown.
-  // The server is not trusted to have done it.
-  const verified = [];
-  for (const message of messages) {
-    if (await verifyMessage(message)) verified.push(message);
-  }
-
-  const authors = [...new Set(verified.map((m) => m.author))];
-  await loadConfigs([...authors, state.me.pubkey]);
-
-  render(verified);
-  state.seq = Math.max(0, ...verified.filter((m) => m.author === state.me.pubkey).map((m) => m.seq));
-}
-
-async function verifyMessage(message) {
-  try {
-    const key = await crypto.subtle.importKey(
-      "jwk", { kty: "OKP", crv: "Ed25519", x: message.author }, "Ed25519", false, ["verify"],
-    );
-    return crypto.subtle.verify(
-      "Ed25519", key,
-      identity.fromB64url(message.signature),
-      new TextEncoder().encode(message.payload),
-    );
-  } catch {
-    return false;
-  }
-}
-
-// Fetches signed configs in one round trip and verifies each before it is
-// allowed to influence anyone's reputation. A seven-deep walk done one fetch
-// at a time would be hundreds of sequential requests.
-async function loadConfigs(pubkeys) {
-  const wanted = pubkeys.filter((key) => key && !state.graph.has(key));
-  if (!wanted.length) return;
-
-  const { configs } = await post("/api/config/batch", { pubkeys: wanted });
-
-  for (const blob of configs) {
-    if (!blob) continue;
-
-    try {
-      const key = await crypto.subtle.importKey(
-        "jwk", { kty: "OKP", crv: "Ed25519", x: blob.pubkey }, "Ed25519", false, ["verify"],
-      );
-      const ok = await crypto.subtle.verify(
-        "Ed25519", key,
-        identity.fromB64url(blob.signature),
-        new TextEncoder().encode(blob.payload),
-      );
-      if (!ok) continue;
-
-      const payload = JSON.parse(blob.payload);
-      if (payload.purpose !== identity.PURPOSE.CONFIG || payload.pubkey !== blob.pubkey) continue;
-
-      state.graph.add(blob.pubkey, payload.ratings);
-    } catch {
-      // A config that will not parse or verify simply does not join the graph.
-    }
-  }
-
-  for (const key of wanted) if (!state.graph.has(key)) state.graph.add(key, {});
+  await fetchConfigs([...new Set(messages.map((m) => m.author))]);
+  render(messages);
+  state.seq = Math.max(0, ...messages.filter((m) => m.author === state.me.pubkey).map((m) => m.seq));
 }
 
 function render(messages) {
@@ -203,20 +258,24 @@ function render(messages) {
   list.replaceChildren();
 
   for (const message of messages) {
-    const bucket = message.author === state.me.pubkey
-      ? "trusted"
-      : state.reputation.bucket(state.me.pubkey, message.author, state.graph);
-
-    // Blocked means blocked: unrated and net-negative people do not render.
+    const mine = message.author === state.me.pubkey;
+    const bucket = mine ? "trusted" : state.session.bucketOf(message.author);
     if (bucket === "blocked") continue;
 
-    const payload = JSON.parse(message.payload);
+    let payload;
+    try {
+      payload = JSON.parse(message.payload);
+    } catch {
+      continue;
+    }
+
     const row = document.createElement("div");
     row.className = `msg ${bucket}`;
 
     const who = document.createElement("span");
     who.className = "who";
-    who.textContent = message.author === state.me.pubkey ? state.me.username || "you" : "someone";
+    who.textContent = displayName(message.author);
+    who.addEventListener("click", () => showProfile(message.author));
 
     const fp = document.createElement("span");
     fp.className = "fp";
@@ -226,13 +285,62 @@ function render(messages) {
     body.textContent = payload.body; // textContent, never innerHTML
 
     row.append(who, fp, body);
+    if (!mine) row.append(emoteBar(message));
     list.append(row);
   }
 
   list.scrollTop = list.scrollHeight;
 }
 
-async function send(event) {
+function displayName(pubkey) {
+  return state.profiles?.get(pubkey)?.username || "someone";
+}
+
+function emoteBar(message) {
+  const bar = document.createElement("div");
+  bar.className = "emotes";
+  const choices = [...state.emotes.positive.slice(0, 6), ...state.emotes.negative];
+
+  for (const emote of choices) {
+    const polarity = state.emotes.negative.includes(emote) ? -1 : 1;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = emote;
+    if (state.voted.has(message.signature)) button.classList.add("voted");
+    button.addEventListener("click", () => emote_(message, polarity));
+    bar.append(button);
+  }
+
+  const report = document.createElement("button");
+  report.type = "button";
+  report.textContent = "report";
+  report.addEventListener("click", () => reportUser(message.author));
+  bar.append(report);
+
+  return bar;
+}
+
+// One vote per comment. The signature is its id.
+async function emote_(message, polarity) {
+  if (state.voted.has(message.signature)) return;
+
+  const current = state.ratings[message.author] || { friend: false, reported: false, net_votes: 0 };
+  state.ratings[message.author] = { ...current, net_votes: current.net_votes + polarity };
+
+  state.voted.add(message.signature);
+  saveVoted();
+
+  try {
+    // Buckets do not move for emotes until the next login, by design; the
+    // refresh only repaints the comment as voted.
+    await publishConfig();
+    refreshMessages();
+  } catch (error) {
+    status($("chat-status"), error.message, "error");
+  }
+}
+
+async function compose(event) {
   event.preventDefault();
   const body = $("body").value.trim();
   if (!body) return;
@@ -255,10 +363,133 @@ async function send(event) {
   }
 }
 
+// --- profiles ----------------------------------------------------------
+
+function showPanel(id) {
+  for (const panel of ["login", "chat", "profile"]) $(panel).classList.toggle("hidden", panel !== id);
+}
+
+function showProfile(pubkey) {
+  state.viewing = pubkey;
+  const own = pubkey === state.me.pubkey;
+  const profile = state.profiles?.get(pubkey) || { username: "someone", message: "", icon: null };
+
+  $("profile-title").textContent = own ? "Your profile" : "Profile";
+  $("profile-edit").classList.toggle("hidden", !own);
+  $("profile-view").classList.toggle("hidden", own);
+  $("breakdown").replaceChildren();
+  status($("profile-status"), "");
+
+  if (own) {
+    $("my-username").value = state.profile.username;
+    $("my-message").value = state.profile.message || "";
+  } else {
+    $("profile-icon").src = profile.icon ? `/images/${profile.icon}` : "";
+    $("profile-name").textContent = profile.username || "someone";
+    $("profile-fp").textContent = fingerprint(pubkey);
+    $("profile-message").textContent = profile.message || "";
+    $("profile-bucket").textContent = `Currently ${state.session.bucketOf(pubkey)} this session.`;
+  }
+
+  showPanel("profile");
+}
+
+async function friendUser() {
+  const pubkey = state.viewing;
+  const current = state.ratings[pubkey] || { friend: false, reported: false, net_votes: 0 };
+  state.ratings[pubkey] = { ...current, friend: true, reported: false };
+
+  await publishConfig();
+  status($("profile-status"), "Friended. This takes full effect at your next login.", "ok");
+}
+
+async function reportUser(pubkey) {
+  const target = pubkey || state.viewing;
+  const current = state.ratings[target] || { friend: false, reported: false, net_votes: 0 };
+  state.ratings[target] = { ...current, friend: false, reported: true };
+
+  await publishConfig();
+  // Your own report blocks at once — waiting a whole session defeats the point.
+  state.session.report(target, state.me.pubkey);
+  refreshMessages();
+
+  if (state.viewing === target) status($("profile-status"), "Reported and blocked.", "ok");
+}
+
+// Re-derives the score and shows which hop and which person produced each
+// part of it. The session discards scores by design, so this recomputes.
+function recalculate() {
+  const result = state.session.explain(state.viewing);
+  const box = $("breakdown");
+  box.replaceChildren();
+
+  const total = document.createElement("p");
+  total.textContent = `Effective reputation ${toNumber(result.effective).toFixed(6)} — ${result.bucket}`;
+  box.append(total);
+
+  if (!result.levels.length) {
+    const none = document.createElement("p");
+    none.textContent = "Nobody in your network has rated them.";
+    return box.append(none);
+  }
+
+  const table = document.createElement("table");
+  const head = document.createElement("tr");
+  for (const label of ["hops", "weight", "raters", "mean", "contribution"]) {
+    const th = document.createElement("th");
+    th.textContent = label;
+    head.append(th);
+  }
+  table.append(head);
+
+  for (const level of result.levels) {
+    const row = document.createElement("tr");
+    const cells = [
+      String(level.hops),
+      toNumber(level.weight).toFixed(6),
+      level.raters.map((r) => `${displayName(r.pubkey)}(${fingerprint(r.pubkey)})${r.reported ? " reported" : ""}`).join(", "),
+      toNumber(level.mean).toFixed(4),
+      toNumber(level.contribution).toFixed(8),
+    ];
+    for (const value of cells) {
+      const td = document.createElement("td");
+      td.textContent = value;
+      row.append(td);
+    }
+    table.append(row);
+  }
+
+  box.append(table);
+}
+
+async function saveProfile() {
+  const username = $("my-username").value.trim();
+  if (!username) return status($("profile-status"), "a display name is required", "error");
+
+  state.profile = {
+    username, message: $("my-message").value.trim(), icon: state.profile.icon,
+  };
+
+  const file = $("my-icon").files[0];
+  if (file) {
+    try {
+      const { icon } = await api("/api/image", { method: "POST", body: file });
+      state.profile.icon = icon;
+    } catch (error) {
+      return status($("profile-status"), error.message, "error");
+    }
+  }
+
+  await publishConfig();
+  state.profiles.set(state.me.pubkey, state.profile);
+  $("me").textContent = `${state.profile.username} · ${fingerprint(state.me.pubkey)}`;
+  status($("profile-status"), "Saved.", "ok");
+}
+
 // --- boot ---------------------------------------------------------------
 
 async function boot() {
-  state.config = await api("/api/defaults");
+  [state.config, state.emotes] = await Promise.all([api("/api/defaults"), api("/api/emotes")]);
   state.reputation = new Reputation(state.config);
   await seed.loadWordlist();
 
@@ -266,7 +497,13 @@ async function boot() {
   $("unlock").addEventListener("click", unlock);
   $("create").addEventListener("click", () => createAccount().catch((e) => status($("seed-status"), e.message, "error")));
   $("logout").addEventListener("click", logOff);
-  $("composer").addEventListener("submit", send);
+  $("composer").addEventListener("submit", compose);
+  $("my-profile").addEventListener("click", () => showProfile(state.me.pubkey));
+  $("profile-close").addEventListener("click", () => showPanel("chat"));
+  $("profile-friend").addEventListener("click", () => friendUser().catch((e) => status($("profile-status"), e.message, "error")));
+  $("profile-report").addEventListener("click", () => reportUser().catch((e) => status($("profile-status"), e.message, "error")));
+  $("profile-recalc").addEventListener("click", recalculate);
+  $("profile-save").addEventListener("click", () => saveProfile().catch((e) => status($("profile-status"), e.message, "error")));
 
   $("generate").addEventListener("click", async () => {
     const phrase = await seed.generate(state.config.seed.min_words);
@@ -288,5 +525,3 @@ async function boot() {
 }
 
 boot().catch((error) => status($("seed-status"), error.message, "error"));
-
-export { toNumber };

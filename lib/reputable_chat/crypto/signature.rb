@@ -6,11 +6,8 @@ require_relative "canonical"
 
 module ReputableChat
   module Crypto
-    # Ed25519 verification.
-    #
-    # The server only ever verifies. It never holds, derives, or sees a private
-    # key -- those exist solely in the browser, derived from a seed that is
-    # never transmitted.
+    # Ed25519 verification. The server only verifies; private keys exist solely in
+    # the browser.
     module Signature
       PUBKEY_BYTES    = 32
       SIGNATURE_BYTES = 64

@@ -1,15 +1,10 @@
 // Identity: seed -> key -> signatures.
 //
-// The seed is turned into a key here and then dropped; it is never stored and
-// never sent anywhere. The derived private key is a NON-EXTRACTABLE WebCrypto
-// key, which is the whole reason this uses WebCrypto rather than a pure-JS
-// Ed25519 library: a non-extractable key can be used to sign but its bytes
-// cannot be read back out, by this page or by anything injected into it.
-//
-// Two layers keep it away from other sites. The origin boundary means no other
-// site can reach this origin's IndexedDB at all. The strict CSP in app.rb is
-// what keeps injected script inside this origin from using the key while a
-// session is live.
+// The seed is turned into a key and dropped; it is never stored or sent. The
+// private key is a NON-EXTRACTABLE WebCrypto key -- the reason for using
+// WebCrypto over a JS Ed25519 library: it can sign, but its bytes cannot be
+// read back out. Origin isolation keeps other sites away from it; the CSP in
+// app.rb keeps injected script from using it.
 
 import * as canonical from "./canonical.js";
 import * as seed from "./seed.js";
@@ -154,6 +149,6 @@ export function messagePayload({ author, room, seq, prev, body, ts }) {
   return { purpose: PURPOSE.MESSAGE, author, room, seq, prev, ts, body };
 }
 
-export function configPayload({ pubkey, version, ratings, ts }) {
-  return { purpose: PURPOSE.CONFIG, pubkey, version, ratings, ts };
+export function configPayload({ pubkey, version, profile, ratings, ts }) {
+  return { purpose: PURPOSE.CONFIG, pubkey, version, profile, ratings, ts };
 }

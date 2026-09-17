@@ -1,7 +1,5 @@
-// BIP39 wordlist encoding and checksum.
-//
-// Mirrors lib/reputable_chat/crypto/seed.rb. The seed never leaves this file's
-// process -- it is turned into a key in identity.js and then discarded.
+// BIP39 wordlist encoding and checksum. Mirrors
+// lib/reputable_chat/crypto/seed.rb.
 
 const BITS_PER_WORD = 11;
 const CHECKSUM_BITS = 8;

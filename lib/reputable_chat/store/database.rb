@@ -6,13 +6,9 @@ require "securerandom"
 
 module ReputableChat
   module Store
-    # Persistence.
-    #
-    # The server stores signed blobs and reads as little of them as it can. For
-    # a config that is the pubkey and the version -- enough to verify the
-    # signature and reject a rollback -- and nothing else. Ratings are never
-    # parsed server-side; clients fetch the blob and do the reputation maths
-    # themselves.
+    # Persistence. Signed blobs in, signed blobs out. Of a config the server reads
+    # only the pubkey and version -- enough to verify and reject a rollback.
+    # Ratings are never parsed server-side.
     class Database
       NONCE_TTL       = 300   # seconds a login challenge stays usable
       CLOCK_SKEW      = 120   # tolerated drift on a signed timestamp
@@ -27,9 +23,10 @@ module ReputableChat
       end
 
       def migrate!
+        # Display name, bio and icon live in the signed config, not here, so
+        # the server cannot alter them and the two cannot drift.
         @db.create_table?(:users) do
           String   :pubkey, primary_key: true
-          String   :username, null: false
           Integer  :created_at, null: false
         end
 
@@ -89,8 +86,8 @@ module ReputableChat
       def user(pubkey) = @db[:users].where(pubkey: pubkey).first
       def registered?(pubkey) = !user(pubkey).nil?
 
-      def register(pubkey, username)
-        @db[:users].insert(pubkey: pubkey, username: username, created_at: now)
+      def register(pubkey)
+        @db[:users].insert(pubkey: pubkey, created_at: now)
       end
 
       # --- configs ---------------------------------------------------------

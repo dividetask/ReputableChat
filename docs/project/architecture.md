@@ -33,8 +33,13 @@ Split by **who needs to read it**.
   "pubkey":  "...",
   "version": 7,
   "ts":      1710000000,
+  "profile": { "username": "alice", "message": "hi", "icon": "<sha256>.png" },
   "ratings": { "<pubkey>": { "friend": true, "reported": false, "net_votes": 12 } } }
 ```
+
+The profile is signed alongside the ratings, so the server cannot alter a
+display name, bio or icon. Names are not unique — the key is the identity, and
+the UI shows a key fingerprint beside every name.
 
 Actions, not scores — see the end of [reputation.md](reputation.md) for why.
 
@@ -49,6 +54,18 @@ without invalidating every signature in the network.
 
 Known limit: a public config accumulates an entry per person ever rated, and
 grows without bound. Fine for the MVP, needs chunking later.
+
+## Images
+
+Content-addressed: a file's name is the SHA-256 of its bytes plus an extension
+**sniffed from those bytes**, never from a claimed content type or filename.
+The server derives the name rather than trusting one, so a reader can re-hash
+what they fetched to confirm it is what the author signed. Names are 64 hex
+characters plus a known extension, which is also the only path check the
+serving route needs.
+
+PNG, JPEG, GIF and WebP only, 256 KB. **SVG is deliberately excluded** — it is a
+script-bearing document, not an image.
 
 ## Signed payloads
 
@@ -108,8 +125,6 @@ public/js/
 
 - Client-side config signature verification (`session.verify_signatures`)
 - WebSocket delivery — messages currently poll every 4s
-- Emote UI; `config/emotes.yml` is defined and served but nothing places them
-- Friend/report UI; ratings are computed and verified but not yet editable
 - Private config contents beyond the placeholder
 - Federation between servers. The payload domain separation is already in place
   for it, but nothing else is.

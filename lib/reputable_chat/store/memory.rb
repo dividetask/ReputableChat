@@ -28,6 +28,12 @@ module ReputableChat
         self
       end
 
+      # Store an existing Rating as-is. Used when snapshotting a graph.
+      def put(rater, subject, rating)
+        @ratings[rater][subject] = rating
+        self
+      end
+
       def ratings_by(pubkey) = @ratings[pubkey]
       def rating(pubkey, subject) = @ratings[pubkey][subject]
     end

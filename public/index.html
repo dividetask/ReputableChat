@@ -44,7 +44,10 @@
   <section id="chat" class="panel hidden">
     <header class="chat-header">
       <span id="me"></span>
-      <button id="logout" class="secondary">Log off</button>
+      <span>
+        <button id="my-profile" class="secondary">My profile</button>
+        <button id="logout" class="secondary">Log off</button>
+      </span>
     </header>
     <div id="messages" class="messages"></div>
     <form id="composer">
@@ -52,6 +55,39 @@
       <button type="submit">Send</button>
     </form>
     <p id="chat-status" class="status"></p>
+  </section>
+
+  <section id="profile" class="panel hidden">
+    <header class="chat-header">
+      <span id="profile-title"></span>
+      <button id="profile-close" class="secondary">Back to chat</button>
+    </header>
+
+    <div id="profile-view">
+      <img id="profile-icon" alt="" width="72" height="72">
+      <p id="profile-name" class="who"></p>
+      <p id="profile-fp" class="fp"></p>
+      <p id="profile-message"></p>
+      <p id="profile-bucket" class="hint"></p>
+      <div class="row">
+        <button id="profile-friend">Add as friend</button>
+        <button id="profile-report" class="secondary">Report</button>
+        <button id="profile-recalc" class="secondary">Recalculate</button>
+      </div>
+      <div id="breakdown"></div>
+    </div>
+
+    <div id="profile-edit" class="hidden">
+      <label for="my-username">Display name</label>
+      <input id="my-username" type="text" maxlength="64" autocomplete="off">
+      <label for="my-message">About you</label>
+      <input id="my-message" type="text" maxlength="280" autocomplete="off">
+      <label for="my-icon">Icon</label>
+      <input id="my-icon" type="file" accept="image/png,image/jpeg,image/gif,image/webp">
+      <div class="row"><button id="profile-save">Save profile</button></div>
+    </div>
+
+    <p id="profile-status" class="status"></p>
   </section>
 </main>
 

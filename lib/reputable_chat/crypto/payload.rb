@@ -2,14 +2,9 @@
 
 module ReputableChat
   module Crypto
-    # The shapes that get signed, and their domain separation strings.
-    #
-    # Every signed payload names its own purpose and the origin it was made
-    # for. Without those, a signature harvested by one server could be replayed
-    # against another to authenticate as that user, or a message lifted from
-    # one room could be replanted in a different one. Both cost nothing now and
-    # are impossible to add later without invalidating every signature already
-    # in the network.
+    # The signed payload shapes. Each names its purpose and the origin or room it
+    # was made for, so a harvested signature cannot be replayed against another
+    # server or replanted in another channel.
     module Payload
       LOGIN   = "reputablechat:login:v1"
       MESSAGE = "reputablechat:message:v1"
@@ -46,11 +41,15 @@ module ReputableChat
       # `version` is a monotonic counter. Without it the server could serve an
       # old copy of someone's config to hide a report from you and the
       # signature would still verify perfectly.
-      def config(pubkey:, version:, ratings:, issued_at:)
+      # `profile` is signed alongside the ratings so a display name, bio and
+      # icon cannot be altered by the server. The icon is a content-addressed
+      # filename, so what is signed is really the image itself.
+      def config(pubkey:, version:, profile:, ratings:, issued_at:)
         {
           "purpose" => CONFIG,
           "pubkey"  => pubkey,
           "version" => version.to_i,
+          "profile" => profile,
           "ratings" => ratings,
           "ts"      => issued_at.to_i
         }

@@ -1,16 +1,8 @@
-// Client-side reputation.
+// Client-side reputation. Mirrors lib/reputable_chat/reputation/; the rules and
+// their reasoning are in docs/project/reputation.md.
 //
-// Reputation is subjective -- it is one viewer's view of the network, built
-// from other people's published ratings -- so it is computed here rather than
-// on the server, and two clients are free to differ in the last decimal place.
-//
-// Arithmetic is BigInt fixed-point rather than float. Not for cross-client
-// agreement, but because visibility is decided by `effective > 0`, and in
-// binary floating point values that should cancel to exactly zero land on
-// +/-1e-17 and flip people across that line at random.
-//
-// Mirrors lib/reputable_chat/reputation/. Rules, and why they are these rules,
-// live in docs/project/reputation.md.
+// BigInt fixed-point rather than float: the Blocked line is `effective > 0`,
+// and float values that should cancel to zero land on +/-1e-17 instead.
 
 const SCALE_DIGITS = 18;
 export const SCALE = 10n ** BigInt(SCALE_DIGITS);
@@ -114,31 +106,55 @@ export class Reputation {
     return depths;
   }
 
-  effective(viewer, target, graph) {
-    if (viewer === target) return 0n;
+  // `depths` lets a caller supply a walk taken earlier; a Session passes the
+  // one from login so later changes stay invisible.
+  effective(viewer, target, graph, depths = null) {
+    return this.breakdown(viewer, target, graph, depths).effective;
+  }
 
-    const depths = this.reachableDepths(viewer, graph);
+  // The same sum, itemised: which hop, who rated, what each contributed.
+  // `effective` is defined in terms of this so the number the UI explains
+  // cannot drift from the number it acts on.
+  breakdown(viewer, target, graph, depths = null) {
+    if (viewer === target) return { effective: 0n, levels: [] };
+
+    const walk = depths || this.reachableDepths(viewer, graph);
     const byDepth = new Map();
 
-    for (const [rater, depth] of depths) {
+    for (const [rater, depth] of walk) {
       if (rater === target) continue;
 
-      const value = this.ratingValue(graph.rating(rater, target));
+      const rating = graph.rating(rater, target);
+      const value = this.ratingValue(rating);
       if (value === null) continue;
 
       if (!byDepth.has(depth)) byDepth.set(depth, []);
-      byDepth.get(depth).push(value);
+      byDepth.get(depth).push({ pubkey: rater, rating: value, reported: Boolean(rating.reported) });
     }
 
+    const levels = [];
     let total = 0n;
-    for (const [depth, values] of byDepth) {
+
+    for (const depth of [...byDepth.keys()].sort((a, b) => a - b)) {
+      const raters = byDepth.get(depth);
       // Mean over the people who actually rated the target at this depth, not
       // over everyone at this depth with non-raters counted as zero.
-      const mean = values.reduce((sum, v) => sum + v, 0n) / BigInt(values.length);
-      total += mul(this.weights[depth], mean);
+      const mean = raters.reduce((sum, r) => sum + r.rating, 0n) / BigInt(raters.length);
+      const weight = this.weights[depth];
+      const contribution = mul(weight, mean);
+
+      total += contribution;
+      levels.push({ hops: depth, weight, raters, mean, contribution });
     }
 
-    return total;
+    return { effective: total, levels };
+  }
+
+  rated(target, walk, graph) {
+    for (const [rater] of walk) {
+      if (rater !== target && graph.rating(rater, target)) return true;
+    }
+    return false;
   }
 
   // Blocked at or below zero -- that covers the unrated (who sit at exactly
@@ -153,8 +169,11 @@ export class Reputation {
     return "trusted";
   }
 
-  bucket(viewer, target, graph) {
-    return this.classify(this.effective(viewer, target, graph));
+  bucket(viewer, target, graph, depths = null) {
+    const walk = depths || this.reachableDepths(viewer, graph);
+
+    return this.classify(this.effective(viewer, target, graph, walk),
+                         this.rated(target, walk, graph));
   }
 }
 
@@ -167,6 +186,15 @@ export class Graph {
 
   add(pubkey, ratings) {
     this.configs.set(pubkey, ratings || {});
+  }
+
+  // A fixed copy of what the walk reached. Freezing only the walk is not
+  // enough -- a rating published later by someone already inside it would
+  // still leak through.
+  snapshot(pubkeys) {
+    const frozen = new Graph();
+    for (const pubkey of pubkeys) frozen.add(pubkey, { ...this.ratingsBy(pubkey) });
+    return frozen;
   }
 
   has(pubkey) {

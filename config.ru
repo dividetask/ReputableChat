@@ -7,6 +7,9 @@ require "reputable_chat/app"
 ReputableChat::App.store  = ReputableChat::Store::Database.new(
   ENV.fetch("DATABASE_URL", "sqlite://data/reputablechat.db")
 )
+ReputableChat::App.images = ReputableChat::Store::Images.new(
+  ENV.fetch("IMAGE_ROOT", "data/images")
+)
 ReputableChat::App.origin = ENV.fetch("ORIGIN", "http://localhost:9292")
 
 run ReputableChat::App.freeze.app

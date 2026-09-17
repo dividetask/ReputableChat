@@ -6,6 +6,8 @@ require "ed25519"
 require "reputable_chat/app"
 require "reputable_chat/crypto/signature"
 require "reputable_chat/crypto/payload"
+require "tmpdir"
+require "digest"
 
 class AppSpec < Minitest::Test
   include Rack::Test::Methods
@@ -18,6 +20,7 @@ class AppSpec < Minitest::Test
 
   def setup
     ReputableChat::App.store  = ReputableChat::Store::Database.new("sqlite:/")
+    ReputableChat::App.images = ReputableChat::Store::Images.new(Dir.mktmpdir)
     ReputableChat::App.origin = ORIGIN
     @signing = Ed25519::SigningKey.generate
     @pubkey  = Sig.encode(@signing.verify_key.to_bytes)
@@ -105,18 +108,100 @@ class AppSpec < Minitest::Test
   end
 
   def test_writes_require_a_session
-    post_json "/api/register", { "username" => "nobody" }
+    post_json "/api/register", {}
 
     assert_equal 401, last_response.status
   end
 
+  # --- profile and images ------------------------------------------------
+
+  def test_profile_travels_inside_the_signed_config
+    log_in
+    post_json "/api/register", {}
+    target = Sig.encode(Ed25519::SigningKey.generate.verify_key.to_bytes)
+
+    put "/api/config", JSON.generate(config_body(version: 1, ratings: ratings_for(target))),
+        "CONTENT_TYPE" => "application/json"
+    assert_equal 200, last_response.status
+
+    get "/api/config/#{@pubkey}"
+    payload = JSON.parse(JSON.parse(last_response.body)["config"]["payload"])
+
+    assert_equal "alice", payload.dig("profile", "username")
+    assert Sig.verify(pubkey_b64: @pubkey, signature_b64: JSON.parse(last_response.body)["config"]["signature"],
+                      payload: payload),
+           "the profile must be covered by the signature"
+  end
+
+  def test_rejects_a_profile_that_was_not_signed
+    log_in
+    target = Sig.encode(Ed25519::SigningKey.generate.verify_key.to_bytes)
+    body = config_body(version: 1, ratings: ratings_for(target))
+    body["profile"] = body["profile"].merge("username" => "mallory")
+
+    put "/api/config", JSON.generate(body), "CONTENT_TYPE" => "application/json"
+
+    assert_equal 400, last_response.status, "changing the profile must break the signature"
+  end
+
+  PNG = "\x89PNG\r\n\x1A\n".b + ("x" * 64).b
+
+  def test_image_upload_is_content_addressed
+    log_in
+    post "/api/image", PNG, "CONTENT_TYPE" => "application/octet-stream"
+    assert_equal 200, last_response.status
+
+    icon = JSON.parse(last_response.body)["icon"]
+    assert_equal "#{Digest::SHA256.hexdigest(PNG)}.png", icon,
+                 "the filename must be the hash of the bytes"
+
+    get "/images/#{icon}"
+    assert_equal 200, last_response.status
+    assert_equal "image/png", last_response.headers["Content-Type"]
+    assert_equal PNG, last_response.body.b
+  end
+
+  # SVG is a script-bearing document. It must never be storable as an icon.
+  def test_rejects_svg_and_other_unsniffable_uploads
+    log_in
+
+    post "/api/image", "<svg onload=alert(1)></svg>", "CONTENT_TYPE" => "image/svg+xml"
+    assert_equal 400, last_response.status
+
+    post "/api/image", "not an image at all", "CONTENT_TYPE" => "image/png"
+    assert_equal 400, last_response.status, "a claimed content type must not be trusted"
+  end
+
+  def test_rejects_oversized_images
+    log_in
+    huge = "\x89PNG\r\n\x1A\n".b + ("x" * 300_000).b
+
+    post "/api/image", huge, "CONTENT_TYPE" => "application/octet-stream"
+
+    assert_equal 413, last_response.status
+  end
+
+  def test_image_names_cannot_traverse_paths
+    log_in
+
+    get "/images/..%2F..%2Fconfig%2Freputation.yml"
+    refute_equal 200, last_response.status
+
+    get "/images/#{'a' * 64}.svg"
+    assert_equal 404, last_response.status
+  end
+
   # --- config storage ---------------------------------------------------
 
-  def config_body(version:, ratings:, key: nil)
+  PROFILE = { "username" => "alice", "message" => "hello", "icon" => nil }.freeze
+
+  def config_body(version:, ratings:, key: nil, profile: PROFILE)
     ts = Time.now.to_i
-    payload = Payload.config(pubkey: @pubkey, version: version, ratings: ratings, issued_at: ts)
+    payload = Payload.config(pubkey: @pubkey, version: version, profile: profile,
+                             ratings: ratings, issued_at: ts)
     signature = key ? Sig.encode(key.sign(Canon.bytes(payload))) : sign(payload)
-    { "version" => version, "ratings" => ratings, "ts" => ts, "signature" => signature }
+    { "version" => version, "profile" => profile, "ratings" => ratings,
+      "ts" => ts, "signature" => signature }
   end
 
   def ratings_for(target, friend: true, reported: false, net_votes: 0)
@@ -257,6 +342,7 @@ class FrozenAppSpec < Minitest::Test
   # accessors.
   FROZEN = Class.new(ReputableChat::App) do
     self.store  = ReputableChat::Store::Database.new("sqlite:/")
+    self.images = ReputableChat::Store::Images.new(Dir.mktmpdir)
     self.origin = "http://example.test"
   end.freeze
 

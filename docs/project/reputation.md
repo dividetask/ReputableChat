@@ -122,6 +122,36 @@ hide threshold, so reporting them made them **more** visible. The further away
 the reporter, the stronger the effect. Sign-based visibility removes the whole
 class of problem.
 
+## Sessions
+
+Scores are computed once at login, everyone is sorted into a bucket, and the
+numbers are discarded. For the rest of the session the buckets are what matter.
+
+The session holds a **snapshot** of the graph, not a live view. Freezing only
+the walk is not enough: a rating published later by someone already inside it
+would still leak through. So further likes and dislikes — yours or anyone
+else's — move nobody until the next login.
+
+Reports are the exception, since waiting a whole session to act on one defeats
+the point. `session.report_blocks` maps hops to how many reporters at that
+distance are needed:
+
+| reporter is | reporters needed |
+|---|---|
+| you | 1 |
+| 1 hop away | 1 |
+| 2 hops away | 2 |
+| 3+ hops | no immediate effect |
+
+Because the score is gone by then, this is a flat count rather than a weighing.
+That makes it **stricter than the login-time maths**, so someone blocked this
+way may reappear at the next login once the report is averaged against
+everything else. That is expected, not a bug.
+
+`Session#explain` re-derives the score and itemises it — which hop, who rated,
+what each contributed. It is defined in terms of the same `breakdown` that
+produces the score, so what the UI explains cannot drift from what it acts on.
+
 ## The coupling — read before retuning anything
 
 The rule "a report from three steps out hides someone you have liked once, but

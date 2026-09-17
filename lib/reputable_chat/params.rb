@@ -1,12 +1,9 @@
 # frozen_string_literal: true
 
 module ReputableChat
-  # Input validation.
-  #
-  # Everything arriving from a client is checked for type, length and shape
-  # before it reaches the crypto layer, the database or the signed payload
-  # builders. Each helper returns nil on anything it does not like rather than
-  # raising, so a handler can reject the whole request in one place.
+  # Input validation. Everything from a client is checked for type, length and
+  # shape before it reaches crypto, the database, or a payload builder. Helpers
+  # return nil rather than raising, so a handler can reject in one place.
   module Params
     # Control characters have no business in a username, room name or message
     # body. Tab, newline and carriage return are allowed through for bodies.
@@ -57,7 +54,34 @@ module ReputableChat
       mapped.include?(nil) ? nil : mapped
     end
 
-    # A ratings map is passed through to storage unparsed, but its shape is
+      # A content-addressed image name: the SHA-256 of the bytes plus a sniffed
+    # extension. Nothing else is a legal icon reference.
+    ICON = /\A[0-9a-f]{64}\.(png|jpg|gif|webp)\z/
+
+    def icon(value)
+      return nil unless value.is_a?(String)
+
+      value.match?(ICON) ? value : nil
+    end
+
+    MAX_USERNAME = 64
+    MAX_BIO      = 280
+
+    def profile(value)
+      return nil unless value.is_a?(Hash)
+
+      username = string(value["username"], max: MAX_USERNAME) or return nil
+
+      bio = value["message"].to_s
+      bio = bio.empty? ? "" : (string(bio, max: MAX_BIO) or return nil)
+
+      image = value["icon"]
+      return nil unless image.nil? || icon(image)
+
+      { "username" => username, "message" => bio, "icon" => image }
+    end
+
+  # A ratings map is passed through to storage unparsed, but its shape is
     # still checked so a malformed blob cannot be stored and then break every
     # client that fetches it.
     def ratings(value, max_entries: 10_000)
