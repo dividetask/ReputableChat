@@ -9,12 +9,14 @@ import { Session } from "./session.js";
 
 const ROOM = "general";
 const VOTED_KEY = "reputablechat.voted";
+const PREFS_KEY = "reputablechat.prefs";
+const PUBKEY = /^[A-Za-z0-9_-]{42,44}$/;
 const $ = (id) => document.getElementById(id);
 
 const state = {
   config: null, emotes: null, me: null, profile: null, version: 0,
   ratings: {}, graph: new Graph(), reputation: null, session: null,
-  seq: 0, voted: new Set(), viewing: null,
+  seq: 0, voted: new Set(), viewing: null, prefs: { showUnrated: false },
 };
 
 async function api(path, options = {}) {
@@ -53,6 +55,49 @@ function saveVoted() {
     localStorage.setItem(VOTED_KEY, JSON.stringify([...state.voted]));
   } catch {
     /* nothing to do: double-vote protection degrades, nothing breaks */
+  }
+}
+
+// show_unrated is a per-viewer preference, not something anyone else reads, so
+// localStorage is its right home. It moves to the private config once that
+// exists.
+function loadPrefs() {
+  try {
+    return { showUnrated: false, ...JSON.parse(localStorage.getItem(PREFS_KEY) || "{}") };
+  } catch {
+    return { showUnrated: false };
+  }
+}
+
+function savePrefs() {
+  try {
+    localStorage.setItem(PREFS_KEY, JSON.stringify(state.prefs));
+  } catch {
+    /* the preference just will not persist */
+  }
+}
+
+// The viewer's preference is layered over the server defaults, which is the
+// same shape the config system uses everywhere else.
+function buildReputation() {
+  return new Reputation({
+    ...state.config,
+    display: { ...state.config.display, show_unrated: state.prefs.showUnrated },
+  });
+}
+
+// Re-sorts everyone from the graph already in hand. In-session reports are
+// replayed so a toggle does not quietly un-block someone.
+function rebuildSession() {
+  const previous = state.session ? [...state.session.reports] : [];
+
+  state.graph.add(state.me.pubkey, state.ratings);
+  state.session = new Session(
+    state.reputation, state.me.pubkey, state.graph, state.config.session.report_blocks,
+  );
+
+  for (const [subject, reporters] of previous) {
+    for (const reporter of reporters.keys()) state.session.report(subject, reporter);
   }
 }
 
@@ -231,9 +276,7 @@ async function enterChat() {
 
   await loadOwnConfig();
   await loadNetwork();
-  state.session = new Session(
-    state.reputation, state.me.pubkey, state.graph, state.config.session.report_blocks,
-  );
+  rebuildSession();
 
   $("me").textContent = `${state.profile.username} · ${fingerprint(state.me.pubkey)}`;
   refreshMessages();
@@ -383,6 +426,9 @@ function showProfile(pubkey) {
   if (own) {
     $("my-username").value = state.profile.username;
     $("my-message").value = state.profile.message || "";
+    $("my-key").value = pubkey;
+    $("show-unrated").checked = state.prefs.showUnrated;
+    $("add-key").value = "";
   } else {
     $("profile-icon").src = profile.icon ? `/images/${profile.icon}` : "";
     $("profile-name").textContent = profile.username || "someone";
@@ -414,6 +460,53 @@ async function reportUser(pubkey) {
   refreshMessages();
 
   if (state.viewing === target) status($("profile-status"), "Reported and blocked.", "ok");
+}
+
+async function copyKey() {
+  try {
+    await navigator.clipboard.writeText(state.me.pubkey);
+    status($("profile-status"), "Key copied.", "ok");
+  } catch {
+    // Clipboard access needs a secure context and permission; selecting the
+    // text is always available.
+    $("my-key").select();
+    status($("profile-status"), "Press Ctrl+C to copy the selected key.");
+  }
+}
+
+async function addByKey() {
+  const pubkey = $("add-key").value.trim();
+  if (!PUBKEY.test(pubkey)) return status($("profile-status"), "that does not look like a key", "error");
+  if (pubkey === state.me.pubkey) return status($("profile-status"), "that is your own key", "error");
+
+  const current = state.ratings[pubkey] || { friend: false, reported: false, net_votes: 0 };
+  state.ratings[pubkey] = { ...current, friend: true, reported: false };
+
+  await publishConfig();
+  await fetchConfigs([pubkey]);
+  rebuildSession();
+  refreshMessages();
+
+  $("add-key").value = "";
+  status($("profile-status"), `Added. They are now ${state.session.bucketOf(pubkey)}.`, "ok");
+}
+
+// Rebuilds rather than just re-rendering: the bucket a user lands in depends on
+// the setting, so everyone has to be sorted again.
+function toggleUnrated() {
+  state.prefs.showUnrated = $("show-unrated").checked;
+  savePrefs();
+
+  state.reputation = buildReputation();
+  rebuildSession();
+  refreshMessages();
+
+  const count = state.session.in("tolerated").length;
+  status($("profile-status"),
+         state.prefs.showUnrated
+           ? `Showing unrated users — ${count} in Tolerated now.`
+           : "Hiding unrated users again.",
+         "ok");
 }
 
 // Re-derives the score and shows which hop and which person produced each
@@ -490,7 +583,8 @@ async function saveProfile() {
 
 async function boot() {
   [state.config, state.emotes] = await Promise.all([api("/api/defaults"), api("/api/emotes")]);
-  state.reputation = new Reputation(state.config);
+  state.prefs = loadPrefs();
+  state.reputation = buildReputation();
   await seed.loadWordlist();
 
   $("seed").addEventListener("input", refreshSeedField);
@@ -504,6 +598,9 @@ async function boot() {
   $("profile-report").addEventListener("click", () => reportUser().catch((e) => status($("profile-status"), e.message, "error")));
   $("profile-recalc").addEventListener("click", recalculate);
   $("profile-save").addEventListener("click", () => saveProfile().catch((e) => status($("profile-status"), e.message, "error")));
+  $("copy-key").addEventListener("click", copyKey);
+  $("add-friend").addEventListener("click", () => addByKey().catch((e) => status($("profile-status"), e.message, "error")));
+  $("show-unrated").addEventListener("change", toggleUnrated);
 
   $("generate").addEventListener("click", async () => {
     const phrase = await seed.generate(state.config.seed.min_words);

@@ -85,6 +85,36 @@
       <label for="my-icon">Icon</label>
       <input id="my-icon" type="file" accept="image/png,image/jpeg,image/gif,image/webp">
       <div class="row"><button id="profile-save">Save profile</button></div>
+
+      <hr>
+
+      <label for="my-key">Your key — give this to people so they can add you</label>
+      <div class="row">
+        <input id="my-key" type="text" readonly>
+        <button id="copy-key" class="secondary" type="button">Copy</button>
+      </div>
+      <p class="hint">This is your whole identity. It is safe to share — unlike
+         your seed phrase, which nobody should ever see.</p>
+
+      <hr>
+
+      <label for="add-key">Add someone by their key</label>
+      <div class="row">
+        <input id="add-key" type="text" autocomplete="off" spellcheck="false" placeholder="their key">
+        <button id="add-friend" type="button">Add as friend</button>
+      </div>
+      <p class="hint">Friending is worth +0.5, which is enough on its own to put
+         them in Trusted.</p>
+
+      <hr>
+
+      <label class="checkbox" for="show-unrated">
+        <input id="show-unrated" type="checkbox">
+        Show users nobody has rated
+      </label>
+      <p class="hint">Off by default — unrated is how new accounts and spam
+         accounts both start. Turn it on to find newcomers worth vouching for.
+         Net-negative users stay hidden either way.</p>
     </div>
 
     <p id="profile-status" class="status"></p>
