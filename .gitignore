@@ -1,7 +1,7 @@
+# Runtime state: the database and uploaded images both live here.
+data/
+tmp/
 *.db
 *.sqlite3
-data/*.db
-data/store/
-tmp/
 .bundle/
 vendor/bundle/

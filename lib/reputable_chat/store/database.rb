@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "sequel"
+require "fileutils"
 require "json"
 require "securerandom"
 
@@ -10,6 +11,7 @@ module ReputableChat
     # only the pubkey and version -- enough to verify and reject a rollback.
     # Ratings are never parsed server-side.
     class Database
+      IN_MEMORY       = ["sqlite:/", "sqlite::memory:"].freeze
       NONCE_TTL       = 300   # seconds a login challenge stays usable
       CLOCK_SKEW      = 120   # tolerated drift on a signed timestamp
       MAX_BODY_BYTES  = 8_192
@@ -18,8 +20,23 @@ module ReputableChat
       attr_reader :db
 
       def initialize(url)
+        ensure_parent_directory(url)
         @db = Sequel.connect(url)
         migrate!
+      end
+
+      # SQLite will not create a missing parent directory, and `data/` is not
+      # in the repository because git does not track empty directories. Without
+      # this a fresh clone fails to boot with an opaque CantOpenException.
+      def ensure_parent_directory(url)
+        url = url.to_s
+        return unless url.start_with?("sqlite:")
+        return if IN_MEMORY.include?(url)
+
+        path = url.sub(%r{\Asqlite://?}, "")
+        return if path.empty?
+
+        FileUtils.mkdir_p(File.dirname(path))
       end
 
       def migrate!

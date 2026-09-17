@@ -10,7 +10,10 @@ gem "sqlite3", "~> 2.0"
 gem "ed25519", "~> 1.4"
 gem "bigdecimal", "~> 3.1"
 
-group :test do
+group :development, :test do
+  # `rake spec` is the documented way to run the suite, so rake has to be in
+  # the bundle -- a global install is not something a fresh clone has.
+  gem "rake", "~> 13.0"
   gem "minitest", "~> 5.20"
   gem "rack-test", "~> 2.2"
 end
