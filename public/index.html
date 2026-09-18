@@ -126,6 +126,16 @@
   </section>
 </main>
 
+<!-- <dialog> rather than a div: Escape, focus trapping and the backdrop all
+     come for free, and window.confirm looks nothing like the rest of the app. -->
+<dialog id="confirm-report">
+  <p id="confirm-text"></p>
+  <div class="row">
+    <button id="confirm-no" class="secondary">Cancel</button>
+    <button id="confirm-yes" class="danger">Report</button>
+  </div>
+</dialog>
+
 <script src="/js/vendor-argon2.umd.min.js"></script>
 <script type="module" src="/js/app.js"></script>
 </body>

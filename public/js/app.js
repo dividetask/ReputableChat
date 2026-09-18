@@ -314,8 +314,19 @@ async function refreshMessages() {
   state.seq = Math.max(0, ...messages.filter((m) => m.author === state.me.pubkey).map((m) => m.seq));
 }
 
+const AT_BOTTOM_SLACK = 48;
+
 function render(messages) {
   const list = $("messages");
+
+  // Only follow new messages if you were already at the bottom. Otherwise keep
+  // your place: this re-renders every few seconds, and pinning unconditionally
+  // drags you back down mid-read. replaceChildren resets scrollTop, so the
+  // position has to be put back by hand.
+  const distanceFromBottom = list.scrollHeight - list.scrollTop - list.clientHeight;
+  const wasFollowing = distanceFromBottom <= AT_BOTTOM_SLACK;
+  const previousTop = list.scrollTop;
+
   list.replaceChildren();
 
   const bySignature = new Map(messages.map((m) => [m.signature, m]));
@@ -363,7 +374,7 @@ function render(messages) {
     list.append(row);
   }
 
-  list.scrollTop = list.scrollHeight;
+  list.scrollTop = wasFollowing ? list.scrollHeight : previousTop;
 }
 
 // message signature -> emote -> the people who gave it.
@@ -686,8 +697,28 @@ async function friendUser() {
   status($("profile-status"), "Friended. This takes full effect at your next login.", "ok");
 }
 
+// Report sits next to reply in the same little toolbar, so a misclick is easy
+// and the consequence is not obvious. Resolves false on Escape or backdrop.
+function confirmReport(name) {
+  const dialog = $("confirm-report");
+  $("confirm-text").textContent = `Report ${name}? You will stop seeing their messages.`;
+
+  return new Promise((resolve) => {
+    const finish = (answer) => {
+      dialog.close();
+      resolve(answer);
+    };
+
+    $("confirm-yes").onclick = () => finish(true);
+    $("confirm-no").onclick = () => finish(false);
+    dialog.addEventListener("close", () => resolve(false), { once: true });
+    dialog.showModal();
+  });
+}
+
 async function reportUser(pubkey) {
   const target = pubkey || state.viewing;
+  if (!(await confirmReport(displayName(target)))) return;
   const current = state.ratings[target] || { friend: false, reported: false, net_votes: 0 };
   state.ratings[target] = { ...current, friend: false, reported: true };
 
