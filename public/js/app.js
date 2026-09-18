@@ -16,7 +16,13 @@ const state = {
   ratings: {}, graph: new Graph(), reputation: null, session: null,
   seq: 0, voted: new Set(), viewing: null, settings: {}, privateVersion: 0,
   reactions: new Map(), recentlyBlocked: new Map(), replyingTo: null,
+  renderEpoch: 0, renderedKey: null,
 };
+
+// Anything that changes how the chat should look without changing what the
+// server returned -- a bucket moving, a profile learned, a vote cast. Polling
+// alone must not rebuild the DOM, so local changes announce themselves here.
+const touch = () => { state.renderEpoch += 1; };
 
 async function api(path, options = {}) {
   const response = await fetch(path, { credentials: "same-origin", ...options });
@@ -277,6 +283,8 @@ async function fetchConfigs(pubkeys) {
   }
 
   for (const key of fresh) if (!state.graph.has(key)) state.graph.add(key, {});
+
+  touch(); // names and icons just became available
 }
 
 // --- chat --------------------------------------------------------------
@@ -309,9 +317,29 @@ async function refreshMessages() {
   }
 
   await fetchConfigs([...new Set([...messages.map((m) => m.author), ...emotes.map((e) => e.author)])]);
+  state.seq = Math.max(0, ...messages.filter((m) => m.author === state.me.pubkey).map((m) => m.seq));
+
+  // Most polls find nothing new. Rebuilding the list anyway costs a full DOM
+  // teardown, drops any text selection, and closes an open hover menu.
+  const key = renderKey(messages, emotes);
+  if (key === state.renderedKey) return;
+
+  state.renderedKey = key;
   state.reactions = tallyReactions(emotes);
   render(messages);
-  state.seq = Math.max(0, ...messages.filter((m) => m.author === state.me.pubkey).map((m) => m.seq));
+}
+
+// Everything the rendered list depends on. The undo stubs are in here because
+// they expire on a timer, so they have to redraw even when nothing arrives.
+function renderKey(messages, emotes) {
+  const stubs = [...state.recentlyBlocked.keys()].filter((key) => withinUndoWindow(key));
+
+  return [
+    messages.map((m) => m.signature).join(","),
+    emotes.map((e) => `${e.message}${e.emote}${e.author}`).join(","),
+    stubs.join(","),
+    state.renderEpoch,
+  ].join("|");
 }
 
 const AT_BOTTOM_SLACK = 48;
@@ -647,6 +675,7 @@ async function countAsVote(message, polarity) {
   const current = state.ratings[message.author] || { friend: false, reported: false, net_votes: 0 };
   state.ratings[message.author] = { ...current, net_votes: (current.net_votes || 0) + polarity };
   state.voted.add(message.signature);
+  touch();
 
   await publishConfig();
   await publishPrivateConfig();
@@ -726,6 +755,7 @@ async function reportUser(pubkey) {
   // Your own report blocks at once — waiting a whole session defeats the point.
   state.session.report(target, state.me.pubkey);
   state.recentlyBlocked.set(target, Date.now());
+  touch();
   refreshMessages();
 
   if (state.viewing === target) {
@@ -741,6 +771,7 @@ async function undoReport(pubkey) {
   await publishConfig();
   state.session.unreport(pubkey, state.me.pubkey);
   state.recentlyBlocked.delete(pubkey);
+  touch();
 
   refreshMessages();
   renderRelations();
@@ -885,6 +916,7 @@ async function addByKey() {
   await publishConfig();
   await fetchConfigs([pubkey]);
   rebuildSession();
+  touch();
   refreshMessages();
 
   $("add-key").value = "";
@@ -901,6 +933,7 @@ async function toggleUnrated() {
 
   state.reputation = buildReputation();
   rebuildSession();
+  touch();
   refreshMessages();
 
   const count = state.session.in("tolerated").length;
@@ -980,6 +1013,7 @@ async function saveProfile() {
   $("me").textContent = `${state.profile.username} · ${fingerprint(state.me.pubkey)}`;
   $("my-avatar").replaceChildren(avatarFor(state.me.pubkey, "avatar-large", state.profile.icon));
   $("my-icon").value = "";
+  touch();
   refreshMessages();
   status($("profile-status"), "Saved.", "ok");
 }
