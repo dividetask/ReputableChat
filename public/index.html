@@ -12,24 +12,33 @@
 <main id="app">
   <section id="login" class="panel">
     <h1>ReputableChat</h1>
-    <p class="hint">There is no username here. Your seed phrase <em>is</em> your account.</p>
 
-    <label for="seed">Seed phrase</label>
-    <textarea id="seed" rows="3" autocomplete="off" autocapitalize="off"
-              spellcheck="false" placeholder="eight or more words"></textarea>
-    <div id="suggestions" class="suggestions"></div>
-    <p id="seed-status" class="status"></p>
-
-    <div class="row">
-      <button id="unlock" disabled>Unlock</button>
-      <button id="generate" class="secondary">Generate a new seed</button>
+    <div id="new-account" class="hidden">
+      <h3 class="section">Your New Seed Phrase</h3>
+      <p class="warn">Write this down and keep it somewhere safe. It is the only
+         way into this account, and nobody can recover it for you.</p>
+      <div class="row">
+        <input id="new-seed-words" type="text" readonly>
+        <button id="copy-seed" type="button" class="secondary">Copy</button>
+      </div>
+      <p class="hint">Paste it below to sign in for the first time.</p>
     </div>
 
-    <div id="new-seed" class="hidden">
-      <p class="warn">Write this down now. Nobody can recover it for you — losing it
-         loses the account and all of its reputation, permanently.</p>
-      <pre id="new-seed-words"></pre>
-    </div>
+    <p id="login-intro" class="hint">There is no username here. Your seed phrase
+       <em>is</em> your account.</p>
+
+    <!-- A real form with a password field so browsers and password managers
+         treat the seed as a credential and offer to save it. -->
+    <form id="login-form">
+      <label for="seed">Seed phrase</label>
+      <div class="row">
+        <input id="seed" type="password" autocomplete="current-password"
+               autocapitalize="off" spellcheck="false" placeholder="eight or more words">
+        <button id="unlock" type="submit" disabled>Login</button>
+        <button id="generate" type="button" class="secondary">New Account</button>
+      </div>
+      <p id="seed-status" class="status"></p>
+    </form>
 
     <div id="register" class="hidden">
       <p class="warn">This seed isn't registered yet. If you meant to sign in to an
@@ -128,7 +137,7 @@
 
 <!-- <dialog> rather than a div: Escape, focus trapping and the backdrop all
      come for free, and window.confirm looks nothing like the rest of the app. -->
-<dialog id="confirm-report">
+<dialog id="confirm">
   <p id="confirm-text"></p>
   <div class="row">
     <button id="confirm-no" class="secondary">Cancel</button>

@@ -8,6 +8,9 @@ import { Reputation, Graph, toNumber } from "./reputation.js";
 import { Session } from "./session.js";
 
 const ROOM = "general";
+// A quick picker, not the whole set: sixteen emotes make a toolbar wider than
+// the message it floats over. The rest stay configured and unused for now.
+const QUICK_EMOTES = 8;
 const PUBKEY = /^[A-Za-z0-9_-]{42,44}$/;
 const $ = (id) => document.getElementById(id);
 
@@ -121,6 +124,9 @@ function rebuildSession() {
 
 // --- seed entry --------------------------------------------------------
 
+// No word suggestions here any more: the field is a password field so it is
+// not readable over a shoulder, and suggesting the word being typed would put
+// it straight back on screen.
 async function refreshSeedField() {
   const phrase = $("seed").value;
   const words = seed.words(phrase);
@@ -128,29 +134,12 @@ async function refreshSeedField() {
 
   $("unlock").disabled = reason !== null;
   status($("seed-status"), reason || `${words.length} words · looks good`, reason ? "" : "ok");
-
-  const partial = phrase.endsWith(" ") ? "" : words[words.length - 1];
-  const box = $("suggestions");
-  box.replaceChildren();
-  if (!partial || partial.length < 2) return;
-
-  for (const word of await seed.suggest(partial, 6)) {
-    if (word === partial) continue;
-    const button = document.createElement("button");
-    button.type = "button";
-    button.textContent = word;
-    button.addEventListener("click", () => {
-      $("seed").value = `${[...words.slice(0, -1), word].join(" ")} `;
-      $("seed").focus();
-      refreshSeedField();
-    });
-    box.append(button);
-  }
 }
 
 // --- login -------------------------------------------------------------
 
-async function unlock() {
+async function unlock(event) {
+  if (event) event.preventDefault();
   $("unlock").disabled = true;
   status($("seed-status"), "deriving your key — this takes a moment by design…");
 
@@ -584,36 +573,58 @@ function reactionBar(message, mine) {
   actions.className = "actions";
 
   if (!reacted) {
-    for (const emote of [...state.emotes.positive.slice(0, 6), ...state.emotes.negative]) {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.textContent = emote;
-      button.title = "React";
-      button.addEventListener("click", () => react(message, emote));
-      actions.append(button);
-    }
+    actions.append(emoteRow(message, state.emotes.positive.slice(0, QUICK_EMOTES), "positive"));
   }
+
+  const lower = emoteRow(message, reacted ? [] : state.emotes.negative, "negative");
+
+  if (!reacted) lower.append(Object.assign(document.createElement("span"), { className: "divider" }));
 
   const reply = document.createElement("button");
   reply.type = "button";
   reply.textContent = "reply";
   reply.addEventListener("click", () => startReply(message));
-  actions.append(reply);
+  lower.append(reply);
 
   const report = document.createElement("button");
   report.type = "button";
   report.textContent = "report";
   report.addEventListener("click", () => reportUser(message.author));
-  actions.append(report);
+  lower.append(report);
 
+  actions.append(lower);
   bar.append(actions);
   return bar;
+}
+
+function emoteRow(message, emotes, kind) {
+  const row = document.createElement("div");
+  row.className = `emote-row ${kind}`;
+
+  for (const emote of emotes) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = emote;
+    button.title = kind === "negative" ? "Negative reaction" : "React";
+    button.addEventListener("click", () => react(message, emote));
+    row.append(button);
+  }
+
+  return row;
 }
 
 // One reaction per comment, which the server enforces too. The message
 // signature is its id.
 async function react(message, emote) {
   if (state.voted.has(message.signature)) return;
+
+  if (polarityOf(emote) < 0) {
+    const sure = await confirmAction(
+      "Giving someone a negative emote will lower their reputation. Are you sure?",
+      "Yes, react",
+    );
+    if (!sure) return;
+  }
 
   const ts = Math.floor(Date.now() / 1000);
   const payload = identity.emotePayload({
@@ -726,11 +737,12 @@ async function friendUser() {
   status($("profile-status"), "Friended. This takes full effect at your next login.", "ok");
 }
 
-// Report sits next to reply in the same little toolbar, so a misclick is easy
-// and the consequence is not obvious. Resolves false on Escape or backdrop.
-function confirmReport(name) {
-  const dialog = $("confirm-report");
-  $("confirm-text").textContent = `Report ${name}? You will stop seeing their messages.`;
+// Used wherever a click has a consequence that is not obvious from the button.
+// Resolves false on Escape or the backdrop.
+function confirmAction(message, confirmLabel) {
+  const dialog = $("confirm");
+  $("confirm-text").textContent = message;
+  $("confirm-yes").textContent = confirmLabel;
 
   return new Promise((resolve) => {
     const finish = (answer) => {
@@ -747,7 +759,10 @@ function confirmReport(name) {
 
 async function reportUser(pubkey) {
   const target = pubkey || state.viewing;
-  if (!(await confirmReport(displayName(target)))) return;
+  const sure = await confirmAction(
+    `Report ${displayName(target)}? You will stop seeing their messages.`, "Report",
+  );
+  if (!sure) return;
   const current = state.ratings[target] || { friend: false, reported: false, net_votes: 0 };
   state.ratings[target] = { ...current, friend: false, reported: true };
 
@@ -1026,7 +1041,7 @@ async function boot() {
   await seed.loadWordlist();
 
   $("seed").addEventListener("input", refreshSeedField);
-  $("unlock").addEventListener("click", unlock);
+  $("login-form").addEventListener("submit", unlock);
   $("create").addEventListener("click", () => createAccount().catch((e) => status($("seed-status"), e.message, "error")));
   $("logout").addEventListener("click", logOff);
   $("composer").addEventListener("submit", compose);
@@ -1042,12 +1057,24 @@ async function boot() {
   $("show-unrated").addEventListener("change",
     () => toggleUnrated().catch((e) => status($("profile-status"), e.message, "error")));
 
+  // The seed is shown but deliberately NOT typed into the field: copying it
+  // across is what makes someone keep a copy of it.
   $("generate").addEventListener("click", async () => {
-    const phrase = await seed.generate(state.config.seed.min_words);
-    $("new-seed-words").textContent = phrase;
-    $("new-seed").classList.remove("hidden");
-    $("seed").value = phrase;
+    $("new-seed-words").value = await seed.generate(state.config.seed.min_words);
+    $("new-account").classList.remove("hidden");
+    $("login-intro").classList.add("hidden");
+    $("seed").value = "";
     refreshSeedField();
+  });
+
+  $("copy-seed").addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText($("new-seed-words").value);
+      status($("seed-status"), "Seed copied — now paste it below.", "ok");
+    } catch {
+      $("new-seed-words").select();
+      status($("seed-status"), "Press Ctrl+C to copy the selected seed.");
+    }
   });
 
   // A remembered key survives a refresh, which is not a log off.

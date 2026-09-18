@@ -102,12 +102,3 @@ export async function generate(wordCount = MIN_WORDS) {
   }
   return out.join(" ");
 }
-
-// Type-ahead. BIP39 guarantees the first four letters identify a word.
-export async function suggest(prefix, limit = 5) {
-  await loadWordlist();
-  const p = String(prefix || "").toLowerCase();
-  if (!p) return [];
-
-  return WORDLIST.filter((w) => w.startsWith(p)).slice(0, limit);
-}
