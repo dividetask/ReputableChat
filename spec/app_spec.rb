@@ -575,6 +575,15 @@ class FrozenAppSpec < Minitest::Test
                     "positive emotes should outnumber negative ones by design"
   end
 
+  # RULE: /new-account is a real URL, so a refresh or a bookmark works.
+  def test_new_account_is_its_own_url
+    get "/new-account"
+
+    assert_equal 200, last_response.status
+    assert_includes last_response.headers["Content-Type"], "text/html"
+    assert_includes last_response.body, "login-form"
+  end
+
   def test_serves_the_wordlist
     get "/wordlist.txt"
 

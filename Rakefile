@@ -8,6 +8,23 @@ Rake::TestTask.new(:spec) do |t|
   t.warning = false
 end
 
+desc "Readable dump of the database (rake dump, or dump[messages] / dump[users,configs])"
+task :dump, [:sections] do |_task, args|
+  $LOAD_PATH.unshift "lib"
+  require "reputable_chat/dump"
+  require "reputable_chat/server_config"
+
+  settings = ReputableChat::ServerConfig.load
+  url = settings.fetch("database_url")
+  puts "database: #{url}"
+  puts
+
+  store = ReputableChat::Store::Database.new(url)
+  sections = args[:sections] ? args[:sections].split(/[\s,]+/) : nil
+
+  ReputableChat::Dump.new(store).render(*[sections].compact)
+end
+
 desc "Print the reputation curve and ladder for the current config"
 task :curve do
   $LOAD_PATH.unshift "lib"

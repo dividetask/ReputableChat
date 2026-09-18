@@ -24,9 +24,11 @@
 - Linux, vim. Node 22 is available and is used by the parity spec.
 
 ```bash
-bundle exec rake spec     # full suite
-bundle exec rake curve    # print current curve, ladder and safety window
-bundle exec rake genesis  # generate the genesis user record (once, ever)
+bundle exec rake spec       # full suite
+bundle exec rake curve      # print current curve, ladder and safety window
+bundle exec rake dump       # readable dump of the database
+bundle exec rake "dump[messages,reactions]"   # just those sections
+bundle exec rake genesis    # generate the genesis user record (once, ever)
 ```
 
 See [docs/project/reputation.md](docs/project/reputation.md) and

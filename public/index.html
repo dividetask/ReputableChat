@@ -12,35 +12,49 @@
 <main id="app">
   <section id="login" class="panel">
     <h1>ReputableChat</h1>
-    <p class="hint">There is no username here. Your seed phrase <em>is</em> your account.</p>
 
-    <label for="seed">Seed phrase</label>
-    <textarea id="seed" rows="3" autocomplete="off" autocapitalize="off"
-              spellcheck="false" placeholder="eight or more words"></textarea>
-    <div id="suggestions" class="suggestions"></div>
-    <p id="seed-status" class="status"></p>
+    <div id="new-account" class="hidden">
+      <h3 class="section">New Account</h3>
 
-    <div class="row">
-      <button id="unlock" disabled>Unlock</button>
-      <button id="generate" class="secondary">Generate a new seed</button>
-    </div>
+      <p id="unregistered-note" class="warn hidden">That seed isn't registered yet.
+         If you meant to sign in to an existing account, check for a mistyped or
+         swapped word — continuing here creates a new, empty account.</p>
 
-    <div id="new-seed" class="hidden">
-      <p class="warn">Write this down now. Nobody can recover it for you — losing it
-         loses the account and all of its reputation, permanently.</p>
-      <pre id="new-seed-words"></pre>
-    </div>
-
-    <div id="register" class="hidden">
-      <p class="warn">This seed isn't registered yet. If you meant to sign in to an
-         existing account, check for a mistyped or swapped word before continuing —
-         creating an account here gives you a new, empty one.</p>
-      <label for="username">Display name</label>
-      <input id="username" type="text" maxlength="64" autocomplete="off">
+      <label for="new-name">Display name</label>
+      <input id="new-name" type="text" maxlength="64" autocomplete="off">
       <p class="hint">Names are not unique. People are identified by the
          fingerprint next to their name, never by the name itself.</p>
-      <button id="create">Create this account</button>
+
+      <!-- Only ever shown for a seed this page generated. A seed the user
+           brought is never echoed back to the screen. -->
+      <div id="new-seed-block">
+        <h3 class="section">Your New Seed Phrase</h3>
+        <p class="warn">Write this down and keep it somewhere safe. It is the only
+           way into this account, and nobody can recover it for you.</p>
+        <div class="row">
+          <input id="new-seed-words" type="text" readonly>
+          <button id="copy-seed" type="button" class="secondary">Copy</button>
+        </div>
+        <p class="hint">Paste it below to sign in for the first time.</p>
+      </div>
     </div>
+
+    <p id="login-intro" class="hint">There is no username here. Your seed phrase
+       <em>is</em> your account.</p>
+
+    <!-- A real form with a password field so browsers and password managers
+         treat the seed as a credential and offer to save it. -->
+    <form id="login-form">
+      <label for="seed">Seed phrase</label>
+      <div class="row">
+        <input id="seed" type="password" autocomplete="current-password"
+               autocapitalize="off" spellcheck="false" placeholder="eight or more words">
+        <button id="unlock" type="submit" disabled>Login</button>
+        <button id="generate" type="button" class="secondary">New Account</button>
+      </div>
+      <p id="seed-status" class="status"></p>
+    </form>
+
   </section>
 
   <section id="chat" class="panel hidden">
@@ -125,6 +139,16 @@
     <p id="profile-status" class="status"></p>
   </section>
 </main>
+
+<!-- <dialog> rather than a div: Escape, focus trapping and the backdrop all
+     come for free, and window.confirm looks nothing like the rest of the app. -->
+<dialog id="confirm">
+  <p id="confirm-text"></p>
+  <div class="row">
+    <button id="confirm-no" class="secondary">Cancel</button>
+    <button id="confirm-yes" class="danger">Report</button>
+  </div>
+</dialog>
 
 <script src="/js/vendor-argon2.umd.min.js"></script>
 <script type="module" src="/js/app.js"></script>

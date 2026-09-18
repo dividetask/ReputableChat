@@ -8,6 +8,11 @@ import { Reputation, Graph, toNumber, toFixed } from "./reputation.js";
 import { Session } from "./session.js";
 
 const ROOM = "general";
+const LOGIN_PATH = "/";
+const NEW_ACCOUNT_PATH = "/new-account";
+// A quick picker, not the whole set: sixteen emotes make a toolbar wider than
+// the message it floats over. The rest stay configured and unused for now.
+const QUICK_EMOTES = 8;
 const PUBKEY = /^[A-Za-z0-9_-]{42,44}$/;
 const $ = (id) => document.getElementById(id);
 
@@ -17,7 +22,13 @@ const state = {
   seq: 0, voted: new Set(), viewing: null, settings: {}, privateVersion: 0,
   reactions: new Map(), recentlyBlocked: new Map(), replyingTo: null,
   genesis: null, tip: null,
+  renderEpoch: 0, renderedKey: null, pendingRegistration: false,
 };
+
+// Anything that changes how the chat should look without changing what the
+// server returned -- a bucket moving, a profile learned, a vote cast. Polling
+// alone must not rebuild the DOM, so local changes announce themselves here.
+const touch = () => { state.renderEpoch += 1; };
 
 // The record this client will name as the last thing it saw. `tip` is the most
 // recent record whose author cleared the bar; with nothing yet seen it is the
@@ -141,50 +152,65 @@ function rebuildSession() {
 
 // --- seed entry --------------------------------------------------------
 
+// No word suggestions here any more: the field is a password field so it is
+// not readable over a shoulder, and suggesting the word being typed would put
+// it straight back on screen.
+// Login and new account are separate URLs, navigated with pushState so the
+// derived key and the typed seed survive the move between them.
+const creatingAccount = () => window.location.pathname === NEW_ACCOUNT_PATH;
+
+function goTo(path, { replace = false } = {}) {
+  if (window.location.pathname !== path) {
+    window.history[replace ? "replaceState" : "pushState"]({}, "", path);
+  }
+  renderRoute();
+}
+
+function renderRoute() {
+  const newAccount = creatingAccount();
+  $("new-account").classList.toggle("hidden", !newAccount);
+  $("login-intro").classList.toggle("hidden", newAccount);
+}
+const chosenName = () => $("new-name").value.trim();
+
 async function refreshSeedField() {
   const phrase = $("seed").value;
   const words = seed.words(phrase);
-  const reason = phrase.trim() ? await seed.validate(phrase, state.config.seed.min_words) : "type your seed";
+  let reason = phrase.trim() ? await seed.validate(phrase, state.config.seed.min_words) : "type your seed";
+
+  // On the new-account page the name is part of signing up, so it gates the
+  // button too rather than being asked for afterwards.
+  if (!reason && creatingAccount() && !chosenName()) reason = "pick a display name";
 
   $("unlock").disabled = reason !== null;
   status($("seed-status"), reason || `${words.length} words · looks good`, reason ? "" : "ok");
-
-  const partial = phrase.endsWith(" ") ? "" : words[words.length - 1];
-  const box = $("suggestions");
-  box.replaceChildren();
-  if (!partial || partial.length < 2) return;
-
-  for (const word of await seed.suggest(partial, 6)) {
-    if (word === partial) continue;
-    const button = document.createElement("button");
-    button.type = "button";
-    button.textContent = word;
-    button.addEventListener("click", () => {
-      $("seed").value = `${[...words.slice(0, -1), word].join(" ")} `;
-      $("seed").focus();
-      refreshSeedField();
-    });
-    box.append(button);
-  }
 }
 
 // --- login -------------------------------------------------------------
 
-async function unlock() {
+async function unlock(event) {
+  if (event) event.preventDefault();
   $("unlock").disabled = true;
-  status($("seed-status"), "deriving your key — this takes a moment by design…");
 
   try {
-    const derived = await identity.deriveFromSeed($("seed").value, state.config.seed.kdf);
-    $("seed").value = ""; // the seed has done its job
-    await signIn(derived);
+    // This seed was derived a moment ago and only the name was missing, so
+    // there is no reason to spend another second in Argon2 on it.
+    if (state.pendingRegistration && chosenName()) {
+      status($("seed-status"), "creating your account…");
+      return await registerWith(chosenName());
+    }
+
+    status($("seed-status"), "deriving your key — this takes a moment by design…");
+    await signIn(await identity.deriveFromSeed($("seed").value, state.config.seed.kdf));
   } catch (error) {
     status($("seed-status"), error.message, "error");
     $("unlock").disabled = false;
   }
 }
 
-async function signIn(derived) {
+// `restoring` means this came from a key left in IndexedDB rather than from
+// someone typing a seed, so nothing here may open a signup they did not ask for.
+async function signIn(derived, { restoring = false } = {}) {
   const { nonce } = await post("/api/challenge", {});
   const ts = Math.floor(Date.now() / 1000);
   const payload = identity.loginPayload({
@@ -196,23 +222,54 @@ async function signIn(derived) {
   });
 
   state.me = derived;
-  await identity.remember({ privateKey: derived.privateKey, pubkey: derived.pubkey });
 
   if (session.registered) return enterChat();
 
-  $("register").classList.remove("hidden");
-  status($("seed-status"), "");
+  // A remembered key whose account was never created -- someone started a
+  // signup and left. Drop it and stay on the login screen rather than making
+  // the new account screen the first thing anyone sees.
+  if (restoring) {
+    await identity.forget();
+    state.me = null;
+    return;
+  }
+
+  if (creatingAccount() && chosenName()) return registerWith(chosenName());
+
+  // An unregistered seed typed on the login screen. Send them to the new
+  // account screen for a display name rather than growing a name field on the
+  // login screen. The seed stays in its password field so the page works
+  // without ever putting it back on screen -- it is not one we generated.
+  state.pendingRegistration = true;
+  $("new-seed-block").classList.add("hidden");
+  $("unregistered-note").classList.remove("hidden");
+  $("new-name").value = "";
+  goTo(NEW_ACCOUNT_PATH);
+  $("new-name").focus();
+  refreshSeedField();
 }
 
-async function createAccount() {
-  const username = $("username").value.trim();
-  if (!username) return status($("seed-status"), "pick a display name", "error");
+// A brand new seed, shown so it can be copied across.
+async function startNewAccount() {
+  $("new-seed-words").value = await seed.generate(state.config.seed.min_words);
+  $("new-name").value = "";
+  $("seed").value = "";
+  state.pendingRegistration = false;
+  $("new-seed-block").classList.remove("hidden");
+  $("unregistered-note").classList.add("hidden");
+  goTo(NEW_ACCOUNT_PATH);
+  refreshSeedField();
+  $("new-name").focus();
+}
 
+async function registerWith(username) {
   await post("/api/register", {});
   state.profile = { username, message: "", icon: null };
   await publishConfig();
-  enterChat();
+  await enterChat();
 }
+
+
 
 async function logOff() {
   await identity.forget();
@@ -303,11 +360,20 @@ async function fetchConfigs(pubkeys) {
   }
 
   for (const key of fresh) if (!state.graph.has(key)) state.graph.add(key, {});
+
+  touch(); // names and icons just became available
 }
 
 // --- chat --------------------------------------------------------------
 
 async function enterChat() {
+  // Remembered only now: before the account exists, storing the key strands a
+  // signup nobody finished.
+  await identity.remember({ privateKey: state.me.privateKey, pubkey: state.me.pubkey });
+
+  goTo(LOGIN_PATH, { replace: true }); // do not leave /new-account in the bar
+  $("seed").value = ""; // the seed has done its job
+  state.pendingRegistration = false;
   $("login").classList.add("hidden");
   $("chat").classList.remove("hidden");
 
@@ -335,14 +401,45 @@ async function refreshMessages() {
   }
 
   await fetchConfigs([...new Set([...messages.map((m) => m.author), ...emotes.map((e) => e.author)])]);
-  state.reactions = tallyReactions(emotes);
-  render(messages);
   state.seq = Math.max(0, ...messages.filter((m) => m.author === state.me.pubkey).map((m) => m.seq));
   state.tip = chooseTip(messages);
+
+  // Most polls find nothing new. Rebuilding the list anyway costs a full DOM
+  // teardown, drops any text selection, and closes an open hover menu.
+  const key = renderKey(messages, emotes);
+  if (key === state.renderedKey) return;
+
+  state.renderedKey = key;
+  state.reactions = tallyReactions(emotes);
+  render(messages);
 }
+
+// Everything the rendered list depends on. The undo stubs are in here because
+// they expire on a timer, so they have to redraw even when nothing arrives.
+function renderKey(messages, emotes) {
+  const stubs = [...state.recentlyBlocked.keys()].filter((key) => withinUndoWindow(key));
+
+  return [
+    messages.map((m) => m.hash).join(","),
+    emotes.map((e) => `${e.message}${e.emote}${e.author}`).join(","),
+    stubs.join(","),
+    state.renderEpoch,
+  ].join("|");
+}
+
+const AT_BOTTOM_SLACK = 48;
 
 function render(messages) {
   const list = $("messages");
+
+  // Only follow new messages if you were already at the bottom. Otherwise keep
+  // your place: this re-renders every few seconds, and pinning unconditionally
+  // drags you back down mid-read. replaceChildren resets scrollTop, so the
+  // position has to be put back by hand.
+  const distanceFromBottom = list.scrollHeight - list.scrollTop - list.clientHeight;
+  const wasFollowing = distanceFromBottom <= AT_BOTTOM_SLACK;
+  const previousTop = list.scrollTop;
+
   list.replaceChildren();
 
   const byHash = new Map(messages.map((m) => [m.hash, m]));
@@ -390,7 +487,7 @@ function render(messages) {
     list.append(row);
   }
 
-  list.scrollTop = list.scrollHeight;
+  list.scrollTop = wasFollowing ? list.scrollHeight : previousTop;
 }
 
 // message record hash -> emote -> the people who gave it.
@@ -571,37 +668,63 @@ function reactionBar(message, mine) {
   const actions = document.createElement("span");
   actions.className = "actions";
 
+  // Reply rides the positive row and report the negative one, so each action
+  // sits with the emotes of its own sign, and reply lands above report.
+  const upper = emoteRow(message, reacted ? [] : state.emotes.positive.slice(0, QUICK_EMOTES), "positive");
+  const lower = emoteRow(message, reacted ? [] : state.emotes.negative, "negative");
+
   if (!reacted) {
-    for (const emote of [...state.emotes.positive.slice(0, 6), ...state.emotes.negative]) {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.textContent = emote;
-      button.title = "React";
-      button.addEventListener("click", () => react(message, emote));
-      actions.append(button);
-    }
+    upper.append(divider());
+    lower.append(divider());
   }
 
   const reply = document.createElement("button");
   reply.type = "button";
   reply.textContent = "reply";
   reply.addEventListener("click", () => startReply(message));
-  actions.append(reply);
+  upper.append(reply);
 
   const report = document.createElement("button");
   report.type = "button";
   report.textContent = "report";
   report.addEventListener("click", () => reportUser(message.author));
-  actions.append(report);
+  lower.append(report);
 
+  actions.append(upper, lower);
   bar.append(actions);
   return bar;
+}
+
+const divider = () => Object.assign(document.createElement("span"), { className: "divider" });
+
+function emoteRow(message, emotes, kind) {
+  const row = document.createElement("div");
+  row.className = `emote-row ${kind}`;
+
+  for (const emote of emotes) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = emote;
+    button.title = kind === "negative" ? "Negative reaction" : "React";
+    button.addEventListener("click", () => react(message, emote));
+    row.append(button);
+  }
+
+  return row;
 }
 
 // One reaction per comment, which the server enforces too. The message's
 // record hash is its id.
 async function react(message, emote) {
   if (state.voted.has(message.hash)) return;
+
+  if (polarityOf(emote) < 0) {
+    const sure = await confirmAction(
+      "Giving someone a negative emote will lower their reputation. Are you sure?",
+      "Yes, react",
+    );
+    if (!sure) return;
+  }
 
   const ts = Math.floor(Date.now() / 1000);
   const ack = currentAck();
@@ -665,6 +788,7 @@ async function countAsVote(message, polarity) {
   const current = state.ratings[message.author] || { friend: false, reported: false, net_votes: 0 };
   state.ratings[message.author] = { ...current, net_votes: (current.net_votes || 0) + polarity };
   state.voted.add(message.hash);
+  touch();
 
   await publishConfig();
   await publishPrivateConfig();
@@ -715,8 +839,32 @@ async function friendUser() {
   status($("profile-status"), "Friended. This takes full effect at your next login.", "ok");
 }
 
+// Used wherever a click has a consequence that is not obvious from the button.
+// Resolves false on Escape or the backdrop.
+function confirmAction(message, confirmLabel) {
+  const dialog = $("confirm");
+  $("confirm-text").textContent = message;
+  $("confirm-yes").textContent = confirmLabel;
+
+  return new Promise((resolve) => {
+    const finish = (answer) => {
+      dialog.close();
+      resolve(answer);
+    };
+
+    $("confirm-yes").onclick = () => finish(true);
+    $("confirm-no").onclick = () => finish(false);
+    dialog.addEventListener("close", () => resolve(false), { once: true });
+    dialog.showModal();
+  });
+}
+
 async function reportUser(pubkey) {
   const target = pubkey || state.viewing;
+  const sure = await confirmAction(
+    `Report ${displayName(target)}? You will stop seeing their messages.`, "Report",
+  );
+  if (!sure) return;
   const current = state.ratings[target] || { friend: false, reported: false, net_votes: 0 };
   state.ratings[target] = { ...current, friend: false, reported: true };
 
@@ -724,6 +872,7 @@ async function reportUser(pubkey) {
   // Your own report blocks at once — waiting a whole session defeats the point.
   state.session.report(target, state.me.pubkey);
   state.recentlyBlocked.set(target, Date.now());
+  touch();
   refreshMessages();
 
   if (state.viewing === target) {
@@ -739,6 +888,7 @@ async function undoReport(pubkey) {
   await publishConfig();
   state.session.unreport(pubkey, state.me.pubkey);
   state.recentlyBlocked.delete(pubkey);
+  touch();
 
   refreshMessages();
   renderRelations();
@@ -883,6 +1033,7 @@ async function addByKey() {
   await publishConfig();
   await fetchConfigs([pubkey]);
   rebuildSession();
+  touch();
   refreshMessages();
 
   $("add-key").value = "";
@@ -899,6 +1050,7 @@ async function toggleUnrated() {
 
   state.reputation = buildReputation();
   rebuildSession();
+  touch();
   refreshMessages();
 
   const count = state.session.in("tolerated").length;
@@ -978,6 +1130,7 @@ async function saveProfile() {
   $("me").textContent = `${state.profile.username} · ${fingerprint(state.me.pubkey)}`;
   $("my-avatar").replaceChildren(avatarFor(state.me.pubkey, "avatar-large", state.profile.icon));
   $("my-icon").value = "";
+  touch();
   refreshMessages();
   status($("profile-status"), "Saved.", "ok");
 }
@@ -991,9 +1144,12 @@ async function boot() {
   state.reputation = buildReputation();
   await seed.loadWordlist();
 
-  $("seed").addEventListener("input", refreshSeedField);
-  $("unlock").addEventListener("click", unlock);
-  $("create").addEventListener("click", () => createAccount().catch((e) => status($("seed-status"), e.message, "error")));
+  // Changing the seed invalidates the key derived from the previous one.
+  $("seed").addEventListener("input", () => {
+    state.pendingRegistration = false;
+    refreshSeedField();
+  });
+  $("login-form").addEventListener("submit", unlock);
   $("logout").addEventListener("click", logOff);
   $("composer").addEventListener("submit", compose);
   $("cancel-reply").addEventListener("click", cancelReply);
@@ -1008,23 +1164,36 @@ async function boot() {
   $("show-unrated").addEventListener("change",
     () => toggleUnrated().catch((e) => status($("profile-status"), e.message, "error")));
 
-  $("generate").addEventListener("click", async () => {
-    const phrase = await seed.generate(state.config.seed.min_words);
-    $("new-seed-words").textContent = phrase;
-    $("new-seed").classList.remove("hidden");
-    $("seed").value = phrase;
-    refreshSeedField();
+  // The seed is shown but deliberately NOT typed into the field: copying it
+  // across is what makes someone keep a copy of it.
+  $("new-name").addEventListener("input", refreshSeedField);
+
+  $("generate").addEventListener("click", () => startNewAccount());
+  window.addEventListener("popstate", renderRoute);
+
+  $("copy-seed").addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText($("new-seed-words").value);
+      status($("seed-status"), "Seed copied — now paste it below.", "ok");
+    } catch {
+      $("new-seed-words").select();
+      status($("seed-status"), "Press Ctrl+C to copy the selected seed.");
+    }
   });
 
   // A remembered key survives a refresh, which is not a log off.
   const remembered = await identity.recall();
   if (remembered) {
     try {
-      await signIn(remembered);
+      await signIn(remembered, { restoring: true });
     } catch {
       await identity.forget();
     }
   }
+
+  // Landing on /new-account directly, or after a refresh, needs a seed to show.
+  if (!state.me && creatingAccount()) await startNewAccount();
+  renderRoute();
 }
 
 boot().catch((error) => status($("seed-status"), error.message, "error"));
