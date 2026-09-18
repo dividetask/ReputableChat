@@ -15,7 +15,7 @@ const state = {
   config: null, emotes: null, me: null, profile: null, version: 0,
   ratings: {}, graph: new Graph(), reputation: null, session: null,
   seq: 0, voted: new Set(), viewing: null, settings: {}, privateVersion: 0,
-  reactions: new Map(),
+  reactions: new Map(), recentlyBlocked: new Map(),
 };
 
 async function api(path, options = {}) {
@@ -321,7 +321,13 @@ function render(messages) {
   for (const message of messages) {
     const mine = message.author === state.me.pubkey;
     const bucket = mine ? "trusted" : state.session.bucketOf(message.author);
-    if (bucket === "blocked") continue;
+
+    if (bucket === "blocked") {
+      // Someone you blocked moments ago leaves a stub you can undo. Everyone
+      // else blocked simply is not here.
+      if (withinUndoWindow(message.author)) list.append(blockedStub(message));
+      continue;
+    }
 
     let payload;
     try {
@@ -332,6 +338,9 @@ function render(messages) {
 
     const row = document.createElement("div");
     row.className = `msg ${bucket}`;
+
+    const main = document.createElement("div");
+    main.className = "msg-main";
 
     const who = document.createElement("span");
     who.className = "who";
@@ -345,8 +354,8 @@ function render(messages) {
     const body = document.createElement("div");
     body.textContent = payload.body; // textContent, never innerHTML
 
-    row.append(who, fp, body);
-    row.append(reactionBar(message));
+    main.append(who, fp, body, reactionBar(message, mine));
+    row.append(main, avatarFor(message.author));
     list.append(row);
   }
 
@@ -379,6 +388,67 @@ function polarityOf(emote) {
   return 1;
 }
 
+// True only for people this session blocked, and only until the grace period
+// runs out. Nothing is persisted, so logging out ends it too.
+function withinUndoWindow(pubkey) {
+  const blockedAt = state.recentlyBlocked.get(pubkey);
+  if (!blockedAt) return false;
+
+  const grace = (state.config.display.block_grace_seconds ?? 3600) * 1000;
+  if (Date.now() - blockedAt > grace) {
+    state.recentlyBlocked.delete(pubkey);
+    return false;
+  }
+
+  return true;
+}
+
+function blockedStub(message) {
+  const row = document.createElement("div");
+  row.className = "msg blocked-note";
+
+  const label = document.createElement("span");
+  label.textContent = "blocked";
+
+  const actions = document.createElement("span");
+  actions.className = "actions";
+  const undo = document.createElement("button");
+  undo.type = "button";
+  undo.textContent = "undo report";
+  undo.addEventListener("click", () => undoReport(message.author).catch(
+    (e) => status($("chat-status"), e.message, "error"),
+  ));
+  actions.append(undo);
+
+  row.append(label, actions);
+  return row;
+}
+
+// Names are not unique, so an avatar derived from the key gives every person a
+// stable look even before they upload one. Same key, same colour, always.
+function avatarFor(pubkey) {
+  const icon = state.profiles?.get(pubkey)?.icon;
+
+  if (icon) {
+    const img = document.createElement("img");
+    img.className = "avatar";
+    img.src = `/images/${icon}`;
+    img.alt = "";
+    img.addEventListener("click", () => showProfile(pubkey));
+    return img;
+  }
+
+  let hash = 0;
+  for (const character of pubkey) hash = ((hash * 31) + character.charCodeAt(0)) >>> 0;
+
+  const placeholder = document.createElement("span");
+  placeholder.className = "avatar placeholder";
+  placeholder.style.background = `hsl(${hash % 360} 42% 30%)`;
+  placeholder.textContent = pubkey.slice(0, 2);
+  placeholder.addEventListener("click", () => showProfile(pubkey));
+  return placeholder;
+}
+
 function displayName(pubkey) {
   return state.profiles?.get(pubkey)?.username || "someone";
 }
@@ -386,7 +456,7 @@ function displayName(pubkey) {
 // Reactions a message actually has, always visible with their counts, plus a
 // picker that only appears on hover or keyboard focus (see .actions in the
 // stylesheet). An emote nobody gave is not shown.
-function reactionBar(message) {
+function reactionBar(message, mine) {
   const bar = document.createElement("div");
   bar.className = "reactions";
   const reacted = state.voted.has(message.signature);
@@ -402,6 +472,10 @@ function reactionBar(message) {
     pill.addEventListener("click", () => react(message, emote));
     bar.append(pill);
   }
+
+  // You can see reactions to your own message but not react to or report
+  // yourself.
+  if (mine) return bar;
 
   const actions = document.createElement("span");
   actions.className = "actions";
@@ -505,6 +579,7 @@ function showProfile(pubkey) {
     $("my-key").value = pubkey;
     $("show-unrated").checked = Boolean(state.settings.display?.show_unrated);
     $("add-key").value = "";
+    renderRelations();
   } else {
     $("profile-icon").src = profile.icon ? `/images/${profile.icon}` : "";
     $("profile-name").textContent = profile.username || "someone";
@@ -533,9 +608,81 @@ async function reportUser(pubkey) {
   await publishConfig();
   // Your own report blocks at once — waiting a whole session defeats the point.
   state.session.report(target, state.me.pubkey);
+  state.recentlyBlocked.set(target, Date.now());
   refreshMessages();
 
-  if (state.viewing === target) status($("profile-status"), "Reported and blocked.", "ok");
+  if (state.viewing === target) {
+    renderRelations();
+    status($("profile-status"), "Reported and blocked.", "ok");
+  }
+}
+
+async function undoReport(pubkey) {
+  const current = state.ratings[pubkey];
+  if (current) state.ratings[pubkey] = { ...current, reported: false };
+
+  await publishConfig();
+  state.session.unreport(pubkey, state.me.pubkey);
+  state.recentlyBlocked.delete(pubkey);
+
+  refreshMessages();
+  renderRelations();
+  status($("chat-status"), "Report undone.", "ok");
+}
+
+async function unfriend(pubkey) {
+  const current = state.ratings[pubkey];
+  if (current) state.ratings[pubkey] = { ...current, friend: false };
+
+  await publishConfig();
+  renderRelations();
+  // Only reports move people mid-session; everything else waits for the next
+  // login, so their bucket is deliberately left alone here.
+  status($("profile-status"), "Unfriended. Takes effect at your next login.", "ok");
+}
+
+// Who you have friended and who you have blocked, each with a way back.
+function renderRelations() {
+  fillRelations($("friend-list"), ([, r]) => r.friend, "unfriend", unfriend,
+                "You have not friended anyone yet.");
+  fillRelations($("blocked-list"), ([, r]) => r.reported, "unblock", undoReport,
+                "You have not blocked anyone.");
+}
+
+function fillRelations(box, predicate, verb, action, emptyText) {
+  const entries = Object.entries(state.ratings).filter(predicate);
+  box.replaceChildren();
+
+  if (!entries.length) {
+    const empty = document.createElement("p");
+    empty.className = "empty";
+    empty.textContent = emptyText;
+    return box.append(empty);
+  }
+
+  for (const [pubkey] of entries) {
+    const row = document.createElement("div");
+    row.className = "row";
+
+    const name = document.createElement("span");
+    name.className = "name";
+    name.textContent = displayName(pubkey);
+
+    const fp = document.createElement("span");
+    fp.className = "fp";
+    fp.textContent = fingerprint(pubkey);
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "secondary";
+    button.textContent = verb;
+    button.addEventListener("click", () => action(pubkey).catch(
+      (e) => status($("profile-status"), e.message, "error"),
+    ));
+
+    row.append(name, fp, button);
+    box.append(row);
+  }
 }
 
 async function copyKey() {

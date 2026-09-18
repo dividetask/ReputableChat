@@ -168,3 +168,64 @@ class SessionSpec < Minitest::Test
                  "raising the threshold should require a second reporter"
   end
 end
+
+# Undoing a report has to put someone back exactly where they were, or an
+# accidental click is effectively permanent until the next login.
+class SessionUndoSpec < Minitest::Test
+  include SpecHelper
+
+  VIEWER = "viewer"
+  TARGET = "target"
+
+  def session(graph, overrides = {})
+    ReputableChat::Reputation::Session.new(engine: engine(graph, overrides), viewer: VIEWER)
+  end
+
+  # RULE: undoing your own report restores the bucket you started from.
+  def test_undoing_your_own_report_restores_the_previous_bucket
+    graph = store.chain(VIEWER, TARGET)
+    s = session(graph).build([TARGET])
+    assert_equal :trusted, s.bucket_of(TARGET)
+
+    s.report(subject: TARGET, reporter: VIEWER)
+    assert_equal :blocked, s.bucket_of(TARGET)
+
+    assert_equal :trusted, s.unreport(subject: TARGET, reporter: VIEWER)
+    assert_equal :trusted, s.bucket_of(TARGET)
+  end
+
+  # RULE: undoing restores what the snapshot said, which for someone only ever
+  # seen as a stranger is still blocked.
+  def test_undoing_does_not_invent_standing
+    graph = store.chain(VIEWER, "a")
+    s = session(graph).build([])
+
+    s.report(subject: "stranger", reporter: VIEWER)
+    assert_equal :blocked, s.bucket_of("stranger")
+
+    assert_equal :blocked, s.unreport(subject: "stranger", reporter: VIEWER),
+                 "an unrated stranger is still blocked once the report is gone"
+  end
+
+  # RULE: undoing your own report must not clear somebody else's.
+  def test_undoing_yours_leaves_other_reporters_alone
+    graph = store.chain(VIEWER, "a").friend(VIEWER, TARGET)
+    s = session(graph).build([TARGET])
+
+    s.report(subject: TARGET, reporter: VIEWER)
+    s.report(subject: TARGET, reporter: "a")
+    assert_equal :blocked, s.bucket_of(TARGET)
+
+    assert_equal :blocked, s.unreport(subject: TARGET, reporter: VIEWER),
+                 "the report from one hop away still stands on its own"
+    assert_equal({ "a" => 1 }, s.reporters_of(TARGET))
+  end
+
+  # RULE: undoing a report nobody made is harmless.
+  def test_undoing_an_absent_report_is_a_no_op
+    graph = store.chain(VIEWER, TARGET)
+    s = session(graph).build([TARGET])
+
+    assert_equal :trusted, s.unreport(subject: TARGET, reporter: VIEWER)
+  end
+end

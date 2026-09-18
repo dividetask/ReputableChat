@@ -60,10 +60,18 @@ module ReputableChat
         return bucket_of(subject) if hops.nil?
 
         @reports[subject][reporter] = hops
-        bucket_of(subject)
-        @buckets[subject] = :blocked if blocked_by_reports?(subject)
+        resort(subject)
+      end
 
-        @buckets[subject]
+      # Undoes a report made this session and re-sorts the subject from the
+      # snapshot, which still holds the rating from before the report. An
+      # accidental click should not be irreversible until the next login.
+      def unreport(subject:, reporter:)
+        reporters = @reports[subject]
+        reporters.delete(reporter)
+        @reports.delete(subject) if reporters.empty?
+
+        resort(subject)
       end
 
       def reporters_of(subject) = @reports[subject].dup
@@ -83,6 +91,17 @@ module ReputableChat
       end
 
       private
+
+      # Re-sorts one person from the snapshot, then re-applies the report
+      # thresholds. Both report and unreport go through here so that removing
+      # one report cannot clear somebody else's.
+      def resort(subject)
+        @buckets.delete(subject)
+        bucket_of(subject)
+        @buckets[subject] = :blocked if blocked_by_reports?(subject)
+
+        @buckets[subject]
+      end
 
       # Copies the ratings the walk reached, so the session reads a fixed
       # graph. Freezing only the walk is not enough -- a new rating published

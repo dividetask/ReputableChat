@@ -44,6 +44,10 @@ display:
   # Show users nobody has rated. Off by default - unrated is how new accounts
   # and spam accounts both start.
   show_unrated: false
+  # After you report someone, their messages show as "blocked" with an undo for
+  # this long, then vanish. Only covers people you blocked yourself, and only
+  # until you log off.
+  block_grace_seconds: 3600
 
 session:
   # MVP only: configs are taken on trust. Flip on to verify every signature.

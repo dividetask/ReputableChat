@@ -60,6 +60,27 @@ export class Session {
     if (!this.reports.has(subject)) this.reports.set(subject, new Map());
     this.reports.get(subject).set(reporter, hops);
 
+    return this.resort(subject);
+  }
+
+  // Undoes a report made this session and re-sorts the subject from the
+  // snapshot, which still holds the rating from before the report. An
+  // accidental click should not be irreversible until the next login.
+  unreport(subject, reporter) {
+    const reporters = this.reports.get(subject);
+    if (reporters) {
+      reporters.delete(reporter);
+      if (!reporters.size) this.reports.delete(subject);
+    }
+
+    return this.resort(subject);
+  }
+
+  // Re-sorts one person from the snapshot, then re-applies the report
+  // thresholds. Both report and unreport come through here so removing one
+  // report cannot clear somebody else's.
+  resort(subject) {
+    this.buckets.delete(subject);
     this.bucketOf(subject);
     if (this.blockedByReports(subject)) this.buckets.set(subject, "blocked");
 

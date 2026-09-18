@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ReputableChat</title>
 <link rel="stylesheet" href="/css/app.css">
+<!-- Inline so there is no second request, and no 404 when none is served. -->
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%236ea8fe'/><path d='M16 6l8 3.5v6.5c0 5.5-3.4 9.2-8 10.5-4.6-1.3-8-5-8-10.5V9.5z' fill='%230b1020'/></svg>">
 </head>
 <body>
 <main id="app">
@@ -115,6 +117,16 @@
       <p class="hint">Off by default — unrated is how new accounts and spam
          accounts both start. Turn it on to find newcomers worth vouching for.
          Net-negative users stay hidden either way.</p>
+
+      <hr>
+
+      <label>People you have friended</label>
+      <div id="friend-list" class="relations"></div>
+
+      <label>People you have blocked</label>
+      <div id="blocked-list" class="relations"></div>
+      <p class="hint">Unfriending takes effect at your next login. Unblocking
+         takes effect immediately.</p>
     </div>
 
     <p id="profile-status" class="status"></p>
