@@ -127,10 +127,17 @@ function rebuildSession() {
 // No word suggestions here any more: the field is a password field so it is
 // not readable over a shoulder, and suggesting the word being typed would put
 // it straight back on screen.
+const creatingAccount = () => !$("new-account").classList.contains("hidden");
+const chosenName = () => $("new-name").value.trim();
+
 async function refreshSeedField() {
   const phrase = $("seed").value;
   const words = seed.words(phrase);
-  const reason = phrase.trim() ? await seed.validate(phrase, state.config.seed.min_words) : "type your seed";
+  let reason = phrase.trim() ? await seed.validate(phrase, state.config.seed.min_words) : "type your seed";
+
+  // On the new-account page the name is part of signing up, so it gates the
+  // button too rather than being asked for afterwards.
+  if (!reason && creatingAccount() && !chosenName()) reason = "pick a display name";
 
   $("unlock").disabled = reason !== null;
   status($("seed-status"), reason || `${words.length} words · looks good`, reason ? "" : "ok");
@@ -169,18 +176,27 @@ async function signIn(derived) {
 
   if (session.registered) return enterChat();
 
+  // Coming from the new-account page the name was given up front, so there is
+  // nothing left to ask. Reaching here any other way means an unregistered
+  // seed was typed in directly, which still needs a name and a warning.
+  if (creatingAccount() && chosenName()) return registerWith(chosenName());
+
   $("register").classList.remove("hidden");
   status($("seed-status"), "");
+}
+
+async function registerWith(username) {
+  await post("/api/register", {});
+  state.profile = { username, message: "", icon: null };
+  await publishConfig();
+  await enterChat();
 }
 
 async function createAccount() {
   const username = $("username").value.trim();
   if (!username) return status($("seed-status"), "pick a display name", "error");
 
-  await post("/api/register", {});
-  state.profile = { username, message: "", icon: null };
-  await publishConfig();
-  enterChat();
+  await registerWith(username);
 }
 
 async function logOff() {
@@ -1059,12 +1075,16 @@ async function boot() {
 
   // The seed is shown but deliberately NOT typed into the field: copying it
   // across is what makes someone keep a copy of it.
+  $("new-name").addEventListener("input", refreshSeedField);
+
   $("generate").addEventListener("click", async () => {
     $("new-seed-words").value = await seed.generate(state.config.seed.min_words);
+    $("new-name").value = "";
     $("new-account").classList.remove("hidden");
     $("login-intro").classList.add("hidden");
     $("seed").value = "";
     refreshSeedField();
+    $("new-name").focus();
   });
 
   $("copy-seed").addEventListener("click", async () => {
