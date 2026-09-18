@@ -108,3 +108,13 @@ label.checkbox input { width: auto; }
 }
 /* A blocked stub gets no avatar — showing it would defeat the block. */
 .msg.blocked-note { display: block; }
+
+/* Section headings, set on a bar. */
+h3.section {
+  margin: 22px 0 12px; padding: 6px 10px; font-size: 13px; font-weight: 600;
+  letter-spacing: .03em; text-transform: uppercase; color: var(--text);
+  background: var(--line); border-radius: 5px;
+}
+h3.section:first-child { margin-top: 0; }
+.avatar-large { width: 72px; height: 72px; border-radius: 10px; font-size: 24px; margin-bottom: 4px; }
+.avatar-large.avatar { cursor: default; }

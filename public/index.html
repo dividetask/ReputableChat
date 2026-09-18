@@ -66,7 +66,7 @@
     </header>
 
     <div id="profile-view">
-      <img id="profile-icon" alt="" width="72" height="72">
+      <div id="profile-icon" class="avatar-large"></div>
       <p id="profile-name" class="who"></p>
       <p id="profile-fp" class="fp"></p>
       <p id="profile-message"></p>
@@ -80,6 +80,8 @@
     </div>
 
     <div id="profile-edit" class="hidden">
+      <h3 class="section">Profile</h3>
+      <div id="my-avatar" class="avatar-large"></div>
       <label for="my-username">Display name</label>
       <input id="my-username" type="text" maxlength="64" autocomplete="off">
       <label for="my-message">About you</label>
@@ -88,45 +90,29 @@
       <input id="my-icon" type="file" accept="image/png,image/jpeg,image/gif,image/webp">
       <div class="row"><button id="profile-save">Save profile</button></div>
 
-      <hr>
-
-      <label for="my-key">Your key — give this to people so they can add you</label>
+      <h3 class="section">Your Key (Public)</h3>
       <div class="row">
         <input id="my-key" type="text" readonly>
         <button id="copy-key" class="secondary" type="button">Copy</button>
       </div>
-      <p class="hint">This is your whole identity. It is safe to share — unlike
-         your seed phrase, which nobody should ever see.</p>
 
-      <hr>
-
-      <label for="add-key">Add someone by their key</label>
+      <h3 class="section">Add Someone</h3>
       <div class="row">
         <input id="add-key" type="text" autocomplete="off" spellcheck="false" placeholder="their key">
         <button id="add-friend" type="button">Add as friend</button>
       </div>
-      <p class="hint">Friending is worth +0.5, which is enough on its own to put
-         them in Trusted.</p>
 
-      <hr>
-
+      <h3 class="section">Settings</h3>
       <label class="checkbox" for="show-unrated">
         <input id="show-unrated" type="checkbox">
         Show users nobody has rated
       </label>
-      <p class="hint">Off by default — unrated is how new accounts and spam
-         accounts both start. Turn it on to find newcomers worth vouching for.
-         Net-negative users stay hidden either way.</p>
 
-      <hr>
-
-      <label>People you have friended</label>
+      <h3 class="section">Friend List</h3>
       <div id="friend-list" class="relations"></div>
 
-      <label>People you have blocked</label>
+      <h3 class="section">Blocked List</h3>
       <div id="blocked-list" class="relations"></div>
-      <p class="hint">Unfriending takes effect at your next login. Unblocking
-         takes effect immediately.</p>
     </div>
 
     <p id="profile-status" class="status"></p>

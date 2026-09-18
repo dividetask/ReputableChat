@@ -426,12 +426,12 @@ function blockedStub(message) {
 
 // Names are not unique, so an avatar derived from the key gives every person a
 // stable look even before they upload one. Same key, same colour, always.
-function avatarFor(pubkey) {
-  const icon = state.profiles?.get(pubkey)?.icon;
-
+function avatarFor(pubkey, extra = "", icon = state.profiles?.get(pubkey)?.icon) {
+  // An <img> with an empty src resolves to the page URL and renders as a
+  // broken image, so anyone without an icon gets the placeholder instead.
   if (icon) {
     const img = document.createElement("img");
-    img.className = "avatar";
+    img.className = `avatar ${extra}`.trim();
     img.src = `/images/${icon}`;
     img.alt = "";
     img.addEventListener("click", () => showProfile(pubkey));
@@ -442,7 +442,7 @@ function avatarFor(pubkey) {
   for (const character of pubkey) hash = ((hash * 31) + character.charCodeAt(0)) >>> 0;
 
   const placeholder = document.createElement("span");
-  placeholder.className = "avatar placeholder";
+  placeholder.className = `avatar placeholder ${extra}`.trim();
   placeholder.style.background = `hsl(${hash % 360} 42% 30%)`;
   placeholder.textContent = pubkey.slice(0, 2);
   placeholder.addEventListener("click", () => showProfile(pubkey));
@@ -579,9 +579,10 @@ function showProfile(pubkey) {
     $("my-key").value = pubkey;
     $("show-unrated").checked = Boolean(state.settings.display?.show_unrated);
     $("add-key").value = "";
+    $("my-avatar").replaceChildren(avatarFor(pubkey, "avatar-large", state.profile.icon));
     renderRelations();
   } else {
-    $("profile-icon").src = profile.icon ? `/images/${profile.icon}` : "";
+    $("profile-icon").replaceChildren(avatarFor(pubkey, "avatar-large", profile.icon));
     $("profile-name").textContent = profile.username || "someone";
     $("profile-fp").textContent = fingerprint(pubkey);
     $("profile-message").textContent = profile.message || "";
@@ -643,20 +644,18 @@ async function unfriend(pubkey) {
 
 // Who you have friended and who you have blocked, each with a way back.
 function renderRelations() {
-  fillRelations($("friend-list"), ([, r]) => r.friend, "unfriend", unfriend,
-                "You have not friended anyone yet.");
-  fillRelations($("blocked-list"), ([, r]) => r.reported, "unblock", undoReport,
-                "You have not blocked anyone.");
+  fillRelations($("friend-list"), ([, r]) => r.friend, "unfriend", unfriend);
+  fillRelations($("blocked-list"), ([, r]) => r.reported, "unblock", undoReport);
 }
 
-function fillRelations(box, predicate, verb, action, emptyText) {
+function fillRelations(box, predicate, verb, action) {
   const entries = Object.entries(state.ratings).filter(predicate);
   box.replaceChildren();
 
   if (!entries.length) {
     const empty = document.createElement("p");
     empty.className = "empty";
-    empty.textContent = emptyText;
+    empty.textContent = "none";
     return box.append(empty);
   }
 
@@ -801,6 +800,9 @@ async function saveProfile() {
   await publishConfig();
   state.profiles.set(state.me.pubkey, state.profile);
   $("me").textContent = `${state.profile.username} · ${fingerprint(state.me.pubkey)}`;
+  $("my-avatar").replaceChildren(avatarFor(state.me.pubkey, "avatar-large", state.profile.icon));
+  $("my-icon").value = "";
+  refreshMessages();
   status($("profile-status"), "Saved.", "ok");
 }
 
