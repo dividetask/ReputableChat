@@ -52,6 +52,10 @@
       </span>
     </header>
     <div id="messages" class="messages"></div>
+    <div id="replying" class="replying hidden">
+      <span id="replying-to"></span>
+      <button id="cancel-reply" type="button" class="secondary">cancel</button>
+    </div>
     <form id="composer">
       <input id="body" type="text" maxlength="4000" autocomplete="off" placeholder="Say something">
       <button type="submit">Send</button>
@@ -113,6 +117,9 @@
 
       <h3 class="section">Blocked List</h3>
       <div id="blocked-list" class="relations"></div>
+
+      <h3 class="section">Ratings</h3>
+      <div id="rating-list" class="relations"></div>
     </div>
 
     <p id="profile-status" class="status"></p>

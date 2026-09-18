@@ -138,6 +138,8 @@ module ReputableChat
         return nil unless [true, false].include?(rating["friend"])
         return nil unless [true, false].include?(rating["reported"])
         return nil unless integer(rating["net_votes"], min: -1_000_000, max: 1_000_000)
+        # Optional so a config written before `cleared` existed still validates.
+        return nil unless [nil, true, false].include?(rating["cleared"])
       end
 
       value

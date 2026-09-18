@@ -71,6 +71,7 @@ module ReputableChat
           String   :room, null: false, index: true
           Integer  :seq, null: false
           String   :prev
+          String   :reply_to
           String   :payload, text: true, null: false
           String   :signature, null: false
           Integer  :received_at, null: false
@@ -89,6 +90,12 @@ module ReputableChat
           String   :signature, null: false
           Integer  :received_at, null: false
           unique %i[author message]
+        end
+
+        # create_table? leaves an existing table alone, so a database made
+        # before reply_to existed needs the column adding explicitly.
+        unless @db[:messages].columns.include?(:reply_to)
+          @db.alter_table(:messages) { add_column :reply_to, String }
         end
 
         @db.create_table?(:nonces) do
@@ -199,9 +206,9 @@ module ReputableChat
         @db[:messages].where(author: author).order(Sequel.desc(:seq)).first
       end
 
-      def store_message(author:, room:, seq:, prev:, payload:, signature:)
+      def store_message(author:, room:, seq:, prev:, payload:, signature:, reply_to: nil)
         @db[:messages].insert(
-          author: author, room: room, seq: seq, prev: prev,
+          author: author, room: room, seq: seq, prev: prev, reply_to: reply_to,
           payload: payload, signature: signature, received_at: now
         )
         :ok

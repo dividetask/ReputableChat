@@ -147,8 +147,8 @@ export function loginPayload({ pubkey, nonce, origin, ts }) {
   return { purpose: PURPOSE.LOGIN, pubkey, nonce, origin, ts };
 }
 
-export function messagePayload({ author, room, seq, prev, body, ts }) {
-  return { purpose: PURPOSE.MESSAGE, author, room, seq, prev, ts, body };
+export function messagePayload({ author, room, seq, prev, body, ts, replyTo = null }) {
+  return { purpose: PURPOSE.MESSAGE, author, room, seq, prev, reply_to: replyTo, ts, body };
 }
 
 export function configPayload({ pubkey, version, profile, ratings, ts }) {

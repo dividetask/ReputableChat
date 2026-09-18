@@ -270,6 +270,49 @@ class AppSpec < Minitest::Test
 
   # --- messages ---------------------------------------------------------
 
+  def test_stores_a_reply_and_serves_the_target_back
+    log_in
+    ts = Time.now.to_i
+    target = "t" * 86
+    payload = Payload.message(author: @pubkey, room: "general", seq: 1, prev: nil,
+                              body: "agreed", issued_at: ts, reply_to: target)
+
+    post_json "/api/room/general/message",
+              { "seq" => 1, "prev" => nil, "body" => "agreed", "ts" => ts,
+                "reply_to" => target, "signature" => sign(payload) }
+    assert_equal 200, last_response.status
+
+    get "/api/room/general/messages"
+    assert_equal target, json["messages"].first["reply_to"]
+  end
+
+  # RULE: the reply target is signed, so it cannot be swapped in transit.
+  def test_rejects_a_reply_whose_target_was_altered
+    log_in
+    ts = Time.now.to_i
+    payload = Payload.message(author: @pubkey, room: "general", seq: 1, prev: nil,
+                              body: "agreed", issued_at: ts, reply_to: "t" * 86)
+
+    post_json "/api/room/general/message",
+              { "seq" => 1, "prev" => nil, "body" => "agreed", "ts" => ts,
+                "reply_to" => "x" * 86, "signature" => sign(payload) }
+
+    assert_equal 400, last_response.status
+  end
+
+  def test_rejects_a_malformed_reply_target
+    log_in
+    ts = Time.now.to_i
+    payload = Payload.message(author: @pubkey, room: "general", seq: 1, prev: nil,
+                              body: "hi", issued_at: ts, reply_to: "nope")
+
+    post_json "/api/room/general/message",
+              { "seq" => 1, "prev" => nil, "body" => "hi", "ts" => ts,
+                "reply_to" => "nope", "signature" => sign(payload) }
+
+    assert_equal 400, last_response.status
+  end
+
   def test_stores_a_signed_message
     log_in
     ts = Time.now.to_i

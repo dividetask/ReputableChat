@@ -15,7 +15,7 @@ const state = {
   config: null, emotes: null, me: null, profile: null, version: 0,
   ratings: {}, graph: new Graph(), reputation: null, session: null,
   seq: 0, voted: new Set(), viewing: null, settings: {}, privateVersion: 0,
-  reactions: new Map(), recentlyBlocked: new Map(),
+  reactions: new Map(), recentlyBlocked: new Map(), replyingTo: null,
 };
 
 async function api(path, options = {}) {
@@ -318,6 +318,8 @@ function render(messages) {
   const list = $("messages");
   list.replaceChildren();
 
+  const bySignature = new Map(messages.map((m) => [m.signature, m]));
+
   for (const message of messages) {
     const mine = message.author === state.me.pubkey;
     const bucket = mine ? "trusted" : state.session.bucketOf(message.author);
@@ -338,6 +340,7 @@ function render(messages) {
 
     const row = document.createElement("div");
     row.className = `msg ${bucket}`;
+    row.id = domId(message.signature);
 
     const main = document.createElement("div");
     main.className = "msg-main";
@@ -354,8 +357,9 @@ function render(messages) {
     const body = document.createElement("div");
     body.textContent = payload.body; // textContent, never innerHTML
 
+    if (payload.reply_to) main.append(replyQuote(payload.reply_to, bySignature));
     main.append(who, fp, body, reactionBar(message, mine));
-    row.append(main, avatarFor(message.author));
+    row.append(avatarFor(message.author), main);
     list.append(row);
   }
 
@@ -449,6 +453,66 @@ function avatarFor(pubkey, extra = "", icon = state.profiles?.get(pubkey)?.icon)
   return placeholder;
 }
 
+// Signatures are base64url, so they are already safe as an element id.
+const domId = (signature) => `m-${signature}`;
+
+// The quoted line above a reply. Clicking it scrolls to what was replied to.
+function replyQuote(targetSignature, bySignature) {
+  const quote = document.createElement("div");
+  quote.className = "reply-quote";
+
+  const target = bySignature.get(targetSignature);
+  if (!target) {
+    quote.classList.add("dangling");
+    quote.textContent = "replying to a message you cannot see";
+    return quote;
+  }
+
+  let body = "";
+  try {
+    body = JSON.parse(target.payload).body;
+  } catch {
+    body = "";
+  }
+
+  const arrow = document.createElement("span");
+  arrow.className = "arrow";
+  arrow.textContent = "\u21B1";
+
+  const name = document.createElement("span");
+  name.textContent = displayName(target.author);
+
+  const snippet = document.createElement("span");
+  snippet.className = "snippet";
+  snippet.textContent = body;
+
+  quote.append(arrow, avatarFor(target.author), name, snippet);
+  quote.addEventListener("click", () => scrollToMessage(targetSignature));
+  return quote;
+}
+
+function scrollToMessage(signature) {
+  const row = document.getElementById(domId(signature));
+  if (!row) return;
+
+  row.scrollIntoView({ behavior: "smooth", block: "center" });
+  row.classList.remove("flash");
+  void row.offsetWidth; // restart the animation if it is already running
+  row.classList.add("flash");
+}
+
+function startReply(message) {
+  state.replyingTo = message;
+  $("replying").classList.remove("hidden");
+  $("replying-to").textContent = `Replying to ${displayName(message.author)}`;
+  $("body").focus();
+}
+
+function cancelReply() {
+  state.replyingTo = null;
+  $("replying").classList.add("hidden");
+}
+
 function displayName(pubkey) {
   return state.profiles?.get(pubkey)?.username || "someone";
 }
@@ -491,6 +555,12 @@ function reactionBar(message, mine) {
     }
   }
 
+  const reply = document.createElement("button");
+  reply.type = "button";
+  reply.textContent = "reply";
+  reply.addEventListener("click", () => startReply(message));
+  actions.append(reply);
+
   const report = document.createElement("button");
   report.type = "button";
   report.textContent = "report";
@@ -517,16 +587,9 @@ async function react(message, emote) {
       signature: await identity.sign(state.me, payload),
     });
 
-    const current = state.ratings[message.author] || { friend: false, reported: false, net_votes: 0 };
-    state.ratings[message.author] = {
-      ...current, net_votes: current.net_votes + polarityOf(emote),
-    };
-    state.voted.add(message.signature);
-
     // Buckets do not move for emotes until the next login, by design; the
     // refresh only repaints the reaction counts.
-    await publishConfig();
-    await publishPrivateConfig();
+    await countAsVote(message, polarityOf(emote));
     refreshMessages();
   } catch (error) {
     status($("chat-status"), error.message, "error");
@@ -540,20 +603,42 @@ async function compose(event) {
 
   const ts = Math.floor(Date.now() / 1000);
   const seq = state.seq + 1;
+  const replyingTo = state.replyingTo;
+  const replyTo = replyingTo ? replyingTo.signature : null;
   const payload = identity.messagePayload({
-    author: state.me.pubkey, room: ROOM, seq, prev: null, body, ts,
+    author: state.me.pubkey, room: ROOM, seq, prev: null, body, ts, replyTo,
   });
 
   try {
     await post(`/api/room/${ROOM}/message`, {
-      seq, prev: null, body, ts, signature: await identity.sign(state.me, payload),
+      seq, prev: null, body, ts, reply_to: replyTo,
+      signature: await identity.sign(state.me, payload),
     });
     $("body").value = "";
     state.seq = seq;
+    cancelReply();
+
+    // Replying counts like reacting: one vote per message either way, so
+    // replying to something you already reacted to does not vote twice.
+    if (replyingTo && replyingTo.author !== state.me.pubkey) await countAsVote(replyingTo, 1);
+
     refreshMessages();
   } catch (error) {
     status($("chat-status"), error.message, "error");
   }
+}
+
+// Shared by reacting and replying. Does nothing if this message has already
+// been voted on.
+async function countAsVote(message, polarity) {
+  if (state.voted.has(message.signature)) return;
+
+  const current = state.ratings[message.author] || { friend: false, reported: false, net_votes: 0 };
+  state.ratings[message.author] = { ...current, net_votes: (current.net_votes || 0) + polarity };
+  state.voted.add(message.signature);
+
+  await publishConfig();
+  await publishPrivateConfig();
 }
 
 // --- profiles ----------------------------------------------------------
@@ -646,6 +731,68 @@ async function unfriend(pubkey) {
 function renderRelations() {
   fillRelations($("friend-list"), ([, r]) => r.friend, "unfriend", unfriend);
   fillRelations($("blocked-list"), ([, r]) => r.reported, "unblock", undoReport);
+  renderRatings();
+}
+
+// Everyone you have rated directly, and what that rating comes to. Only your
+// own actions count here -- nothing inherited through the social graph.
+function renderRatings() {
+  const box = $("rating-list");
+  box.replaceChildren();
+
+  const entries = Object.entries(state.ratings)
+    .filter(([, r]) => r.friend || r.reported || r.cleared || (r.net_votes || 0) !== 0)
+    .sort((a, b) => Number(state.reputation.ratingValue(b[1]) - state.reputation.ratingValue(a[1])));
+
+  if (!entries.length) {
+    const empty = document.createElement("p");
+    empty.className = "empty";
+    empty.textContent = "none";
+    return box.append(empty);
+  }
+
+  for (const [pubkey, rating] of entries) {
+    const row = document.createElement("div");
+    row.className = "row";
+
+    const name = document.createElement("span");
+    name.className = "name";
+    name.textContent = displayName(pubkey);
+
+    const fp = document.createElement("span");
+    fp.className = "fp";
+    fp.textContent = fingerprint(pubkey);
+
+    const score = document.createElement("span");
+    score.className = "score";
+    score.textContent = toNumber(state.reputation.ratingValue(rating)).toFixed(4);
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "secondary";
+    button.textContent = "remove";
+    // Friending and reporting are deliberate and outrank a reset, so there is
+    // nothing for this to do until one of them is undone above.
+    button.disabled = Boolean(rating.friend || rating.reported);
+    button.title = button.disabled ? "unfriend or unblock them first" : "set their rating to zero";
+    button.addEventListener("click", () => clearRating(pubkey).catch(
+      (e) => status($("profile-status"), e.message, "error"),
+    ));
+
+    row.append(name, fp, score, button);
+    box.append(row);
+  }
+}
+
+// Pins someone to zero. `cleared` survives later emotes and replies, so this
+// is not undone the next time they are voted on.
+async function clearRating(pubkey) {
+  const current = state.ratings[pubkey] || { friend: false, reported: false, net_votes: 0 };
+  state.ratings[pubkey] = { ...current, cleared: true };
+
+  await publishConfig();
+  renderRatings();
+  status($("profile-status"), "Rating removed.", "ok");
 }
 
 function fillRelations(box, predicate, verb, action) {
@@ -818,6 +965,7 @@ async function boot() {
   $("create").addEventListener("click", () => createAccount().catch((e) => status($("seed-status"), e.message, "error")));
   $("logout").addEventListener("click", logOff);
   $("composer").addEventListener("submit", compose);
+  $("cancel-reply").addEventListener("click", cancelReply);
   $("my-profile").addEventListener("click", () => showProfile(state.me.pubkey));
   $("profile-close").addEventListener("click", () => showPanel("chat"));
   $("profile-friend").addEventListener("click", () => friendUser().catch((e) => status($("profile-status"), e.message, "error")));

@@ -246,14 +246,17 @@ module ReputableChat
       sig    = Params.signature(r.params["signature"]) or bad_request(r, "bad signature")
       ts     = Params.integer(r.params["ts"]) or bad_request(r, "bad timestamp")
       prev   = r.params["prev"].nil? ? nil : Params.signature(r.params["prev"])
+      reply  = r.params["reply_to"].nil? ? nil : Params.signature(r.params["reply_to"])
+      bad_request(r, "bad reply target") if !r.params["reply_to"].nil? && reply.nil?
 
       payload = Cryptography::Payload.message(
-        author: author, room: room, seq: seq, prev: prev, body: body, issued_at: ts
+        author: author, room: room, seq: seq, prev: prev, body: body,
+        issued_at: ts, reply_to: reply
       )
       verify!(r, author, sig, payload)
 
       result = store.store_message(
-        author: author, room: room, seq: seq, prev: prev,
+        author: author, room: room, seq: seq, prev: prev, reply_to: reply,
         payload: Cryptography::Canonical.dump(payload), signature: sig
       )
       r.halt(409, { "error" => "that sequence number is already used" }) if result == :duplicate
@@ -313,8 +316,8 @@ module ReputableChat
 
     def present_message(row)
       { "author" => row[:author], "seq" => row[:seq], "prev" => row[:prev],
-        "payload" => row[:payload], "signature" => row[:signature],
-        "received_at" => row[:received_at] }
+        "reply_to" => row[:reply_to], "payload" => row[:payload],
+        "signature" => row[:signature], "received_at" => row[:received_at] }
     end
 
     # Content-addressed, so the bytes can never change under a given name.

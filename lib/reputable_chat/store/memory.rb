@@ -11,9 +11,9 @@ module ReputableChat
         @ratings = Hash.new { |h, k| h[k] = {} }
       end
 
-      def rate(rater, subject, friend: false, reported: false, net_votes: 0)
+      def rate(rater, subject, friend: false, reported: false, net_votes: 0, cleared: false)
         @ratings[rater][subject] = Reputation::Rating.new(
-          friend: friend, reported: reported, net_votes: net_votes
+          friend: friend, reported: reported, net_votes: net_votes, cleared: cleared
         )
         self
       end

@@ -9,7 +9,10 @@ body {
 }
 #app { max-width: 760px; margin: 0 auto; padding: 24px 16px; }
 .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 20px; }
-.hidden { display: none; }
+/* A utility that has to beat whatever display rule an element already carries,
+   including one defined later in this file. Without !important, .replying's
+   own `display: flex` silently won and the bar would never hide. */
+.hidden { display: none !important; }
 h1 { margin: 0 0 4px; font-size: 22px; }
 label { display: block; margin: 14px 0 4px; font-size: 13px; color: var(--muted); }
 textarea, input[type=text] {
@@ -39,7 +42,10 @@ pre { background: #0f1115; padding: 12px; border-radius: 6px; white-space: pre-w
 .msg .fp { color: var(--muted); font-family: ui-monospace, monospace; font-size: 12px; margin-left: 6px; }
 /* Tolerated: readable, but clearly marked as unvouched-for. */
 .msg.tolerated { opacity: .45; }
-.msg.tolerated .who::after { content: " · untrusted"; color: var(--warn); font-weight: 400; font-size: 12px; }
+.msg.tolerated .who::after {
+  content: " · untrusted"; color: var(--warn); font-weight: 400;
+  font-size: 12px; margin-left: 2px;
+}
 #composer { display: flex; gap: 8px; margin-top: 12px; }
 #composer input { flex: 1; }
 
@@ -69,7 +75,10 @@ pre { background: #0f1115; padding: 12px; border-radius: 6px; white-space: pre-w
   padding: 2px 5px; font-size: 14px; font-weight: 400; border-radius: 4px;
 }
 .msg .actions button:hover { background: var(--line); }
-.msg .who { cursor: pointer; text-decoration: underline dotted; }
+/* No underline: at this size it renders like a strikethrough and collides with
+   the untrusted marker. Bold plus a hover colour is enough of an affordance. */
+.msg .who { cursor: pointer; }
+.msg .who:hover { color: var(--accent); }
 #profile-icon { border-radius: 8px; background: #0f1115; object-fit: cover; }
 #breakdown { margin-top: 14px; font-family: ui-monospace, monospace; font-size: 12px; }
 #breakdown table { width: 100%; border-collapse: collapse; }
@@ -118,3 +127,25 @@ h3.section {
 h3.section:first-child { margin-top: 0; }
 .avatar-large { width: 72px; height: 72px; border-radius: 10px; font-size: 24px; margin-bottom: 4px; }
 .avatar-large.avatar { cursor: default; }
+
+/* Reply: a quoted line above the message, and a bar above the composer. */
+.reply-quote {
+  display: flex; align-items: center; gap: 6px; margin-bottom: 3px;
+  font-size: 13px; color: var(--muted); cursor: pointer;
+}
+.reply-quote:hover { color: var(--text); }
+.reply-quote .avatar { width: 16px; height: 16px; border-radius: 3px; font-size: 9px; }
+.reply-quote .snippet { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60%; }
+.reply-quote .arrow { color: var(--line); }
+.reply-quote.dangling { cursor: default; font-style: italic; }
+.replying {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  margin-top: 10px; padding: 5px 10px; font-size: 13px; color: var(--muted);
+  background: var(--line); border-radius: 5px 5px 0 0;
+}
+.replying button { padding: 2px 8px; font-size: 12px; }
+@keyframes flash { from { background: #2b3a55; } to { background: transparent; } }
+.msg.flash { animation: flash 1.2s ease-out; }
+
+.relations .score { font-family: ui-monospace, monospace; font-size: 12px; color: var(--muted); }
+.relations button:disabled { opacity: .35; }

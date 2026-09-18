@@ -219,3 +219,60 @@ class ReputationRulesSpec < Minitest::Test
                  "a blank value must track the default"
   end
 end
+
+# `cleared` is the profile's "remove" button: it pins someone to zero whatever
+# they have been emoted or replied to, before or since.
+class ClearedRatingSpec < Minitest::Test
+  include SpecHelper
+
+  VIEWER = "viewer"
+  TARGET = "target"
+
+  # RULE: clearing wipes accumulated votes, in either direction.
+  def test_clearing_pins_a_rating_to_zero
+    graph = store.rate(VIEWER, TARGET, net_votes: 30, cleared: true)
+    assert_equal dec("0"), engine(graph).effective(viewer: VIEWER, target: TARGET)
+
+    graph.rate(VIEWER, TARGET, net_votes: -30, cleared: true)
+    assert_equal dec("0"), engine(graph).effective(viewer: VIEWER, target: TARGET)
+  end
+
+  # RULE: a cleared user is blocked, not merely quiet -- zero is not above zero.
+  def test_a_cleared_user_is_blocked
+    graph = store.rate(VIEWER, TARGET, net_votes: 30, cleared: true)
+
+    assert_equal :blocked, engine(graph).bucket(viewer: VIEWER, target: TARGET)
+  end
+
+  # RULE: friending outranks clearing, which is why the UI will not offer to
+  # clear a friend.
+  def test_friending_outranks_clearing
+    graph = store.rate(VIEWER, TARGET, friend: true, net_votes: 2, cleared: true)
+
+    assert_equal :trusted, engine(graph).bucket(viewer: VIEWER, target: TARGET)
+  end
+
+  # RULE: reporting outranks everything.
+  def test_reporting_outranks_clearing
+    graph = store.rate(VIEWER, TARGET, reported: true, net_votes: 30, cleared: true)
+
+    assert_equal dec("-0.9"), engine(graph).effective(viewer: VIEWER, target: TARGET)
+  end
+
+  # RULE: a cleared link is not positive, so the walk stops there.
+  def test_a_cleared_user_does_not_carry_the_walk
+    graph = store.rate(VIEWER, "a", net_votes: 30, cleared: true)
+    graph.friend("a", TARGET)
+
+    refute engine(graph).reachable_depths(VIEWER).key?(TARGET)
+  end
+
+  # RULE: a config written before `cleared` existed still loads.
+  def test_ratings_without_cleared_still_parse
+    rating = ReputableChat::Reputation::Rating.from_h(
+      { "friend" => false, "reported" => false, "net_votes" => 3 }
+    )
+
+    refute rating.cleared
+  end
+end

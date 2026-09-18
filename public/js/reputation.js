@@ -22,6 +22,7 @@ export function toNumber(fixed) {
 }
 
 const mul = (a, b) => (a * b) / SCALE;
+const clamp = (v) => (v > SCALE ? SCALE : v < -SCALE ? -SCALE : v);
 
 export class Reputation {
   constructor(config) {
@@ -61,19 +62,22 @@ export class Reputation {
     return net < 0 ? -value : value;
   }
 
+  // Precedence: report, then friend, then cleared, then accumulated votes.
+  //
   // A report is absolute within one rater: it overrides however many of the
   // target's comments that same rater liked. Across raters it is only -1 in
-  // the mean, and so remains outvoteable.
+  // the mean, and so remains outvoteable. `cleared` pins someone to zero
+  // however often they are emoted or replied to, before or after; friending is
+  // deliberate and outranks it.
   ratingValue(rating) {
     if (!rating) return null;
     if (rating.reported) return -SCALE;
 
-    let value = this.curve(rating.net_votes || 0);
-    if (rating.friend) value += this.friendValue;
+    const votes = this.curve(rating.net_votes || 0);
+    if (rating.friend) return clamp(this.friendValue + votes);
+    if (rating.cleared) return 0n;
 
-    if (value > SCALE) return SCALE;
-    if (value < -SCALE) return -SCALE;
-    return value;
+    return clamp(votes);
   }
 
   // Breadth-first, gated at every hop. Reaching a hop means every link on the

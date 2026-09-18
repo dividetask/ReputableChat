@@ -28,15 +28,19 @@ module ReputableChat
       # silently drop or reorder one without it being detectable. `ts` is the
       # client's clock and is attacker-controlled; the server records its own
       # receipt time separately and unsigned.
-      def message(author:, room:, seq:, prev:, body:, issued_at:)
+      # `reply_to` is the signature of the message being replied to, or nil.
+      # Always present so the canonical form does not change shape between a
+      # reply and an ordinary message.
+      def message(author:, room:, seq:, prev:, body:, issued_at:, reply_to: nil)
         {
-          "purpose" => MESSAGE,
-          "author"  => author,
-          "room"    => room,
-          "seq"     => seq.to_i,
-          "prev"    => prev,
-          "ts"      => issued_at.to_i,
-          "body"    => body
+          "purpose"  => MESSAGE,
+          "author"   => author,
+          "room"     => room,
+          "seq"      => seq.to_i,
+          "prev"     => prev,
+          "reply_to" => reply_to,
+          "ts"       => issued_at.to_i,
+          "body"     => body
         }
       end
 
