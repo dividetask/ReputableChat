@@ -452,6 +452,26 @@ class FrozenAppSpec < Minitest::Test
     assert_equal 2048, last_response.body.split("\n").size
   end
 
+  # RULE: browsers must revalidate the app's own modules. Without an explicit
+  # policy they cache each file independently on a heuristic, which after a
+  # deploy leaves someone running a new app.js against a stale session.js --
+  # and for signed payloads that is a silent failure, not a loud one.
+  def test_modules_must_be_revalidated
+    %w[/js/app.js /js/session.js /js/identity.js /css/app.css].each do |path|
+      get path
+
+      assert_equal 200, last_response.status, path
+      assert_equal "no-cache", last_response.headers["Cache-Control"], path
+    end
+  end
+
+  # RULE: things whose name is their content never need revalidating.
+  def test_content_addressed_assets_stay_immutable
+    get "/wordlist.txt"
+
+    assert_includes last_response.headers["Cache-Control"], "immutable"
+  end
+
   def test_security_headers_are_present_on_api_responses
     get "/api/defaults"
 

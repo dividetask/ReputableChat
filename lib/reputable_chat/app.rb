@@ -31,7 +31,13 @@ module ReputableChat
            error_handler: ->(r) { r.halt(400, '{"error":"malformed json"}') }
     plugin :halt
     plugin :all_verbs
-    plugin :public, root: "public"
+    # "no-cache" means cache but always revalidate, not "do not cache" -- an
+    # unchanged file still answers 304. Without it browsers fall back to
+    # heuristic caching and cache each module independently, so a deploy can
+    # leave someone running a new app.js against a stale session.js. For signed
+    # payloads that is the silent-failure case: mismatched shapes produce
+    # signature errors with no obvious cause.
+    plugin :public, root: "public", headers: { "Cache-Control" => "no-cache" }
     plugin :default_headers,
            "Content-Type" => "application/json",
            "X-Content-Type-Options" => "nosniff",
