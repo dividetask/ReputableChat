@@ -641,19 +641,21 @@ function reactionBar(message, mine) {
   const actions = document.createElement("span");
   actions.className = "actions";
 
-  if (!reacted) {
-    actions.append(emoteRow(message, state.emotes.positive.slice(0, QUICK_EMOTES), "positive"));
-  }
-
+  // Reply rides the positive row and report the negative one, so each action
+  // sits with the emotes of its own sign, and reply lands above report.
+  const upper = emoteRow(message, reacted ? [] : state.emotes.positive.slice(0, QUICK_EMOTES), "positive");
   const lower = emoteRow(message, reacted ? [] : state.emotes.negative, "negative");
 
-  if (!reacted) lower.append(Object.assign(document.createElement("span"), { className: "divider" }));
+  if (!reacted) {
+    upper.append(divider());
+    lower.append(divider());
+  }
 
   const reply = document.createElement("button");
   reply.type = "button";
   reply.textContent = "reply";
   reply.addEventListener("click", () => startReply(message));
-  lower.append(reply);
+  upper.append(reply);
 
   const report = document.createElement("button");
   report.type = "button";
@@ -661,10 +663,12 @@ function reactionBar(message, mine) {
   report.addEventListener("click", () => reportUser(message.author));
   lower.append(report);
 
-  actions.append(lower);
+  actions.append(upper, lower);
   bar.append(actions);
   return bar;
 }
+
+const divider = () => Object.assign(document.createElement("span"), { className: "divider" });
 
 function emoteRow(message, emotes, kind) {
   const row = document.createElement("div");
