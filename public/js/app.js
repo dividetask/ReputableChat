@@ -8,6 +8,8 @@ import { Reputation, Graph, toNumber } from "./reputation.js";
 import { Session } from "./session.js";
 
 const ROOM = "general";
+const LOGIN_PATH = "/";
+const NEW_ACCOUNT_PATH = "/new-account";
 // A quick picker, not the whole set: sixteen emotes make a toolbar wider than
 // the message it floats over. The rest stay configured and unused for now.
 const QUICK_EMOTES = 8;
@@ -127,7 +129,22 @@ function rebuildSession() {
 // No word suggestions here any more: the field is a password field so it is
 // not readable over a shoulder, and suggesting the word being typed would put
 // it straight back on screen.
-const creatingAccount = () => !$("new-account").classList.contains("hidden");
+// Login and new account are separate URLs, navigated with pushState so the
+// derived key and the typed seed survive the move between them.
+const creatingAccount = () => window.location.pathname === NEW_ACCOUNT_PATH;
+
+function goTo(path, { replace = false } = {}) {
+  if (window.location.pathname !== path) {
+    window.history[replace ? "replaceState" : "pushState"]({}, "", path);
+  }
+  renderRoute();
+}
+
+function renderRoute() {
+  const newAccount = creatingAccount();
+  $("new-account").classList.toggle("hidden", !newAccount);
+  $("login-intro").classList.toggle("hidden", newAccount);
+}
 const chosenName = () => $("new-name").value.trim();
 
 async function refreshSeedField() {
@@ -165,7 +182,9 @@ async function unlock(event) {
   }
 }
 
-async function signIn(derived) {
+// `restoring` means this came from a key left in IndexedDB rather than from
+// someone typing a seed, so nothing here may open a signup they did not ask for.
+async function signIn(derived, { restoring = false } = {}) {
   const { nonce } = await post("/api/challenge", {});
   const ts = Math.floor(Date.now() / 1000);
   const payload = identity.loginPayload({
@@ -177,9 +196,18 @@ async function signIn(derived) {
   });
 
   state.me = derived;
-  await identity.remember({ privateKey: derived.privateKey, pubkey: derived.pubkey });
 
   if (session.registered) return enterChat();
+
+  // A remembered key whose account was never created -- someone started a
+  // signup and left. Drop it and stay on the login screen rather than making
+  // the new account screen the first thing anyone sees.
+  if (restoring) {
+    await identity.forget();
+    state.me = null;
+    return;
+  }
+
   if (creatingAccount() && chosenName()) return registerWith(chosenName());
 
   // An unregistered seed typed on the login screen. Send them to the new
@@ -189,11 +217,23 @@ async function signIn(derived) {
   state.pendingRegistration = true;
   $("new-seed-block").classList.add("hidden");
   $("unregistered-note").classList.remove("hidden");
-  $("new-account").classList.remove("hidden");
-  $("login-intro").classList.add("hidden");
   $("new-name").value = "";
+  goTo(NEW_ACCOUNT_PATH);
   $("new-name").focus();
   refreshSeedField();
+}
+
+// A brand new seed, shown so it can be copied across.
+async function startNewAccount() {
+  $("new-seed-words").value = await seed.generate(state.config.seed.min_words);
+  $("new-name").value = "";
+  $("seed").value = "";
+  state.pendingRegistration = false;
+  $("new-seed-block").classList.remove("hidden");
+  $("unregistered-note").classList.add("hidden");
+  goTo(NEW_ACCOUNT_PATH);
+  refreshSeedField();
+  $("new-name").focus();
 }
 
 async function registerWith(username) {
@@ -301,6 +341,11 @@ async function fetchConfigs(pubkeys) {
 // --- chat --------------------------------------------------------------
 
 async function enterChat() {
+  // Remembered only now: before the account exists, storing the key strands a
+  // signup nobody finished.
+  await identity.remember({ privateKey: state.me.privateKey, pubkey: state.me.pubkey });
+
+  goTo(LOGIN_PATH, { replace: true }); // do not leave /new-account in the bar
   $("seed").value = ""; // the seed has done its job
   state.pendingRegistration = false;
   $("login").classList.add("hidden");
@@ -1088,18 +1133,8 @@ async function boot() {
   // across is what makes someone keep a copy of it.
   $("new-name").addEventListener("input", refreshSeedField);
 
-  $("generate").addEventListener("click", async () => {
-    $("new-seed-words").value = await seed.generate(state.config.seed.min_words);
-    $("new-name").value = "";
-    $("seed").value = "";
-    state.pendingRegistration = false;
-    $("new-seed-block").classList.remove("hidden");
-    $("unregistered-note").classList.add("hidden");
-    $("new-account").classList.remove("hidden");
-    $("login-intro").classList.add("hidden");
-    refreshSeedField();
-    $("new-name").focus();
-  });
+  $("generate").addEventListener("click", () => startNewAccount());
+  window.addEventListener("popstate", renderRoute);
 
   $("copy-seed").addEventListener("click", async () => {
     try {
@@ -1115,11 +1150,15 @@ async function boot() {
   const remembered = await identity.recall();
   if (remembered) {
     try {
-      await signIn(remembered);
+      await signIn(remembered, { restoring: true });
     } catch {
       await identity.forget();
     }
   }
+
+  // Landing on /new-account directly, or after a refresh, needs a seed to show.
+  if (!state.me && creatingAccount()) await startNewAccount();
+  renderRoute();
 }
 
 boot().catch((error) => status($("seed-status"), error.message, "error"));

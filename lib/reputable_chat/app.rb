@@ -76,6 +76,9 @@ module ReputableChat
       r.public
 
       r.root { serve_index }
+      # The same page: the client picks the screen from the path, so a direct
+      # visit or a refresh on /new-account works rather than 404ing.
+      r.get("new-account") { serve_index }
 
       # Served from config/ rather than copied into public/ so the wordlist has
       # exactly one source of truth shared with the Ruby reference.
