@@ -19,7 +19,7 @@ const state = {
   ratings: {}, graph: new Graph(), reputation: null, session: null,
   seq: 0, voted: new Set(), viewing: null, settings: {}, privateVersion: 0,
   reactions: new Map(), recentlyBlocked: new Map(), replyingTo: null,
-  renderEpoch: 0, renderedKey: null,
+  renderEpoch: 0, renderedKey: null, pendingRegistration: false,
 };
 
 // Anything that changes how the chat should look without changing what the
@@ -148,12 +148,17 @@ async function refreshSeedField() {
 async function unlock(event) {
   if (event) event.preventDefault();
   $("unlock").disabled = true;
-  status($("seed-status"), "deriving your key — this takes a moment by design…");
 
   try {
-    const derived = await identity.deriveFromSeed($("seed").value, state.config.seed.kdf);
-    $("seed").value = ""; // the seed has done its job
-    await signIn(derived);
+    // This seed was derived a moment ago and only the name was missing, so
+    // there is no reason to spend another second in Argon2 on it.
+    if (state.pendingRegistration && chosenName()) {
+      status($("seed-status"), "creating your account…");
+      return await registerWith(chosenName());
+    }
+
+    status($("seed-status"), "deriving your key — this takes a moment by design…");
+    await signIn(await identity.deriveFromSeed($("seed").value, state.config.seed.kdf));
   } catch (error) {
     status($("seed-status"), error.message, "error");
     $("unlock").disabled = false;
@@ -175,14 +180,20 @@ async function signIn(derived) {
   await identity.remember({ privateKey: derived.privateKey, pubkey: derived.pubkey });
 
   if (session.registered) return enterChat();
-
-  // Coming from the new-account page the name was given up front, so there is
-  // nothing left to ask. Reaching here any other way means an unregistered
-  // seed was typed in directly, which still needs a name and a warning.
   if (creatingAccount() && chosenName()) return registerWith(chosenName());
 
-  $("register").classList.remove("hidden");
-  status($("seed-status"), "");
+  // An unregistered seed typed on the login screen. Send them to the new
+  // account screen for a display name rather than growing a name field on the
+  // login screen. The seed stays in its password field so the page works
+  // without ever putting it back on screen -- it is not one we generated.
+  state.pendingRegistration = true;
+  $("new-seed-block").classList.add("hidden");
+  $("unregistered-note").classList.remove("hidden");
+  $("new-account").classList.remove("hidden");
+  $("login-intro").classList.add("hidden");
+  $("new-name").value = "";
+  $("new-name").focus();
+  refreshSeedField();
 }
 
 async function registerWith(username) {
@@ -192,12 +203,7 @@ async function registerWith(username) {
   await enterChat();
 }
 
-async function createAccount() {
-  const username = $("username").value.trim();
-  if (!username) return status($("seed-status"), "pick a display name", "error");
 
-  await registerWith(username);
-}
 
 async function logOff() {
   await identity.forget();
@@ -295,6 +301,8 @@ async function fetchConfigs(pubkeys) {
 // --- chat --------------------------------------------------------------
 
 async function enterChat() {
+  $("seed").value = ""; // the seed has done its job
+  state.pendingRegistration = false;
   $("login").classList.add("hidden");
   $("chat").classList.remove("hidden");
 
@@ -1056,9 +1064,12 @@ async function boot() {
   state.reputation = buildReputation();
   await seed.loadWordlist();
 
-  $("seed").addEventListener("input", refreshSeedField);
+  // Changing the seed invalidates the key derived from the previous one.
+  $("seed").addEventListener("input", () => {
+    state.pendingRegistration = false;
+    refreshSeedField();
+  });
   $("login-form").addEventListener("submit", unlock);
-  $("create").addEventListener("click", () => createAccount().catch((e) => status($("seed-status"), e.message, "error")));
   $("logout").addEventListener("click", logOff);
   $("composer").addEventListener("submit", compose);
   $("cancel-reply").addEventListener("click", cancelReply);
@@ -1080,9 +1091,12 @@ async function boot() {
   $("generate").addEventListener("click", async () => {
     $("new-seed-words").value = await seed.generate(state.config.seed.min_words);
     $("new-name").value = "";
+    $("seed").value = "";
+    state.pendingRegistration = false;
+    $("new-seed-block").classList.remove("hidden");
+    $("unregistered-note").classList.add("hidden");
     $("new-account").classList.remove("hidden");
     $("login-intro").classList.add("hidden");
-    $("seed").value = "";
     refreshSeedField();
     $("new-name").focus();
   });
