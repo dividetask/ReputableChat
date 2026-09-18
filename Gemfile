@@ -2,6 +2,7 @@ source "https://rubygems.org"
 
 ruby ">= 3.2"
 
+gem "base64"
 gem "roda", "~> 3.108"
 gem "rack", "~> 3.2"
 gem "puma", "~> 8.0"
