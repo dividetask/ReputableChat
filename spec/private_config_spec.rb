@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "spec_helper"
+require "digest"
 require "rack/test"
 require "ed25519"
 require "tmpdir"
@@ -163,15 +164,29 @@ class PrivateConfigSpec < Minitest::Test
   end
 
   # The voted list is what makes one-vote-per-comment survive a second device.
+  # It names record hashes, the same way everything else on the chain names a
+  # message.
   def test_carries_the_voted_list
     key, pubkey = new_user
     log_in_as(key, pubkey)
-    signature = "a" * 86
+    voted = Digest::SHA256.hexdigest("a message")
 
-    put_private(key, pubkey, version: 1, voted: [signature])
+    put_private(key, pubkey, version: 1, voted: [voted])
     assert_equal 200, last_response.status
 
     get "/api/private-config"
-    assert_equal [signature], JSON.parse(json["config"]["payload"])["voted"]
+    assert_equal [voted], JSON.parse(json["config"]["payload"])["voted"]
+  end
+
+  # RULE: a signature is not a record hash. They were the same thing before the
+  # chain existed, so an old client sending the old shape has to be refused
+  # rather than quietly storing something nothing can be matched against.
+  def test_rejects_a_voted_entry_that_is_a_signature
+    key, pubkey = new_user
+    log_in_as(key, pubkey)
+
+    put_private(key, pubkey, version: 1, voted: ["a" * 86])
+
+    assert_equal 400, last_response.status
   end
 end

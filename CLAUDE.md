@@ -26,9 +26,11 @@
 ```bash
 bundle exec rake spec     # full suite
 bundle exec rake curve    # print current curve, ladder and safety window
+bundle exec rake genesis  # generate the genesis user record (once, ever)
 ```
 
-See [docs/project/reputation.md](docs/project/reputation.md).
+See [docs/project/reputation.md](docs/project/reputation.md) and
+[docs/project/chain.md](docs/project/chain.md).
 
 ## Things that break silently
 
@@ -39,6 +41,13 @@ See [docs/project/reputation.md](docs/project/reputation.md).
   either file.
 - **Signed payload shapes.** `cryptography/payload.rb` and the `*Payload` helpers in
   `public/js/identity.js` must stay in lockstep for the same reason.
+- **Record hashes.** `cryptography/record.rb` and `public/js/record.js` must agree,
+  and so must `reputation/fingerprint.rb` and `public/js/fingerprint.js`. If they
+  drift, every `ack` points at a record the other side cannot find and no
+  reference resolves. `spec/record_parity_spec.rb` guards both.
+- **The genesis record.** `config/genesis/tom.json` is the bottom of the chain.
+  Regenerating it orphans every record that acknowledged the old one, which is
+  the whole chain. `script/generate_genesis.rb` refuses to overwrite it.
 - **The seed derivation domain.** Changing `seed.kdf.domain` in
   `config/reputation.yml` changes every derived key, which strands every
   existing account. It is versioned (`:v1`) so a future change can be handled

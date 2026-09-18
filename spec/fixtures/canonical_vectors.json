@@ -1,10 +1,139 @@
 [
-  { "purpose": "reputablechat:login:v1", "pubkey": "AAAA", "nonce": "n1", "origin": "http://x.test", "ts": 17 },
-  { "z": 1, "a": 2, "m": { "nested": true, "alpha": [3, 2, 1] } },
-  { "purpose": "reputablechat:message:v1", "author": "k", "room": "general", "seq": 4, "prev": null, "ts": 9,
-    "body": "hi é中🚀 \"quoted\" \\slash\\ and\ttab" },
-  { "ratings": { "bbb": { "friend": true, "reported": false, "net_votes": -3 },
-                 "aaa": { "friend": false, "reported": true, "net_votes": 0 } } },
-  { "empty": {}, "list": [], "zero": 0, "neg": -1, "big": 9007199254740991 },
-  { "unicode_keys": { "zebra": 1, "Apple": 2, "_under": 3, "0digit": 4 } }
+  {
+    "purpose": "reputablechat:login:v1",
+    "pubkey": "AAAA",
+    "nonce": "n1",
+    "origin": "http://x.test",
+    "ts": 17
+  },
+  {
+    "z": 1,
+    "a": 2,
+    "m": {
+      "nested": true,
+      "alpha": [
+        3,
+        2,
+        1
+      ]
+    }
+  },
+  {
+    "purpose": "reputablechat:message:v1",
+    "author": "k",
+    "room": "general",
+    "seq": 4,
+    "prev": null,
+    "ts": 9,
+    "body": "hi é中🚀 \"quoted\" \\slash\\ and\ttab"
+  },
+  {
+    "ratings": {
+      "bbb": {
+        "friend": true,
+        "reported": false,
+        "net_votes": -3
+      },
+      "aaa": {
+        "friend": false,
+        "reported": true,
+        "net_votes": 0
+      }
+    }
+  },
+  {
+    "empty": {},
+    "list": [],
+    "zero": 0,
+    "neg": -1,
+    "big": 9007199254740991
+  },
+  {
+    "unicode_keys": {
+      "zebra": 1,
+      "Apple": 2,
+      "_under": 3,
+      "0digit": 4
+    }
+  },
+  {
+    "purpose": "reputablechat:user:v1",
+    "pubkey": "k",
+    "version": 1,
+    "handle": "Tom",
+    "bio": "hi é中",
+    "icon": null,
+    "master_pubkey": null,
+    "previous_pubkey": null,
+    "ack": null,
+    "ts": 17
+  },
+  {
+    "purpose": "reputablechat:attestation:v1",
+    "pubkey": "k",
+    "version": 4,
+    "scores": {
+      "bbb": {
+        "reputation": "0.5",
+        "trust": "1"
+      },
+      "aaa": {
+        "reputation": "-1.0",
+        "trust": "0"
+      }
+    },
+    "derived": {
+      "hops": 3,
+      "params": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "scores": {
+        "ccc": "0.0123"
+      }
+    },
+    "ack": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "ts": 17
+  },
+  {
+    "purpose": "reputablechat:adjustment:v1",
+    "pubkey": "k",
+    "base_version": 4,
+    "seq": 7,
+    "target": "t",
+    "reputation": "0.5032",
+    "trust": "1",
+    "ack": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "ts": 17
+  },
+  {
+    "purpose": "reputablechat:release:v1",
+    "publisher": "k",
+    "version": 12,
+    "label": "0.4.0",
+    "files": {
+      "js/app.js": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "index.html": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+    },
+    "notes": "first release",
+    "ack": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "ts": 17
+  },
+  {
+    "purpose": "reputablechat:message:v1",
+    "author": "k",
+    "room": "general",
+    "seq": 4,
+    "prev": null,
+    "reply_to": null,
+    "ack": "0000000000000000000000000000000000000000000000000000000000000000",
+    "ts": 9,
+    "body": "with an ack"
+  },
+  {
+    "purpose": "reputablechat:emote:v1",
+    "author": "k",
+    "room": "general",
+    "message": "1111111111111111111111111111111111111111111111111111111111111111",
+    "emote": "👍",
+    "ack": "2222222222222222222222222222222222222222222222222222222222222222",
+    "ts": 9
+  }
 ]

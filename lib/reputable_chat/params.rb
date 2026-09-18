@@ -41,6 +41,17 @@ module ReputableChat
     def pubkey(value) = base64url(value, bytes: 32)
     def signature(value) = base64url(value, bytes: 64)
 
+    # A record hash: SHA-256 of a record's canonical payload and signature.
+    # This is what `ack`, `prev`, `reply_to` and an emote's target are, and it
+    # is the same shape as a content-addressed image name minus the extension.
+    RECORD_HASH = /\A[0-9a-f]{64}\z/
+
+    def record_hash(value)
+      return nil unless value.is_a?(String)
+
+      value.match?(RECORD_HASH) ? value : nil
+    end
+
     def room(value)
       return nil unless value.is_a?(String)
 
@@ -116,13 +127,13 @@ module ReputableChat
       value
     end
 
-    # Signatures of the comments this user has already emoted on, so one vote
-    # per comment survives moving to another device.
+    # Record hashes of the comments this user has already emoted on, so one
+    # vote per comment survives moving to another device.
     def voted(value)
       return nil unless value.is_a?(Array)
       return nil if value.size > MAX_VOTED
 
-      value.all? { |entry| signature(entry) } ? value : nil
+      value.all? { |entry| record_hash(entry) } ? value : nil
     end
 
     # A ratings map is passed through to storage unparsed, but its shape is

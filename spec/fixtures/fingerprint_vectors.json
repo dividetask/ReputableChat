@@ -1,0 +1,5 @@
+[
+  { "constants.k": "0.1", "vote_curve.a": "0.0004", "display.show_unrated": "false" },
+  { "precision.scale": "18" },
+  {}
+]

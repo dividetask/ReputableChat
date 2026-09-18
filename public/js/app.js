@@ -4,7 +4,7 @@
 
 import * as seed from "./seed.js";
 import * as identity from "./identity.js";
-import { Reputation, Graph, toNumber } from "./reputation.js";
+import { Reputation, Graph, toNumber, toFixed } from "./reputation.js";
 import { Session } from "./session.js";
 
 const ROOM = "general";
@@ -16,7 +16,33 @@ const state = {
   ratings: {}, graph: new Graph(), reputation: null, session: null,
   seq: 0, voted: new Set(), viewing: null, settings: {}, privateVersion: 0,
   reactions: new Map(), recentlyBlocked: new Map(), replyingTo: null,
+  genesis: null, tip: null,
 };
+
+// The record this client will name as the last thing it saw. `tip` is the most
+// recent record whose author cleared the bar; with nothing yet seen it is the
+// genesis, which is why Tom exists.
+function currentAck() {
+  return state.tip || state.genesis.hash;
+}
+
+// The bar is the viewer's own, read through the viewer's own config, so two
+// people disagree about which references were legitimate and no server can
+// settle it. Acknowledging only people you rate is what leaves new and
+// low-reputation accounts unanchored -- see docs/project/chain.md.
+function chooseTip(messages) {
+  if (!state.session) return null;
+
+  const bar = toFixed(state.config.chain.min_reputation_to_acknowledge);
+
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const { author, hash } = messages[i];
+    if (!hash) continue;
+    if (author === state.me.pubkey) return hash;
+    if (state.session.scoreOf(author) > bar) return hash;
+  }
+  return null;
+}
 
 async function api(path, options = {}) {
   const response = await fetch(path, { credentials: "same-origin", ...options });
@@ -312,13 +338,14 @@ async function refreshMessages() {
   state.reactions = tallyReactions(emotes);
   render(messages);
   state.seq = Math.max(0, ...messages.filter((m) => m.author === state.me.pubkey).map((m) => m.seq));
+  state.tip = chooseTip(messages);
 }
 
 function render(messages) {
   const list = $("messages");
   list.replaceChildren();
 
-  const bySignature = new Map(messages.map((m) => [m.signature, m]));
+  const byHash = new Map(messages.map((m) => [m.hash, m]));
 
   for (const message of messages) {
     const mine = message.author === state.me.pubkey;
@@ -340,7 +367,7 @@ function render(messages) {
 
     const row = document.createElement("div");
     row.className = `msg ${bucket}`;
-    row.id = domId(message.signature);
+    row.id = domId(message.hash);
 
     const main = document.createElement("div");
     main.className = "msg-main";
@@ -357,7 +384,7 @@ function render(messages) {
     const body = document.createElement("div");
     body.textContent = payload.body; // textContent, never innerHTML
 
-    if (payload.reply_to) main.append(replyQuote(payload.reply_to, bySignature));
+    if (payload.reply_to) main.append(replyQuote(payload.reply_to, byHash));
     main.append(who, fp, body, reactionBar(message, mine));
     row.append(avatarFor(message.author), main);
     list.append(row);
@@ -366,7 +393,7 @@ function render(messages) {
   list.scrollTop = list.scrollHeight;
 }
 
-// message signature -> emote -> the people who gave it.
+// message record hash -> emote -> the people who gave it.
 //
 // Reactions from blocked people are dropped, so a pile of spam accounts cannot
 // inflate a count. Counts are therefore per-viewer, like everything else here.
@@ -453,15 +480,15 @@ function avatarFor(pubkey, extra = "", icon = state.profiles?.get(pubkey)?.icon)
   return placeholder;
 }
 
-// Signatures are base64url, so they are already safe as an element id.
-const domId = (signature) => `m-${signature}`;
+// Record hashes are hex, so they are already safe as an element id.
+const domId = (hash) => `m-${hash}`;
 
 // The quoted line above a reply. Clicking it scrolls to what was replied to.
-function replyQuote(targetSignature, bySignature) {
+function replyQuote(targetHash, byHash) {
   const quote = document.createElement("div");
   quote.className = "reply-quote";
 
-  const target = bySignature.get(targetSignature);
+  const target = byHash.get(targetHash);
   if (!target) {
     quote.classList.add("dangling");
     quote.textContent = "replying to a message you cannot see";
@@ -487,12 +514,12 @@ function replyQuote(targetSignature, bySignature) {
   snippet.textContent = body;
 
   quote.append(arrow, avatarFor(target.author), name, snippet);
-  quote.addEventListener("click", () => scrollToMessage(targetSignature));
+  quote.addEventListener("click", () => scrollToMessage(targetHash));
   return quote;
 }
 
-function scrollToMessage(signature) {
-  const row = document.getElementById(domId(signature));
+function scrollToMessage(hash) {
+  const row = document.getElementById(domId(hash));
   if (!row) return;
 
   row.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -523,9 +550,9 @@ function displayName(pubkey) {
 function reactionBar(message, mine) {
   const bar = document.createElement("div");
   bar.className = "reactions";
-  const reacted = state.voted.has(message.signature);
+  const reacted = state.voted.has(message.hash);
 
-  for (const [emote, people] of state.reactions.get(message.signature) || []) {
+  for (const [emote, people] of state.reactions.get(message.hash) || []) {
     const pill = document.createElement("button");
     pill.type = "button";
     pill.className = "pill";
@@ -571,19 +598,20 @@ function reactionBar(message, mine) {
   return bar;
 }
 
-// One reaction per comment, which the server enforces too. The message
-// signature is its id.
+// One reaction per comment, which the server enforces too. The message's
+// record hash is its id.
 async function react(message, emote) {
-  if (state.voted.has(message.signature)) return;
+  if (state.voted.has(message.hash)) return;
 
   const ts = Math.floor(Date.now() / 1000);
+  const ack = currentAck();
   const payload = identity.emotePayload({
-    author: state.me.pubkey, room: ROOM, message: message.signature, emote, ts,
+    author: state.me.pubkey, room: ROOM, message: message.hash, emote, ack, ts,
   });
 
   try {
     await post(`/api/room/${ROOM}/emote`, {
-      message: message.signature, emote, ts,
+      message: message.hash, emote, ack, ts,
       signature: await identity.sign(state.me, payload),
     });
 
@@ -604,14 +632,15 @@ async function compose(event) {
   const ts = Math.floor(Date.now() / 1000);
   const seq = state.seq + 1;
   const replyingTo = state.replyingTo;
-  const replyTo = replyingTo ? replyingTo.signature : null;
+  const replyTo = replyingTo ? replyingTo.hash : null;
+  const ack = currentAck();
   const payload = identity.messagePayload({
-    author: state.me.pubkey, room: ROOM, seq, prev: null, body, ts, replyTo,
+    author: state.me.pubkey, room: ROOM, seq, prev: null, body, ack, ts, replyTo,
   });
 
   try {
     await post(`/api/room/${ROOM}/message`, {
-      seq, prev: null, body, ts, reply_to: replyTo,
+      seq, prev: null, body, ack, ts, reply_to: replyTo,
       signature: await identity.sign(state.me, payload),
     });
     $("body").value = "";
@@ -631,11 +660,11 @@ async function compose(event) {
 // Shared by reacting and replying. Does nothing if this message has already
 // been voted on.
 async function countAsVote(message, polarity) {
-  if (state.voted.has(message.signature)) return;
+  if (state.voted.has(message.hash)) return;
 
   const current = state.ratings[message.author] || { friend: false, reported: false, net_votes: 0 };
   state.ratings[message.author] = { ...current, net_votes: (current.net_votes || 0) + polarity };
-  state.voted.add(message.signature);
+  state.voted.add(message.hash);
 
   await publishConfig();
   await publishPrivateConfig();
@@ -956,7 +985,9 @@ async function saveProfile() {
 // --- boot ---------------------------------------------------------------
 
 async function boot() {
-  [state.config, state.emotes] = await Promise.all([api("/api/defaults"), api("/api/emotes")]);
+  [state.config, state.emotes, state.genesis] = await Promise.all([
+    api("/api/defaults"), api("/api/emotes"), api("/api/genesis"),
+  ]);
   state.reputation = buildReputation();
   await seed.loadWordlist();
 

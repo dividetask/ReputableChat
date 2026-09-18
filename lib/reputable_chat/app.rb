@@ -8,6 +8,8 @@ require_relative "params"
 require_relative "cryptography/signature"
 require_relative "cryptography/canonical"
 require_relative "cryptography/payload"
+require_relative "cryptography/record"
+require_relative "genesis"
 require_relative "store/database"
 require_relative "store/images"
 
@@ -65,12 +67,13 @@ module ReputableChat
     ALLOWED_EMOTES = EMOTES.values_at("positive", "negative", "neutral").compact.flatten.freeze
 
     class << self
-      attr_accessor :store, :images, :origin
+      attr_accessor :store, :images, :origin, :genesis
     end
 
     def store = self.class.store
     def images = self.class.images
     def origin = self.class.origin
+    def genesis = self.class.genesis
 
     route do |r|
       r.public
@@ -90,6 +93,10 @@ module ReputableChat
         # default change reach every user who never pinned that setting.
         r.get("defaults") { DEFAULTS }
         r.get("emotes")   { EMOTES }
+        # The bottom of the chain. Served so a client can check the hash it
+        # was built with against the one this server is running, rather than
+        # discovering a mismatch as signatures that will not verify.
+        r.get("genesis")  { genesis.to_h }
         r.post("session")   { open_session(r) }
         r.post("register")  { register(r) }
         r.post("image")     { upload_image(r) }
@@ -239,25 +246,31 @@ module ReputableChat
       { "stored" => true, "version" => version }
     end
 
+    # `ack` is the record this message's author had last seen. The server does
+    # not check that it was well chosen -- it cannot, since it never computes a
+    # reputation and the rule is the author's own. It checks only that it is
+    # the right shape, and stores what it is given.
     def post_message(r, room)
       author = current_pubkey(r)
       seq    = Params.integer(r.params["seq"], min: 1) or bad_request(r, "bad seq")
       body   = Params.string(r.params["body"], max: MAX_BODY) or bad_request(r, "bad body")
       sig    = Params.signature(r.params["signature"]) or bad_request(r, "bad signature")
       ts     = Params.integer(r.params["ts"]) or bad_request(r, "bad timestamp")
-      prev   = r.params["prev"].nil? ? nil : Params.signature(r.params["prev"])
-      reply  = r.params["reply_to"].nil? ? nil : Params.signature(r.params["reply_to"])
-      bad_request(r, "bad reply target") if !r.params["reply_to"].nil? && reply.nil?
+      ack    = Params.record_hash(r.params["ack"]) or bad_request(r, "bad ack")
+      prev   = optional_hash(r, "prev")
+      reply  = optional_hash(r, "reply_to")
 
       payload = Cryptography::Payload.message(
         author: author, room: room, seq: seq, prev: prev, body: body,
-        issued_at: ts, reply_to: reply
+        ack: ack, issued_at: ts, reply_to: reply
       )
       verify!(r, author, sig, payload)
 
+      canonical = Cryptography::Canonical.dump(payload)
       result = store.store_message(
-        author: author, room: room, seq: seq, prev: prev, reply_to: reply,
-        payload: Cryptography::Canonical.dump(payload), signature: sig
+        hash: Cryptography::Record.digest(payload: canonical, signature: sig),
+        author: author, room: room, seq: seq, prev: prev, ack: ack,
+        reply_to: reply, payload: canonical, signature: sig
       )
       r.halt(409, { "error" => "that sequence number is already used" }) if result == :duplicate
 
@@ -266,19 +279,23 @@ module ReputableChat
 
     def post_emote(r, room)
       author  = current_pubkey(r)
-      message = Params.signature(r.params["message"]) or bad_request(r, "bad message")
+      message = Params.record_hash(r.params["message"]) or bad_request(r, "bad message")
       choice  = Params.emote(r.params["emote"], allowed: ALLOWED_EMOTES) or bad_request(r, "unknown emote")
       sig     = Params.signature(r.params["signature"]) or bad_request(r, "bad signature")
       ts      = Params.integer(r.params["ts"]) or bad_request(r, "bad timestamp")
+      ack     = Params.record_hash(r.params["ack"]) or bad_request(r, "bad ack")
 
       payload = Cryptography::Payload.emote(
-        author: author, room: room, message: message, emote: choice, issued_at: ts
+        author: author, room: room, message: message, emote: choice,
+        ack: ack, issued_at: ts
       )
       verify!(r, author, sig, payload)
 
+      canonical = Cryptography::Canonical.dump(payload)
       result = store.store_emote(
+        hash: Cryptography::Record.digest(payload: canonical, signature: sig),
         author: author, room: room, message: message, emote: choice,
-        payload: Cryptography::Canonical.dump(payload), signature: sig
+        ack: ack, payload: canonical, signature: sig
       )
       r.halt(409, { "error" => "you have already reacted to that message" }) if result == :duplicate
 
@@ -304,6 +321,15 @@ module ReputableChat
       r.halt(400, { "error" => message })
     end
 
+    # Absent is fine, present but malformed is not -- silently dropping a bad
+    # reference would store a record whose signature covers something the
+    # server never saw.
+    def optional_hash(r, field)
+      return nil if r.params[field].nil?
+
+      Params.record_hash(r.params[field]) or bad_request(r, "bad #{field}")
+    end
+
     # Signed blobs go out exactly as they came in. The client verifies them
     # against the author's key, so the server re-serializing them would only
     # create a way to break signatures.
@@ -315,9 +341,10 @@ module ReputableChat
     end
 
     def present_message(row)
-      { "author" => row[:author], "seq" => row[:seq], "prev" => row[:prev],
-        "reply_to" => row[:reply_to], "payload" => row[:payload],
-        "signature" => row[:signature], "received_at" => row[:received_at] }
+      { "hash" => row[:hash], "author" => row[:author], "seq" => row[:seq],
+        "prev" => row[:prev], "reply_to" => row[:reply_to], "ack" => row[:ack],
+        "payload" => row[:payload], "signature" => row[:signature],
+        "received_at" => row[:received_at] }
     end
 
     # Content-addressed, so the bytes can never change under a given name.
