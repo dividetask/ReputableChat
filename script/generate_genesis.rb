@@ -6,12 +6,16 @@
 #   bundle exec rake genesis
 #   bundle exec ruby script/generate_genesis.rb --handle Tim --words 12
 #
-# Prints the seed phrase and the private key to the terminal ONCE and writes
-# neither anywhere. There is no recovery: lose them and the publisher identity
-# is gone, and with it the ability to publish a release anyone will run.
+# Writes two files: the genesis record, which is committed, and the seed, which
+# is gitignored and 0600. Nothing secret is printed -- a terminal scrollback,
+# a CI log and a screen share are all places a seed should not turn up.
 #
-# Refuses to overwrite an existing genesis, because doing so would orphan every
-# record in the chain that acknowledges the old one.
+# There is no recovery. Lose the seed file and the genesis identity is gone,
+# and with it the ability to publish a release anyone will run, so back it up
+# somewhere outside the checkout.
+#
+# Refuses to overwrite either file, because a second genesis would orphan every
+# record in the chain that acknowledges the first.
 
 $LOAD_PATH.unshift File.expand_path("../lib", __dir__)
 
@@ -27,6 +31,7 @@ require "reputable_chat/cryptography/payload"
 require "reputable_chat/cryptography/record"
 require "reputable_chat/cryptography/signature"
 require "reputable_chat/genesis"
+require "reputable_chat/operator"
 
 module GenerateGenesis
   Crypto = ReputableChat::Cryptography
@@ -36,7 +41,8 @@ module GenerateGenesis
 
   def run(argv)
     options = parse(argv)
-    refuse_to_overwrite!(options[:path])
+    refuse_to_overwrite!(options[:path], "genesis record")
+    refuse_to_overwrite!(options[:seed_path], "seed")
 
     kdf    = kdf_parameters
     phrase = new_phrase(options[:words])
@@ -53,8 +59,9 @@ module GenerateGenesis
 
     hash = Crypto::Record.digest(payload: canonical, signature: signature)
     write(options[:path], pubkey: keys["pubkey"], payload: canonical, signature: signature, hash: hash)
+    ReputableChat::Operator.write_seed(phrase, path: options[:seed_path])
 
-    report(options[:path], phrase, keys, hash)
+    report(options, keys["pubkey"], hash)
   end
 
   # --- steps ------------------------------------------------------------
@@ -110,25 +117,23 @@ module GenerateGenesis
 
   # --- reporting --------------------------------------------------------
 
-  def report(path, phrase, keys, hash)
+  # Public key and record hash only. Both are public by definition -- the
+  # record hash is what every other record will acknowledge, and the public key
+  # is the identity itself. The seed is never printed.
+  def report(options, pubkey, hash)
     puts
-    puts "  Wrote #{relative(path)}"
-    puts "  Public key   #{keys['pubkey']}"
+    puts "  Genesis created."
+    puts
+    puts "  Record       #{relative(options[:path])}"
+    puts "  Seed         #{relative(options[:seed_path])}  (0600, gitignored, never printed)"
+    puts "  Public key   #{pubkey}"
     puts "  Record hash  #{hash}"
     puts
-    puts "  " + ("-" * 68)
-    puts "  SAVE THESE NOW. They are printed once and stored nowhere."
-    puts "  There is no recovery."
-    puts "  " + ("-" * 68)
+    puts "  Commit the record: every client needs the same genesis hash before"
+    puts "  it has fetched anything, so it cannot be downloaded."
     puts
-    puts "  Seed phrase  #{phrase}"
-    puts "  Private key  #{keys['private_key']}"
-    puts
-    puts "  The seed phrase is what logs in through the UI. The private key is"
-    puts "  the same identity in raw form, for signing outside the browser."
-    puts
-    puts "  Commit #{relative(path)}: every client needs the same genesis hash"
-    puts "  before it has fetched anything, so it cannot be downloaded."
+    puts "  Back the seed up somewhere outside this checkout. It is the whole"
+    puts "  identity and there is no recovery."
     puts
   end
 
@@ -139,7 +144,8 @@ module GenerateGenesis
   DEFAULT_BIO = "Tim is legally distinct from, and no relation to, Tom"
 
   DEFAULTS = { handle: "Tim", bio: DEFAULT_BIO, words: 12,
-               path: ReputableChat::Genesis::PATH }.freeze
+               path: ReputableChat::Genesis::PATH,
+               seed_path: ReputableChat::Operator::SEED_PATH }.freeze
 
   def parse(argv)
     options = DEFAULTS.dup
@@ -151,6 +157,7 @@ module GenerateGenesis
       when "--bio"    then options[:bio]    = argv.shift.to_s
       when "--words"  then options[:words]  = Integer(argv.shift)
       when "--path"   then options[:path]   = File.expand_path(argv.shift.to_s)
+      when "--seed"   then options[:seed_path] = File.expand_path(argv.shift.to_s)
       when "--help", "-h" then usage
       else abort "unknown option: #{flag}\n\n#{usage_text}"
       end
@@ -180,11 +187,12 @@ module GenerateGenesis
 
   # Overwriting would orphan every record that acknowledges the old genesis,
   # which is to say the entire chain.
-  def refuse_to_overwrite!(path)
+  def refuse_to_overwrite!(path, what)
     return unless File.exist?(path)
 
-    abort "#{relative(path)} already exists. Delete it deliberately if you really mean to " \
-          "start a new chain -- every record acknowledging the old genesis becomes unanchored."
+    abort "the #{what} at #{relative(path)} already exists. Delete it deliberately if you " \
+          "really mean to start a new chain -- every record acknowledging the old genesis " \
+          "becomes unanchored."
   end
 
   def usage
@@ -201,7 +209,8 @@ module GenerateGenesis
                         (default: "#{DEFAULT_BIO}")
         --words N       seed length; more than the 8-word minimum, since this
                         key signs releases (default: 12)
-        --path FILE     where to write (default: config/genesis/tim.json)
+        --path FILE     where to write the record (default: config/genesis/tim.json)
+        --seed FILE     where to write the seed (default: config/genesis/seed)
     TEXT
   end
 end

@@ -75,9 +75,25 @@ fetched anything — a genesis you have to download from the server is not a
 genesis.
 
 The script runs the **real** client derivation path under Node: the vendored
-Argon2id build, `public/js/seed.js`, `public/js/canonical.js`. It is not a
-second implementation that could drift from the browser's. It prints the seed
-phrase and the private key once, to the terminal, and writes neither anywhere.
+Argon2id build, the same Argon2id parameters out of `config/reputation.yml`,
+and WebCrypto Ed25519. It is not a second implementation that could drift from
+the browser's and strand the account it creates.
+
+It writes the seed to `config/genesis/seed`, gitignored and 0600, and prints
+nothing secret -- a terminal scrollback, a CI log and a screen share are all
+places a seed should not turn up. The file holds the phrase rather than the
+derived key, so it is the same secret a person would type into the UI.
+
+`script/tim.rb` signs with it, which is how the genesis account posts
+announcements and vouches for new arrivals without somebody sitting at a
+browser. That file is the one place in this project a private key lives outside
+a browser, and it is the weakest point in the system: whoever holds it is the
+genesis account, and can publish a release every client would run.
+
+The command that matters on a new network is `visible`. An unrated account sits
+at exactly zero and is invisible to everyone, which is the sybil defense and
+also the reason nobody can get started. One positive rating from the genesis
+account lifts somebody over the line for anyone who rates the genesis account.
 
 ## What gets acknowledged
 
