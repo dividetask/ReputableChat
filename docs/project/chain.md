@@ -159,8 +159,15 @@ the act that caused it.
 ### The derived cache
 
 `derived` is the author's own calculated scores, out to `attestation.published_hops`
-(3 by default). It is a **cache and nothing else**. It is published to save
-readers the walk, not to tell them what to think.
+(3 by default). It is not a convenience: it is the **fourth term** of everyone
+else's score, because the walk stops at hop 2 and depth 3 is filled in from
+these summaries rather than reached. See **Why the walk stops at two** in
+[reputation.md](reputation.md).
+
+It is still never an input to a reader's own opinion at depths 0 to 2, which
+are read from direct scores. It carries 0.0009 of the total, cannot make anyone
+Trusted on its own, and exists mainly to lift a well-regarded stranger from
+Blocked to Tolerated.
 
 It carries `params`, a hash of the reputation parameters it was computed under,
 because without that it would be worse than useless. Reputation is subjective

@@ -81,10 +81,84 @@ Reaching hop `d` means every link on the path was rated above the gate by the
 person one step closer in; a single non-positive link and the whole branch
 beyond it goes unread.
 
-The walk stops at `max_hops` **or** `max_configs`, whichever comes first. A
-positive-only graph still branches, so seven hops is unbounded in practice — at
-30 positive ratings each that is 27,000 configs by hop 3 and 810,000 by hop 4.
-`max_configs` is what makes the walk terminate on a real graph.
+The walk stops at **hop 2**, and the fourth term comes from other people's
+arithmetic rather than from walking further. `max_configs` still bounds it, and
+still has to: a positive-only graph branches, so even two hops is 900 people at
+30 ratings each and 22,500 at 150.
+
+### Why the walk stops at two
+
+A forward walk is quadratic in ratings-per-person, so hop 3 is where it stops
+being something a phone can do. At 30 ratings each that is 27,000 people; at a
+more realistic 150 it is 3.4 million. There is no version of "fetch all of
+them" that works.
+
+So depth 3 is filled in rather than walked. Every attestation publishes its
+author's own calculated scores out to `attestation.published_hops`, and a
+viewer takes the mean of those estimates from the people at hop 2:
+
+```
+effective = 0.9    * your own score
+          + 0.09   * mean score published by the people you rated
+          + 0.009  * mean score published by the people they rated
+          + 0.0009 * mean ESTIMATE published by the people they rated
+```
+
+The first three terms read direct scores. The fourth reads a summary, and
+trusts the people at hop 2 to have done their own arithmetic honestly — which
+is the same thing the third term already trusts them for.
+
+Those weights sum to 0.9999 rather than 1. Under-summing is harmless: an
+effective score is still inside −1..+1 with no clamping. The old hops 4 to 7
+are simply gone, and their 0.0001 with them.
+
+### What the fourth term is for
+
+Almost nothing, most of the time — and that is the point. It is bounded by
+0.0009, while `trusted_at` is 0.01, so **the fourth term can never make anyone
+Trusted on its own.** Eleven times its maximum would be needed.
+
+What it can do is move someone from exactly 0 to slightly above it. An account
+nobody within two hops has rated sits at precisely zero and is therefore
+Blocked — that is the sybil defense — and this is the one thing that can lift
+them into Tolerated without anyone nearby vouching for them. It exists to
+rescue the well-regarded stranger, and it is deliberately too weak to do
+anything else.
+
+It cuts the other way too, though only just. Someone scoring between 0 and
+0.0009 from the first three terms can be pushed back under the line by a
+negative fourth term. That is a real bucket change, from Tolerated to Blocked,
+on a hair's-breadth score.
+
+### What it costs, and what it does not buy
+
+The estimate is reached through its author's own configuration, so it carries a
+fingerprint of the parameters it was computed under (see
+[chain.md](chain.md)). That fingerprint is **advisory and incomplete**: a
+multi-hop estimate averages scores that each came from a different author's
+curve, and no single hash can describe all of them. It says "this came from a
+different setup", never "this is safe to use".
+
+There is also mild double counting. A hop-2 person's estimate is 90% their own
+direct score for the target, which the third term already counted at 0.009. So
+the fourth term re-counts their direct opinion at 0.00081, and only the
+remainder is genuinely news from further out.
+
+And the cache is not free to publish. An attestation carrying estimates for
+everyone within three hops is thousands of entries, and a viewer fetches
+hundreds of attestations. That is the cost of not walking hop 3 directly, and
+it only stays reasonable while the published set does. It will need bounding —
+Merkle proofs over the estimate map, so a reader can fetch the few entries it
+wants and verify them against the signed root, are the known way to do it
+without asking the server to be trusted about what it left out.
+
+### Sampling
+
+`max_configs` truncates the walk. On a large graph that means the mean at
+depth 2 is taken over whichever people breadth-first order happened to reach
+first, which is arbitrary and differs between clients for no principled reason.
+Deterministic selection — nearest first, then by pubkey — at least makes two
+clients with the same view agree.
 
 Each person is counted once, at their **shortest** distance. Someone reachable
 by two paths does not get to vote twice. Nobody contributes to their own score.
@@ -162,7 +236,11 @@ curve(1)  <  k³  <  curve(2)
    A      < 0.000729 <  4A
 ```
 
-which pins `A` to the window **(0.00025, 0.001)**. At `A = 0.0004` the margins
+which pins `A` to the window **(0.00025, 0.001)**. The arithmetic is unchanged
+now that depth 3 is the estimate term rather than a walked hop, but it means
+something different: one like of yours is outweighed by your two-hop
+neighbourhood collectively estimating someone at −1, and two likes outweigh it.
+It is a statement about a summary rather than about a single distant reporter. At `A = 0.0004` the margins
 are symmetric: one like lands 0.00054 below the line and two likes 0.00054
 above it, each 60% of the report's weight.
 

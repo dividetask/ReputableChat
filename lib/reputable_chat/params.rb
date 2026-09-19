@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "bigdecimal"
+
 module ReputableChat
   # Input validation. Everything from a client is checked for type, length and
   # shape before it reaches cryptography, the database, or a payload builder.
@@ -77,7 +79,6 @@ module ReputableChat
     end
 
     MAX_USERNAME = 64
-    MAX_BIO      = 280
 
     def profile(value)
       return nil unless value.is_a?(Hash)
@@ -99,6 +100,104 @@ module ReputableChat
       return nil unless value.is_a?(String)
 
       allowed.include?(value) ? value : nil
+    end
+
+    # --- chain records ------------------------------------------------------
+
+    MAX_HANDLE  = 64
+    MAX_BIO     = 280
+    MAX_SCORES  = 10_000
+    MAX_DERIVED = 50_000
+    MAX_LABEL   = 64
+    MAX_NOTES   = 1_000
+    MAX_FILES   = 500
+    MAX_PATH    = 256
+
+    # A decimal string. Numbers that are signed never travel as JSON numbers:
+    # canonical serialization refuses floats outright, because they have no
+    # single textual form across languages, and the Blocked line is
+    # `effective > 0`, which binary floating point cannot be trusted to land on.
+    DECIMAL = /\A-?(0|[1-9]\d{0,6})(\.\d{1,18})?\z/
+
+    def decimal(value, min: -1, max: 1)
+      return nil unless value.is_a?(String) && value.match?(DECIMAL)
+
+      number = BigDecimal(value)
+      number.between?(BigDecimal(min.to_s), BigDecimal(max.to_s)) ? value : nil
+    end
+
+    def handle(value) = string(value, max: MAX_HANDLE)
+
+    def bio(value)
+      return "" if value.nil? || value.to_s.empty?
+
+      string(value, max: MAX_BIO)
+    end
+
+    # What one person publishes about everyone they have an opinion of:
+    # a reputation and a trust multiplier, both decimal strings.
+    #
+    # The multiplier is clamped to -1..1 rather than left open. Above 1 it would
+    # amplify a branch past the weight the ladder assigned it, and the ladder's
+    # weights summing to (just under) 1 is what keeps an effective score inside
+    # -1..1 without clamping.
+    def scores(value, max_entries: MAX_SCORES)
+      return nil unless value.is_a?(Hash)
+      return nil if value.size > max_entries
+
+      value.each do |target, entry|
+        return nil unless pubkey(target)
+        return nil unless entry.is_a?(Hash)
+        return nil unless decimal(entry["reputation"])
+        return nil unless decimal(entry["trust"])
+      end
+
+      value
+    end
+
+    # The author's own calculated scores, and the fingerprint of the parameters
+    # they were computed under. The fingerprint is not optional: without it a
+    # reader cannot tell whether the numbers mean anything to them, and taking
+    # them anyway would mean silently adopting a stranger's settings.
+    def derived(value)
+      return nil unless value.is_a?(Hash)
+      return nil unless integer(value["hops"], min: 0, max: 7)
+      return nil unless record_hash(value["params"])
+
+      scores = value["scores"]
+      return nil unless scores.is_a?(Hash) && scores.size <= MAX_DERIVED
+
+      scores.each do |target, score|
+        return nil unless pubkey(target)
+        return nil unless decimal(score)
+      end
+
+      value
+    end
+
+    # A release manifest: published path => sha256 of the bytes at it. Paths are
+    # relative and cannot climb, since they name files the client will fetch.
+    PATH = %r{\A[a-z0-9][a-z0-9._/-]*\z}i
+
+    def files(value)
+      return nil unless value.is_a?(Hash)
+      return nil if value.empty? || value.size > MAX_FILES
+
+      value.each do |path, digest|
+        return nil unless path.is_a?(String) && path.bytesize <= MAX_PATH
+        return nil unless path.match?(PATH) && !path.include?("..")
+        return nil unless record_hash(digest)
+      end
+
+      value
+    end
+
+    def label(value) = string(value, max: MAX_LABEL)
+
+    def notes(value)
+      return "" if value.nil? || value.to_s.empty?
+
+      string(value, max: MAX_NOTES)
     end
 
     MAX_SETTING_KEYS   = 100

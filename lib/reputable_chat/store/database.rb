@@ -68,6 +68,39 @@ module ReputableChat
         # `hash` is the record hash -- what everything else on the chain names
         # this message by. Unique because a repeat means the identical record
         # arrived twice, not that two records collided.
+        # Who somebody is, and what they think of everyone else. Both replace
+        # halves of the old config blob, and both are versioned for the same
+        # reason it was: without a monotonic counter inside the signature, the
+        # server could serve an old copy to hide something and the signature on
+        # it would still verify perfectly.
+        %i[user_records attestations].each do |table|
+          @db.create_table?(table) do
+            String   :pubkey, primary_key: true
+            Integer  :version, null: false
+            String   :hash, null: false
+            String   :payload, text: true, null: false
+            String   :signature, null: false
+            Integer  :updated_at, null: false
+          end
+        end
+
+        # One change to an attestation between republishes. Unique on the run
+        # it belongs to and its place in that run, so a replay of an earlier
+        # adjustment against a later snapshot cannot take hold.
+        @db.create_table?(:adjustments) do
+          primary_key :id
+          String   :hash, null: false, unique: true
+          String   :pubkey, null: false, index: true
+          Integer  :base_version, null: false
+          Integer  :seq, null: false
+          String   :target, null: false
+          String   :ack, null: false
+          String   :payload, text: true, null: false
+          String   :signature, null: false
+          Integer  :received_at, null: false
+          unique %i[pubkey base_version seq]
+        end
+
         @db.create_table?(:messages) do
           primary_key :id
           String   :hash, null: false, unique: true
@@ -168,6 +201,58 @@ module ReputableChat
           @db[:configs].insert(row)
         end
         :ok
+      end
+
+      # --- user records and attestations --------------------------------------
+      #
+      # Same shape and same rules, so one pair of methods serves both rather
+      # than two copies that can drift apart.
+
+      def user_record(pubkey) = versioned(:user_records, pubkey)
+      def user_records(pubkeys) = versioned_batch(:user_records, pubkeys)
+      def attestation(pubkey) = versioned(:attestations, pubkey)
+      def attestations(pubkeys) = versioned_batch(:attestations, pubkeys)
+
+      def store_user_record(**row) = store_versioned(:user_records, **row)
+      def store_attestation(**row) = store_versioned(:attestations, **row)
+
+      def versioned(table, pubkey) = @db[table].where(pubkey: pubkey).first
+
+      def versioned_batch(table, pubkeys)
+        @db[table].where(pubkey: pubkeys.first(MAX_BATCH)).all
+      end
+
+      # Rejects a stale version, exactly as a config does.
+      def store_versioned(table, pubkey:, version:, hash:, payload:, signature:)
+        existing = versioned(table, pubkey)
+        return :stale if existing && version <= existing[:version]
+
+        row = { pubkey: pubkey, version: version, hash: hash, payload: payload,
+                signature: signature, updated_at: now }
+
+        existing ? @db[table].where(pubkey: pubkey).update(row) : @db[table].insert(row)
+        :ok
+      end
+
+      # --- adjustments ---------------------------------------------------------
+
+      def store_adjustment(hash:, pubkey:, base_version:, seq:, target:, ack:, payload:, signature:)
+        @db[:adjustments].insert(
+          hash: hash, pubkey: pubkey, base_version: base_version, seq: seq,
+          target: target, ack: ack, payload: payload, signature: signature, received_at: now
+        )
+        :ok
+      rescue Sequel::UniqueConstraintViolation
+        :duplicate
+      end
+
+      # Only the run that amends the attestation the caller actually holds.
+      # An adjustment against an older snapshot has already been superseded by
+      # the republish that followed it.
+      def adjustments_for(pubkey, base_version:, limit: 1_000)
+        @db[:adjustments]
+          .where(pubkey: pubkey, base_version: base_version)
+          .order(:seq).limit(limit).all
       end
 
       # --- emotes -------------------------------------------------------------

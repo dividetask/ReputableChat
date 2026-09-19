@@ -109,6 +109,25 @@ module ReputableChat
           r.put { store_private_config(r) }
         end
 
+        # The chain records. `config` below is what these replace and is on
+        # its way out; both are served while the client moves across.
+        r.on "user" do
+          r.post("batch") { batch(r, :user_records) }
+          r.put { put_user_record(r) }
+          r.get(String) { |pubkey| fetch(:user_record, pubkey) }
+        end
+
+        r.on "attestation" do
+          r.post("batch") { batch(r, :attestations) }
+          r.put { put_attestation(r) }
+          r.get(String) { |pubkey| fetch(:attestation, pubkey) }
+        end
+
+        r.on "adjustment" do
+          r.post { post_adjustment(r) }
+          r.get(String) { |pubkey| fetch_adjustments(r, pubkey) }
+        end
+
         r.on "config" do
           r.post("batch") { config_batch(r) }
           r.put { store_config(r) }
@@ -253,6 +272,120 @@ module ReputableChat
     # not check that it was well chosen -- it cannot, since it never computes a
     # reputation and the rule is the author's own. It checks only that it is
     # the right shape, and stores what it is given.
+    # --- chain records -----------------------------------------------------
+
+    # Who somebody is. `master_pubkey` and `previous_pubkey` are placeholders
+    # for key rotation and must still be null: accepting a value for a field
+    # nothing implements would let a client publish a claim the network would
+    # later have to honour or explain away.
+    def put_user_record(r)
+      pubkey  = current_pubkey(r)
+      version = Params.integer(r.params["version"], min: 1) or bad_request(r, "bad version")
+      handle  = Params.handle(r.params["handle"])           or bad_request(r, "bad handle")
+      bio     = Params.bio(r.params["bio"])                 or bad_request(r, "bad bio")
+      ack     = Params.record_hash(r.params["ack"])         or bad_request(r, "bad ack")
+      sig     = Params.signature(r.params["signature"])     or bad_request(r, "bad signature")
+      ts      = Params.integer(r.params["ts"])              or bad_request(r, "bad timestamp")
+      icon    = r.params["icon"].nil? ? nil : (Params.icon(r.params["icon"]) or bad_request(r, "bad icon"))
+
+      bad_request(r, "key rotation is not implemented") if r.params["master_pubkey"] || r.params["previous_pubkey"]
+
+      payload = Cryptography::Payload.user(
+        pubkey: pubkey, version: version, handle: handle, bio: bio, icon: icon,
+        ack: ack, issued_at: ts
+      )
+      store_record(r, :store_user_record, pubkey, version, payload, sig)
+    end
+
+    # What somebody thinks of everyone else. The server checks the shape and
+    # nothing else -- it has no opinion about whether a score is deserved, and
+    # could not form one without computing a reputation.
+    def put_attestation(r)
+      pubkey  = current_pubkey(r)
+      version = Params.integer(r.params["version"], min: 1) or bad_request(r, "bad version")
+      scores  = Params.scores(r.params["scores"])           or bad_request(r, "bad scores")
+      derived = Params.derived(r.params["derived"])         or bad_request(r, "bad derived scores")
+      ack     = Params.record_hash(r.params["ack"])         or bad_request(r, "bad ack")
+      sig     = Params.signature(r.params["signature"])     or bad_request(r, "bad signature")
+      ts      = Params.integer(r.params["ts"])              or bad_request(r, "bad timestamp")
+
+      payload = Cryptography::Payload.attestation(
+        pubkey: pubkey, version: version, scores: scores, derived: derived,
+        ack: ack, issued_at: ts
+      )
+      store_record(r, :store_attestation, pubkey, version, payload, sig)
+    end
+
+    def store_record(r, method, pubkey, version, payload, signature)
+      verify!(r, pubkey, signature, payload)
+
+      canonical = Cryptography::Canonical.dump(payload)
+      hash = Cryptography::Record.digest(payload: canonical, signature: signature)
+      result = store.public_send(method, pubkey: pubkey, version: version, hash: hash,
+                                         payload: canonical, signature: signature)
+
+      r.halt(409, { "error" => "version is not newer than the stored one" }) if result == :stale
+
+      { "stored" => true, "version" => version, "hash" => hash }
+    end
+
+    # One change to an attestation between republishes. `base_version` names
+    # the snapshot it amends and `seq` its place in that run, both inside the
+    # signature, so the server can neither reorder a run nor replay one against
+    # a later snapshot.
+    def post_adjustment(r)
+      pubkey  = current_pubkey(r)
+      base    = Params.integer(r.params["base_version"], min: 1) or bad_request(r, "bad base version")
+      seq     = Params.integer(r.params["seq"], min: 1)          or bad_request(r, "bad seq")
+      target  = Params.pubkey(r.params["target"])                or bad_request(r, "bad target")
+      score   = Params.decimal(r.params["reputation"])           or bad_request(r, "bad reputation")
+      trust   = Params.decimal(r.params["trust"])                or bad_request(r, "bad trust")
+      ack     = Params.record_hash(r.params["ack"])              or bad_request(r, "bad ack")
+      sig     = Params.signature(r.params["signature"])          or bad_request(r, "bad signature")
+      ts      = Params.integer(r.params["ts"])                   or bad_request(r, "bad timestamp")
+
+      bad_request(r, "an adjustment cannot be about its own author") if target == pubkey
+
+      payload = Cryptography::Payload.adjustment(
+        pubkey: pubkey, base_version: base, seq: seq, target: target,
+        reputation: score, trust: trust, ack: ack, issued_at: ts
+      )
+      verify!(r, pubkey, sig, payload)
+
+      canonical = Cryptography::Canonical.dump(payload)
+      hash = Cryptography::Record.digest(payload: canonical, signature: sig)
+      result = store.store_adjustment(
+        hash: hash, pubkey: pubkey, base_version: base, seq: seq, target: target,
+        ack: ack, payload: canonical, signature: sig
+      )
+      r.halt(409, { "error" => "that adjustment already exists" }) if result == :duplicate
+
+      { "stored" => true, "seq" => seq, "hash" => hash }
+    end
+
+    # Only the run amending the snapshot the caller holds. An adjustment
+    # against an older version was superseded by the republish that followed.
+    def fetch_adjustments(r, pubkey_param)
+      pubkey = Params.pubkey(pubkey_param) or bad_request(r, "bad pubkey")
+      base = Params.integer(r.params["base_version"], min: 1) or bad_request(r, "bad base version")
+
+      { "adjustments" => store.adjustments_for(pubkey, base_version: base).map { |row| present_adjustment(row) } }
+    end
+
+    def fetch(kind, pubkey_param)
+      pubkey = Params.pubkey(pubkey_param)
+      return { kind.to_s => nil } unless pubkey
+
+      { kind.to_s => present_record(store.public_send(kind, pubkey)) }
+    end
+
+    def batch(r, kind)
+      pubkeys = Params.array_of(r.params["pubkeys"], max: MAX_BATCH) { |v| Params.pubkey(v) }
+      bad_request(r, "bad pubkeys") unless pubkeys
+
+      { kind.to_s => store.public_send(kind, pubkeys).map { |row| present_record(row) } }
+    end
+
     def post_message(r, room)
       author = current_pubkey(r)
       seq    = Params.integer(r.params["seq"], min: 1) or bad_request(r, "bad seq")
@@ -341,6 +474,24 @@ module ReputableChat
 
       { "pubkey" => row[:pubkey], "version" => row[:version],
         "payload" => row[:payload], "signature" => row[:signature] }
+    end
+
+    # Signed blobs go out exactly as they came in, with the record hash the
+    # server derived from them. A reader re-derives it from the same two
+    # strings, so a server that invented one would be caught.
+    def present_record(row)
+      return nil unless row
+
+      { "pubkey" => row[:pubkey], "version" => row[:version], "hash" => row[:hash],
+        "payload" => row[:payload], "signature" => row[:signature] }.compact
+    end
+
+    # An adjustment has no version of its own -- it has the snapshot it amends
+    # and its place in that run, which is what a reader replays it by.
+    def present_adjustment(row)
+      { "pubkey" => row[:pubkey], "base_version" => row[:base_version], "seq" => row[:seq],
+        "target" => row[:target], "hash" => row[:hash], "payload" => row[:payload],
+        "signature" => row[:signature] }
     end
 
     def present_message(row)
