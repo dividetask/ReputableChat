@@ -64,13 +64,48 @@ class BotBrainSpec < Minitest::Test
     assert_nil Brain.clean("Ana:", name: "Ana")
   end
 
+  # --- links --------------------------------------------------------------
+  #
+  # A test server is a place people are invited to click things they should
+  # not. Whatever a model invents, and whatever a persona file says, only the
+  # vetted destinations can ever reach the wire.
+
+  SAFE = ["https://example.test/caught.html"].freeze
+
+  def test_a_link_is_replaced_with_a_safe_one_for_accounts_that_post_links
+    assert_equal "claim it at https://example.test/caught.html now",
+                 Brain.clean("claim it at http://not-a-real-site.example/claim now", links: SAFE)
+  end
+
+  def test_a_bare_domain_counts_as_a_link
+    assert_equal "go to https://example.test/caught.html",
+                 Brain.clean("go to free-money-now.click", links: SAFE)
+    assert_equal "go to https://example.test/caught.html",
+                 Brain.clean("go to www.free-money-now.example", links: SAFE)
+  end
+
+  def test_an_account_that_does_not_post_links_posts_none
+    assert_equal "check out", Brain.clean("check out http://somewhere.example/thing")
+    assert_equal "check out", Brain.clean("check out bit.ly/x", links: [])
+  end
+
+  def test_ordinary_prose_is_not_mistaken_for_a_link
+    ["i.e. this one", "e.g. that", "see section 3.2 of the spec"].each do |line|
+      assert_equal line, Brain.clean(line, links: SAFE), "mangled #{line.inspect}"
+    end
+  end
+
+  def test_a_message_that_is_only_a_link_becomes_nothing
+    assert_nil Brain.clean("http://somewhere.example", links: [])
+  end
+
   def context(recent: [])
     Brain::Context.new(kind: :post, target: nil, target_name: nil,
                        recent: recent, name: "Ana", room: "general")
   end
 
   def test_a_scripted_bot_does_not_repeat_itself_immediately
-    persona = Persona.new({ "username" => "S", "brain" => "scripted",
+    persona = Persona.new({ "username" => "S", "category" => "realperson", "brain" => "scripted",
                             "lines" => %w[one two three four] })
     brain   = Brain::Scripted.new(persona: persona, random: Random.new(2))
     said    = Array.new(12) { brain.compose(context) }
@@ -80,7 +115,7 @@ class BotBrainSpec < Minitest::Test
 
   # Until it has read enough, the chain would just parrot its input back.
   def test_a_markov_bot_falls_back_to_its_seed_lines_until_it_has_read_enough
-    persona = Persona.new({ "username" => "S", "brain" => "markov",
+    persona = Persona.new({ "username" => "S", "category" => "realperson", "brain" => "markov",
                             "lines" => ["a quiet opener here"] })
     brain   = Brain::Markov.new(persona: persona, random: Random.new(3))
 
@@ -88,7 +123,7 @@ class BotBrainSpec < Minitest::Test
   end
 
   def test_a_markov_bot_speaks_from_what_it_has_read
-    persona = Persona.new({ "username" => "S", "brain" => "markov",
+    persona = Persona.new({ "username" => "S", "category" => "realperson", "brain" => "markov",
                             "lines" => ["seed line here"] })
     brain   = Brain::Markov.new(persona: persona, random: Random.new(3))
     corpus  = Array.new(40) { |i| ["someone", "the build is broken again today number #{i}"] }

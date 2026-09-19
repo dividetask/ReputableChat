@@ -103,6 +103,13 @@ export class Session {
     return false;
   }
 
+  // The raw score behind the bucket. Buckets are what the UI acts on, but the
+  // chain needs to compare against an arbitrary threshold, and three buckets
+  // cannot answer "is this above 0.02".
+  scoreOf(target) {
+    return this.reputation.effective(this.viewer, target, this.graph, this.depths);
+  }
+
   // Itemised score for the recalculate view: who contributed what.
   explain(target) {
     const result = this.reputation.breakdown(this.viewer, target, this.graph, this.depths);

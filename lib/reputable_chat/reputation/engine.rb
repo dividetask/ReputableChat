@@ -87,6 +87,20 @@ module ReputableChat
         :trusted
       end
 
+      # The fewest votes one rater has to cast to lift somebody over the
+      # visibility line. Read off the curve rather than hardcoded, so retuning
+      # the curve moves it: the answer is a property of the configuration, not
+      # a number anyone should be carrying around.
+      #
+      # Used for saying "this account is real" without saying "I know them" --
+      # friending is worth far more and claims far more.
+      def minimum_visible_votes
+        weight = ladder.weight(0)
+
+        (1..curve.saturation_point).find { |n| weight * curve.value(n) > @visible_above } ||
+          curve.saturation_point
+      end
+
       # Breadth-first walk out from the viewer, gated at every hop.
       #
       # Reaching a hop means every link on the path was rated above the gate by

@@ -2,38 +2,97 @@
 
 Test traffic. Each bot is one process holding one account, talking to the
 server exactly as a browser does: it asks for a challenge, signs it, keeps the
-session cookie, and sends signed blobs. The server cannot tell the difference,
+session cookie, and sends signed records. The server cannot tell the difference,
 which is the point — a bot that took a shortcut would be testing the shortcut.
 
+The purpose is to give the moderation machinery something to moderate. How fast
+does a scammer get silenced? How much damage does one credulous account do by
+vouching for the wrong people? Does a troll's reports move anybody, and does an
+expert's standing survive a swarm of them?
+
 ```bash
+bin/vouch --count 3                          # once, before the first swarm
 bin/bot personas/regular.yml --name ana
-bin/bot personas/scammer.yml --name scam-01 --server https://chat.example
-bin/bot personas/regular.yml --explain          # what this persona implies
+bin/bot personas/regular.yml --explain       # what this persona implies
 ```
 
 One persona file can back any number of bots. `--name` is what separates their
 accounts and their state, so a dozen spammers need one file:
 
 ```bash
-for i in $(seq 1 12); do bin/bot personas/scammer.yml --name scam-$i & done
+for i in $(seq 1 12); do bin/bot personas/spammer.yml --name spam-$i & done
 ```
 
-## Accounts
+## Getting seen
 
-A bot holds a real BIP39 seed phrase and derives its key exactly as the browser
-does, so **you can log into any bot from the login screen** and see what it has
-been doing. The phrase is in the bot's state file under `data/bots/<name>.json`.
+An unrated account sits at exactly zero and is invisible to everybody. That is
+the sybil defense, and it applies to bots as hard as it applies to anybody —
+so a swarm does not get to opt out of it with `show_unrated` and still call the
+test realistic. Somebody visible has to vouch.
 
-Argon2id runs through `tools/argon2-derive.mjs`, which loads the same vendored
-hash-wasm build `public/js/identity.js` loads. A second implementation of the
-KDF in Ruby could drift from the browser's without anything noticing until
-every bot account silently became a different account;
-`spec/bot_identity_spec.rb` runs the browser's own `deriveFromSeed` under node
-and compares. **This means a bot machine needs node** (or `BOT_NODE=/path/to/node`).
+Tim cannot do it directly for every bot: the genesis account friending two
+hundred accounts would make it a rubber stamp and nothing downstream would mean
+anything. So `bin/vouch` creates a handful of **voucher** accounts, Tim friends
+those once, and each new bot is introduced by one of them as it is born:
 
-A persona file may carry a `seed:`, but normally it does not: a named instance
-generates its own on first run, and a recycling bot goes through one every few
-days.
+```
+Tim ──friend──▶ voucher ──"this account exists"──▶ bot
+```
+
+A bot is then three hops from anyone who rates Tim: **visible, and nowhere near
+trusted**, which is exactly what a brand new account should be. The vouch is
+deliberately not a friendship — it is the least rating that clears the
+visibility line, read off the curve under the server's own parameters, so it
+says "this account exists" rather than "I know them".
+
+Vouchers live in `data/bots/vouchers.json`, written 0600 because they are seed
+phrases. If the genesis seed is not on the machine you run `bin/vouch` on, it
+prints the `script/tim.rb friend` commands to run wherever it is.
+
+Every bot also friends the genesis account when it is born, and `starting_friends`
+other bots — a new account arrives with a contact or two, the way a person who
+joined a small server on somebody's recommendation does.
+
+## Categories
+
+Every persona declares one of seven, defined once in
+`config/bot-categories.yml`:
+
+| category | what it is for |
+|---|---|
+| `realperson` | the baseline: ordinary traffic for the bad actors to hide among |
+| `expert` | useful and accurate; the account whose standing should be hardest to shift |
+| `bot` | honest automation, small mechanical corrections; a harmless control |
+| `gullible` | honest, and vouches for exactly the people it should not |
+| `scammer` | urgency and credential-phishing patterns, simulated |
+| `spammer` | volume nobody asked for |
+| `troll` | picks fights; the test case for reports and negative emotes |
+
+The category's `definition` and `guidance` go to the model verbatim, above the
+persona's own `disposition`, so a persona can be nothing more than a name and a
+voice and still behave like the kind of account it claims to be.
+
+Two fields in that file are read by the script rather than the model, because a
+270M model cannot be relied on to follow an instruction it was given four
+hundred tokens ago:
+
+- **`drawn_to`** — which categories this one gravitates towards when choosing
+  whom to answer, react to and friend. A gullible account befriending scammers
+  is the behaviour under test, so it is arranged rather than hoped for.
+- **`links`** — see below.
+
+## Links
+
+Nothing a bot posts can contain a link to anywhere that was not vetted. The
+scammer and spammer categories are `links: safe`, which means every URL in what
+they were about to post is **replaced** with one from `safe_links` — the
+rickroll, or `/caught.html`, a page on this server explaining what clicking a
+stranger's link usually gets you. Every other category is `links: none`, and
+URLs are stripped.
+
+This is enforced in `lib/reputable_chat/bot/brain.rb`, on the way out, for
+every brain. A persona's own scripted lines go through it too: a link written
+into a YAML file by a person is not more trustworthy than one a model invented.
 
 ## The visit model
 
@@ -73,6 +132,10 @@ Posts therefore arrive in clusters minutes apart with hours of nothing between,
 without anything in the scheduler arranging that: they can only happen while
 the bot is present.
 
+A visit is also a login, which is how the reputation rules want it — buckets
+are sorted on arrival and hold until the bot comes back, so a reaction it makes
+at 9pm changes nothing it can see until tomorrow.
+
 ### Why the weekly rates are honest
 
 The count of actions in a visit is not `visit_length / mean_gap`. Actions are a
@@ -100,12 +163,11 @@ moment it is used at normal speed.
 |---|---|---|
 | `scripted` | nothing | a list of `lines:`, picked at random. Does not read the room, because real spam does not either |
 | `markov` | nothing | an order-2 chain over what this account has actually read: on-topic vocabulary, no meaning |
-| `llm` | one shared model | a small local model, prompted with the room |
+| `llm` | one shared model | a small local model, prompted with the category, the disposition and the room |
 
-`disposition:` is the whole of an `llm` bot's character — it goes to the model
-as the system prompt and can be a word or several paragraphs. The bot is shown
-the tail of the conversation **its account can actually see**, with display
-names, and asked for one short line.
+The bot is shown the tail of the conversation **its account can actually see**,
+with display names, and asked for one short line. A bot that is blocked from
+seeing somebody is not writing replies informed by them either.
 
 ### The model
 
@@ -154,6 +216,22 @@ State files hold seed phrases in plaintext under `data/`, which is gitignored.
 They are throwaway test accounts and there is no recovery for any of them, so
 nothing of value should ever be signed into a bot's seed.
 
+## Accounts and the chain
+
+A bot holds a real BIP39 seed phrase and derives its key through
+`script/derive_key.mjs` — the same helper the genesis account uses, loading the
+same vendored hash-wasm the browser loads. So **you can log into any bot from
+the login screen** and see what it has been doing. The phrase is in the bot's
+state file under `data/bots/<name>.json`, and a bot machine therefore needs
+node on PATH (or `BOT_NODE=/path/to/node`).
+
+Every record a bot signs carries an `ack`: the record hash of the most recent
+thing it could see whose author it rates above
+`chain.min_reputation_to_acknowledge`, or the genesis when there is nothing. A
+bot checks at startup that the genesis in its checkout is the one the server is
+running and refuses to start if not, because otherwise every `ack` it signs
+would point at a record nobody else has.
+
 ## What the bots do to reputation
 
 Reacting and replying both count as one vote for the author, once per message,
@@ -161,24 +239,13 @@ and are folded into the bot's own published config as `net_votes` — the record
 are the display form, the config is the reputation form, and a reaction that
 never reached a config changes nobody's reputation.
 
-Friending is rare on purpose (`friend_per_visit`, around 0.02). A friendship is
-worth 0.5 on its own, which is most of the way to Trusted for everyone it
-reaches; bots handing them out freely would make the whole graph trusted within
-a day.
+Friending is rare for most categories (`friend_per_visit`, around 0.02). A
+friendship is worth 0.5 on its own, which is most of the way to Trusted for
+everyone it reaches. The gullible category is the deliberate exception: it
+hands them out, to the people its `drawn_to` says it should not.
 
-Nothing reports anybody. Reporting is a judgement the test swarm should not be
-making on its own.
-
-### You will not see them at first
-
-Unrated accounts sit at exactly zero, so a new bot is invisible to everyone,
-including other bots — that is the sybil defence working. Personas therefore
-set `show_unrated: true` by default; a swarm that could not see itself would
-have nothing to react to and would never start.
-
-To see them from your own account, either turn on `show_unrated` in your
-profile, or friend one bot and watch how far that reaches. The second is the
-more interesting thing to watch.
+Nothing reports anybody. Reporting is a judgement the swarm should not be
+making on its own — it is the thing you are there to do, and to watch work.
 
 ## Load
 
@@ -199,7 +266,7 @@ remembering before pointing five hundred bots at one server.
 | `--speed N` | compress the waiting N times |
 | `--visits N`, `--once` | stop after N visits, starting immediately |
 | `--seed N` | fix the RNG for a reproducible run |
-| `--explain` | print the schedule this persona implies and exit |
+| `--explain` | print the schedule and briefing this persona implies, and exit |
 
 `--origin` matters when bots run elsewhere: the origin travels inside the
 signed login payload and must match the server's configured `origin` exactly,

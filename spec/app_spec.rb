@@ -1,11 +1,13 @@
 # frozen_string_literal: true
 
 require_relative "spec_helper"
+require_relative "genesis_fixture"
 require "rack/test"
 require "ed25519"
 require "reputable_chat/app"
 require "reputable_chat/cryptography/signature"
 require "reputable_chat/cryptography/payload"
+require "reputable_chat/cryptography/record"
 require "tmpdir"
 require "digest"
 
@@ -22,6 +24,7 @@ class AppSpec < Minitest::Test
     ReputableChat::App.store  = ReputableChat::Store::Database.new("sqlite:/")
     ReputableChat::App.images = ReputableChat::Store::Images.new(Dir.mktmpdir)
     ReputableChat::App.origin = ORIGIN
+    ReputableChat::App.genesis = GenesisFixture.build
     @signing = Ed25519::SigningKey.generate
     @pubkey  = Sig.encode(@signing.verify_key.to_bytes)
   end
@@ -35,6 +38,13 @@ class AppSpec < Minitest::Test
   end
 
   def json = JSON.parse(last_response.body)
+
+  # What a client with nothing else in view acknowledges.
+  def ack = ReputableChat::App.genesis.hash
+
+  # A record hash that is well formed but names nothing stored, which is all
+  # the server can tell about one anyway.
+  def a_record_hash(seed = "a message") = Digest::SHA256.hexdigest(seed)
 
   def challenge
     post_json "/api/challenge", {}
@@ -273,12 +283,12 @@ class AppSpec < Minitest::Test
   def test_stores_a_reply_and_serves_the_target_back
     log_in
     ts = Time.now.to_i
-    target = "t" * 86
+    target = a_record_hash("target")
     payload = Payload.message(author: @pubkey, room: "general", seq: 1, prev: nil,
-                              body: "agreed", issued_at: ts, reply_to: target)
+                              body: "agreed", ack: ack, issued_at: ts, reply_to: target)
 
     post_json "/api/room/general/message",
-              { "seq" => 1, "prev" => nil, "body" => "agreed", "ts" => ts,
+              { "seq" => 1, "prev" => nil, "ack" => ack, "body" => "agreed", "ts" => ts,
                 "reply_to" => target, "signature" => sign(payload) }
     assert_equal 200, last_response.status
 
@@ -291,11 +301,11 @@ class AppSpec < Minitest::Test
     log_in
     ts = Time.now.to_i
     payload = Payload.message(author: @pubkey, room: "general", seq: 1, prev: nil,
-                              body: "agreed", issued_at: ts, reply_to: "t" * 86)
+                              body: "agreed", ack: ack, issued_at: ts, reply_to: a_record_hash("target"))
 
     post_json "/api/room/general/message",
-              { "seq" => 1, "prev" => nil, "body" => "agreed", "ts" => ts,
-                "reply_to" => "x" * 86, "signature" => sign(payload) }
+              { "seq" => 1, "prev" => nil, "ack" => ack, "body" => "agreed", "ts" => ts,
+                "reply_to" => a_record_hash("other"), "signature" => sign(payload) }
 
     assert_equal 400, last_response.status
   end
@@ -304,10 +314,10 @@ class AppSpec < Minitest::Test
     log_in
     ts = Time.now.to_i
     payload = Payload.message(author: @pubkey, room: "general", seq: 1, prev: nil,
-                              body: "hi", issued_at: ts, reply_to: "nope")
+                              body: "hi", ack: ack, issued_at: ts, reply_to: "nope")
 
     post_json "/api/room/general/message",
-              { "seq" => 1, "prev" => nil, "body" => "hi", "ts" => ts,
+              { "seq" => 1, "prev" => nil, "ack" => ack, "body" => "hi", "ts" => ts,
                 "reply_to" => "nope", "signature" => sign(payload) }
 
     assert_equal 400, last_response.status
@@ -317,10 +327,10 @@ class AppSpec < Minitest::Test
     log_in
     ts = Time.now.to_i
     payload = Payload.message(author: @pubkey, room: "general", seq: 1, prev: nil,
-                              body: "hello", issued_at: ts)
+                              body: "hello", ack: ack, issued_at: ts)
 
     post_json "/api/room/general/message",
-              { "seq" => 1, "prev" => nil, "body" => "hello", "ts" => ts, "signature" => sign(payload) }
+              { "seq" => 1, "prev" => nil, "ack" => ack, "body" => "hello", "ts" => ts, "signature" => sign(payload) }
     assert_equal 200, last_response.status
 
     get "/api/room/general/messages"
@@ -333,20 +343,96 @@ class AppSpec < Minitest::Test
     log_in
     ts = Time.now.to_i
     elsewhere = Payload.message(author: @pubkey, room: "other", seq: 1, prev: nil,
-                                body: "hello", issued_at: ts)
+                                body: "hello", ack: ack, issued_at: ts)
 
     post_json "/api/room/general/message",
-              { "seq" => 1, "prev" => nil, "body" => "hello", "ts" => ts, "signature" => sign(elsewhere) }
+              { "seq" => 1, "prev" => nil, "ack" => ack, "body" => "hello", "ts" => ts, "signature" => sign(elsewhere) }
 
     assert_equal 400, last_response.status
+  end
+
+  # RULE: a message must name what its author had seen. A record with no ack is
+  # one nothing else can anchor to, so it is refused rather than stored loose.
+  def test_rejects_a_message_with_no_ack
+    log_in
+    ts = Time.now.to_i
+    payload = Payload.message(author: @pubkey, room: "general", seq: 1, prev: nil,
+                              body: "hello", ack: ack, issued_at: ts)
+
+    post_json "/api/room/general/message",
+              { "seq" => 1, "prev" => nil, "body" => "hello", "ts" => ts,
+                "signature" => sign(payload) }
+
+    assert_equal 400, last_response.status
+  end
+
+  def test_rejects_a_malformed_ack
+    log_in
+    ts = Time.now.to_i
+    payload = Payload.message(author: @pubkey, room: "general", seq: 1, prev: nil,
+                              body: "hello", ack: "nope", issued_at: ts)
+
+    post_json "/api/room/general/message",
+              { "seq" => 1, "prev" => nil, "ack" => "nope", "body" => "hello",
+                "ts" => ts, "signature" => sign(payload) }
+
+    assert_equal 400, last_response.status
+  end
+
+  # RULE: the ack is inside the signature, so a server cannot re-anchor a
+  # message to somewhere else in the history after the fact.
+  def test_rejects_a_message_whose_ack_was_altered
+    log_in
+    ts = Time.now.to_i
+    payload = Payload.message(author: @pubkey, room: "general", seq: 1, prev: nil,
+                              body: "hello", ack: ack, issued_at: ts)
+
+    post_json "/api/room/general/message",
+              { "seq" => 1, "prev" => nil, "ack" => a_record_hash("elsewhere"),
+                "body" => "hello", "ts" => ts, "signature" => sign(payload) }
+
+    assert_equal 400, last_response.status
+  end
+
+  # RULE: the hash the server serves is the hash of what it serves. A reader
+  # re-derives it from the blob, so a server that made one up would be caught.
+  def test_the_served_hash_is_the_hash_of_the_served_record
+    log_in
+    ts = Time.now.to_i
+    payload = Payload.message(author: @pubkey, room: "general", seq: 1, prev: nil,
+                              body: "hello", ack: ack, issued_at: ts)
+
+    post_json "/api/room/general/message",
+              { "seq" => 1, "prev" => nil, "ack" => ack, "body" => "hello",
+                "ts" => ts, "signature" => sign(payload) }
+    assert_equal 200, last_response.status
+
+    get "/api/room/general/messages"
+    stored = json["messages"].first
+
+    assert_equal ack, stored["ack"]
+    assert_equal ReputableChat::Cryptography::Record.digest(
+      payload: stored["payload"], signature: stored["signature"]
+    ), stored["hash"]
+  end
+
+  # RULE: the genesis is served so a client can check the hash it was built
+  # with against the one this server runs, rather than meeting the mismatch as
+  # signatures that will not verify.
+  def test_serves_the_genesis_record
+    get "/api/genesis"
+
+    assert_equal 200, last_response.status
+    assert_equal ReputableChat::App.genesis.hash, json["hash"]
+    assert_nil JSON.parse(json["payload"])["ack"]
   end
 
   def test_sequence_numbers_cannot_be_reused
     log_in
     ts = Time.now.to_i
     payload = Payload.message(author: @pubkey, room: "general", seq: 1, prev: nil,
-                              body: "hello", issued_at: ts)
-    body = { "seq" => 1, "prev" => nil, "body" => "hello", "ts" => ts, "signature" => sign(payload) }
+                              body: "hello", ack: ack, issued_at: ts)
+    body = { "seq" => 1, "prev" => nil, "ack" => ack, "body" => "hello", "ts" => ts, "signature" => sign(payload) }
 
     post_json "/api/room/general/message", body
     assert_equal 200, last_response.status
@@ -364,12 +450,13 @@ class AppSpec < Minitest::Test
 
   def emote_body(message:, emote: FIRST_EMOTE, room: "general", key: nil)
     ts = Time.now.to_i
-    payload = Payload.emote(author: @pubkey, room: room, message: message, emote: emote, issued_at: ts)
+    payload = Payload.emote(author: @pubkey, room: room, message: message,
+                            emote: emote, ack: ack, issued_at: ts)
     signature = key ? Sig.encode(key.sign(Canon.bytes(payload))) : sign(payload)
-    { "message" => message, "emote" => emote, "ts" => ts, "signature" => signature }
+    { "message" => message, "emote" => emote, "ack" => ack, "ts" => ts, "signature" => signature }
   end
 
-  def a_message_signature = "m" * 86
+  def a_message_signature = a_record_hash
 
   def test_stores_an_emote_and_serves_it_back
     log_in
@@ -486,6 +573,15 @@ class FrozenAppSpec < Minitest::Test
 
     assert_operator emotes["positive"].size, :>, emotes["negative"].size,
                     "positive emotes should outnumber negative ones by design"
+  end
+
+  # RULE: /new-account is a real URL, so a refresh or a bookmark works.
+  def test_new_account_is_its_own_url
+    get "/new-account"
+
+    assert_equal 200, last_response.status
+    assert_includes last_response.headers["Content-Type"], "text/html"
+    assert_includes last_response.body, "login-form"
   end
 
   def test_serves_the_wordlist

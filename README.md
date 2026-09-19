@@ -6,8 +6,14 @@ to comments, and report bad actors. Those judgements propagate through the
 social graph, weighted by distance, and decide what each person sees — so "who
 is worth reading" is answered per viewer rather than globally.
 
+Every signed record names the last record its author had seen, and only records
+from people that author rates are worth naming — so the history is a chain the
+reputable part of the network builds for itself, and being unvouched for means
+being left out of it.
+
 **Status: early.** Reputation, identity and cryptography are built and tested. The
-chat UI is a working skeleton.
+chain's record shapes and hashing are in; the records that use them are landing
+a stage at a time. The chat UI is a working skeleton.
 
 ## Running it
 
@@ -48,16 +54,17 @@ exactly as a browser does — same seed phrase, same key derivation, same signed
 payloads.
 
 ```bash
-bin/bot personas/regular.yml --name ana
-for i in $(seq 1 12); do bin/bot personas/scammer.yml --name scam-$i & done
+bin/vouch --count 3                                              # once
+for i in $(seq 1 12); do bin/bot personas/spammer.yml --name spam-$i & done
 ```
 
-A persona says how often the bot checks in, how long it stays and how much it
-does per week; when it posts follows from that. Words come from a list of
-canned lines, a Markov chain over what it has read, or a small local model
-shared by the whole swarm. Some personas abandon their account every few days
-and come back as somebody new, which is the case the reputation system exists
-to handle. See [bots](docs/project/bots.md).
+Each declares a category — `scammer`, `troll`, `gullible`, `expert` and three
+more — defined once in `config/bot-categories.yml` and used both to brief the
+model and to decide who a bot gravitates towards. New bots are invisible until
+a voucher introduces them, exactly like a real new account, and some of them
+abandon their account every few days and come back as somebody new. No link a
+bot posts goes anywhere but a page explaining why you should not have clicked
+it. See [bots](docs/project/bots.md).
 
 ## How reputation works
 
@@ -77,8 +84,25 @@ Hop 2 tops out at 0.009, so **Trusted means you rated them or someone you rated
 did**. The unrated sit at exactly 0, so **new accounts start invisible** — that
 is the sybil defense. Set `show_unrated` to see them anyway.
 
+## The chain
+
+No proof of work and no mining. The chain exists so a record cannot be quietly
+removed, back-dated, or shown to one person and not another: dropping a message
+means dropping everything that acknowledged it, and everything that
+acknowledged those.
+
+A record is acknowledged only if its author clears the acknowledger's own
+reputation bar, which is subjective and which no server can check. New and
+low-reputation accounts therefore go unacknowledged and unanchored — that is
+the point of it, not a gap in it.
+
+Tim's user record is the genesis. Generate it once with `bundle exec rake
+genesis` and commit it; every client needs the same hash before it has fetched
+anything, so it cannot be downloaded.
+
 Full design: [reputation](docs/project/reputation.md) ·
 [identity](docs/project/identity.md) ·
+[chain](docs/project/chain.md) ·
 [architecture](docs/project/architecture.md) ·
 [bots](docs/project/bots.md)
 

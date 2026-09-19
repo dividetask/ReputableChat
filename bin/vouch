@@ -1,0 +1,83 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# The accounts that introduce new bots to the network.
+#
+#   bin/vouch --count 3
+#
+# A new account sits at exactly zero and is invisible to everybody -- the sybil
+# defense, which applies to bots as hard as it applies to anybody. So somebody
+# visible has to vouch. Tim friending every bot himself would make Tim a rubber
+# stamp; instead Tim friends a few vouchers once, here, and the vouchers
+# introduce bots as they are born.
+#
+# Run this once before starting a swarm, and again if you raise --count.
+
+$LOAD_PATH.unshift File.expand_path("../lib", __dir__)
+
+require "optparse"
+require "open3"
+require "reputable_chat/bot/client"
+require "reputable_chat/bot/vouchers"
+require "reputable_chat/genesis"
+require "reputable_chat/operator"
+
+options = {
+  server: ENV.fetch("BOT_SERVER", "http://localhost:9292"),
+  origin: ENV["BOT_ORIGIN"],
+  state_dir: ENV.fetch("BOT_STATE_DIR", "data/bots"),
+  count: 3
+}
+
+parser = OptionParser.new do |opts|
+  opts.banner = "Usage: bin/vouch [options]"
+  opts.on("--count N", Integer, "How many vouchers there should be (default #{options[:count]})") do |v|
+    options[:count] = v
+  end
+  opts.on("--server URL", "Where to reach the server (default #{options[:server]})") { |v| options[:server] = v }
+  opts.on("--origin URL", "Origin to sign; must match the server's configured origin") { |v| options[:origin] = v }
+  opts.on("--state DIR", "Where bot state lives (default #{options[:state_dir]})") { |v| options[:state_dir] = v }
+  opts.on("-h", "--help") { puts opts; exit }
+end
+parser.parse!
+
+origin = options[:origin] || options[:server]
+path   = File.join(options[:state_dir], "vouchers.json")
+
+def client_for(server, origin)
+  ReputableChat::Bot::Client.new(base_url: server, origin: origin)
+end
+
+vouchers = ReputableChat::Bot::Vouchers.load(path)
+seed_config = client_for(options[:server], origin).defaults.fetch("seed")
+
+added = vouchers.grow_to(options[:count], seed_config: seed_config)
+vouchers.save
+puts "#{vouchers.size} voucher#{'s' unless vouchers.size == 1} in #{path}#{added.empty? ? '' : " (#{added.size} new)"}"
+
+vouchers.all.each do |voucher|
+  state = vouchers.establish(voucher: voucher, client: client_for(options[:server], origin),
+                             seed_config: seed_config)
+  puts "  #{voucher.username}  #{voucher.pubkey}  #{state}"
+end
+
+# Tim has to friend them, or they are as invisible as the bots they introduce.
+# Done here when the genesis seed is on this machine, and printed for a human
+# to run somewhere else when it is not.
+puts
+if File.exist?(ReputableChat::Operator.seed_path)
+  vouchers.all.each do |voucher|
+    command = ["ruby", "script/tim.rb", "friend", voucher.pubkey,
+               "--url", options[:server], "--origin", origin]
+    _out, err, status = Open3.capture3(*command)
+    puts status.success? ? "  the genesis account friended #{voucher.username}" : "  #{err.strip}"
+  end
+else
+  puts "  The genesis seed is not on this machine, so the vouchers are not yet"
+  puts "  visible themselves. Wherever it lives, run:"
+  puts
+  vouchers.all.each do |voucher|
+    puts "    bundle exec ruby script/tim.rb friend #{voucher.pubkey}"
+  end
+end
+puts

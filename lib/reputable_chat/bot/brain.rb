@@ -24,13 +24,28 @@ module ReputableChat
       ARTIFACT_PREFIX = /\A(assistant|ai|bot|system|response|answer|reply|output|user)\s*:\s*/i
       CONTROL         = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/
 
+      # Anything that could be clicked. Deliberately greedy: a false positive
+      # costs a bot one hallucinated URL, a false negative puts a link nobody
+      # vetted in front of whoever is testing the server.
+      URL = %r{
+        \b(?:https?://|www\.)\S+
+        |
+        \b[a-z0-9](?:[a-z0-9-]*[a-z0-9])?
+         \.(?:com|net|org|io|co|ly|xyz|link|click|info|biz|app|shop|top|ru|tk|gg|me)
+         \b(?:/\S*)?
+      }ix
+
       module_function
 
-      def for(persona, random: Random.new)
+      # `links` is what this bot may post, already resolved: the category's
+      # safe list, or empty for a category that posts none.
+      def for(persona, random: Random.new, links: [], logger: nil)
+        options = { persona: persona, random: random, links: links }
+
         case persona.brain
-        when "scripted" then Scripted.new(persona: persona, random: random)
-        when "markov"   then Markov.new(persona: persona, random: random)
-        when "llm"      then Llm.new(persona: persona, random: random)
+        when "scripted" then Scripted.new(**options)
+        when "markov"   then Markov.new(**options)
+        when "llm"      then Llm.new(**options, logger: logger)
         else raise ArgumentError, "unknown brain #{persona.brain.inspect}"
         end
       end
@@ -40,14 +55,27 @@ module ReputableChat
       # Nil is a normal outcome, not an error: a bot that produced nothing
       # usable just read the room instead, which is what a person who started
       # typing and thought better of it does.
-      def clean(text, name: nil)
-        line = text.to_s.gsub(CONTROL, " ").gsub(/\s+/, " ").strip
+      # `links` is the category's link policy, already resolved to absolute
+      # URLs. Empty or absent strips every URL; a list replaces each one.
+      # There is no option that lets a link through: a model inventing a
+      # domain, or a persona's scripted line smuggling one, is not a risk
+      # worth carrying for a test harness.
+      def clean(text, name: nil, links: nil, random: Random.new)
+        line = text.to_s.gsub(CONTROL, " ")
+        line = substitute_links(line, links, random)
+        line = line.gsub(/\s+/, " ").strip
         line = line.sub(ARTIFACT_PREFIX, "")
         line = line.sub(/\A#{Regexp.escape(name)}\s*:\s*/i, "") if name
         line = line[1...-1].to_s.strip if line.match?(/\A(["'])(?!.*\1.*\1).*\1\z/m)
         line = truncate(line)
 
         line.empty? ? nil : line
+      end
+
+      def substitute_links(line, links, random)
+        safe = Array(links)
+
+        line.gsub(URL) { safe.empty? ? " " : safe.sample(random: random) }
       end
 
       # On a word boundary where there is one, so a cut-off message looks like

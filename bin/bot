@@ -14,6 +14,7 @@ $LOAD_PATH.unshift File.expand_path("../lib", __dir__)
 require "optparse"
 require "reputable_chat/bot/persona"
 require "reputable_chat/bot/runner"
+require "reputable_chat/bot/vouchers"
 
 options = {
   server: ENV.fetch("BOT_SERVER", "http://localhost:9292"),
@@ -63,11 +64,15 @@ random = options[:seed] ? Random.new(options[:seed]) : Random.new
 
 if options[:explain]
   schedule = persona.schedule(random: random)
-  puts "#{name} (#{persona.brain} brain, room ##{persona.room})"
+  puts "#{name}: #{%w[a e i o u].include?(persona.category[0]) ? "an" : "a"} #{persona.category} with a #{persona.brain} brain, in ##{persona.room}"
   puts "  #{schedule.summary}"
   puts format("  ~%.1f posts/week, ~%.1f reactions/week, %.0f%% of posts are replies",
               schedule.posts_per_week, schedule.reactions_per_week, persona.reply_ratio * 100)
+  puts format("  starts with the genesis account and ~%.1f other bots as friends",
+              persona.starting_friends)
   puts "  recycles every ~#{persona.recycle_after_days} days" if persona.recycles?
+  puts
+  puts persona.briefing.lines.map { |line| "  #{line}" }.join
   exit
 end
 
@@ -79,9 +84,11 @@ client = ReputableChat::Bot::Client.new(
   base_url: options[:server], origin: options[:origin] || options[:server], logger: log
 )
 
+vouchers = ReputableChat::Bot::Vouchers.load(File.join(options[:state_dir], "vouchers.json"))
+
 runner = ReputableChat::Bot::Runner.new(
   persona: persona, name: name, state: state, client: client, logger: log,
-  random: random, speed: options[:speed]
+  vouchers: vouchers, state_dir: options[:state_dir], random: random, speed: options[:speed]
 )
 
 begin
@@ -95,6 +102,9 @@ rescue ReputableChat::Bot::Identity::DerivationFailed => e
   warn "The key derivation needs node on PATH (or BOT_NODE=/path/to/node)."
   exit 1
 rescue ReputableChat::Bot::Client::Error => e
+  warn "#{name}: #{e.message}"
+  exit 1
+rescue ReputableChat::Genesis::Missing, ReputableChat::Genesis::Corrupt => e
   warn "#{name}: #{e.message}"
   exit 1
 end

@@ -5,3 +5,4 @@ tmp/
 *.sqlite3
 .bundle/
 vendor/bundle/
+config/genesis/seed

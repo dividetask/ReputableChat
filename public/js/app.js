@@ -4,10 +4,12 @@
 
 import * as seed from "./seed.js";
 import * as identity from "./identity.js";
-import { Reputation, Graph, toNumber } from "./reputation.js";
+import { Reputation, Graph, toNumber, toFixed } from "./reputation.js";
 import { Session } from "./session.js";
 
 const ROOM = "general";
+const LOGIN_PATH = "/";
+const NEW_ACCOUNT_PATH = "/new-account";
 // A quick picker, not the whole set: sixteen emotes make a toolbar wider than
 // the message it floats over. The rest stay configured and unused for now.
 const QUICK_EMOTES = 8;
@@ -19,13 +21,39 @@ const state = {
   ratings: {}, graph: new Graph(), reputation: null, session: null,
   seq: 0, voted: new Set(), viewing: null, settings: {}, privateVersion: 0,
   reactions: new Map(), recentlyBlocked: new Map(), replyingTo: null,
-  renderEpoch: 0, renderedKey: null,
+  genesis: null, tip: null,
+  renderEpoch: 0, renderedKey: null, pendingRegistration: false,
 };
 
 // Anything that changes how the chat should look without changing what the
 // server returned -- a bucket moving, a profile learned, a vote cast. Polling
 // alone must not rebuild the DOM, so local changes announce themselves here.
 const touch = () => { state.renderEpoch += 1; };
+
+// The record this client will name as the last thing it saw. `tip` is the most
+// recent record whose author cleared the bar; with nothing yet seen it is the
+// genesis, which is why Tim exists.
+function currentAck() {
+  return state.tip || state.genesis.hash;
+}
+
+// The bar is the viewer's own, read through the viewer's own config, so two
+// people disagree about which references were legitimate and no server can
+// settle it. Acknowledging only people you rate is what leaves new and
+// low-reputation accounts unanchored -- see docs/project/chain.md.
+function chooseTip(messages) {
+  if (!state.session) return null;
+
+  const bar = toFixed(state.config.chain.min_reputation_to_acknowledge);
+
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const { author, hash } = messages[i];
+    if (!hash) continue;
+    if (author === state.me.pubkey) return hash;
+    if (state.session.scoreOf(author) > bar) return hash;
+  }
+  return null;
+}
 
 async function api(path, options = {}) {
   const response = await fetch(path, { credentials: "same-origin", ...options });
@@ -127,7 +155,22 @@ function rebuildSession() {
 // No word suggestions here any more: the field is a password field so it is
 // not readable over a shoulder, and suggesting the word being typed would put
 // it straight back on screen.
-const creatingAccount = () => !$("new-account").classList.contains("hidden");
+// Login and new account are separate URLs, navigated with pushState so the
+// derived key and the typed seed survive the move between them.
+const creatingAccount = () => window.location.pathname === NEW_ACCOUNT_PATH;
+
+function goTo(path, { replace = false } = {}) {
+  if (window.location.pathname !== path) {
+    window.history[replace ? "replaceState" : "pushState"]({}, "", path);
+  }
+  renderRoute();
+}
+
+function renderRoute() {
+  const newAccount = creatingAccount();
+  $("new-account").classList.toggle("hidden", !newAccount);
+  $("login-intro").classList.toggle("hidden", newAccount);
+}
 const chosenName = () => $("new-name").value.trim();
 
 async function refreshSeedField() {
@@ -148,19 +191,26 @@ async function refreshSeedField() {
 async function unlock(event) {
   if (event) event.preventDefault();
   $("unlock").disabled = true;
-  status($("seed-status"), "deriving your key — this takes a moment by design…");
 
   try {
-    const derived = await identity.deriveFromSeed($("seed").value, state.config.seed.kdf);
-    $("seed").value = ""; // the seed has done its job
-    await signIn(derived);
+    // This seed was derived a moment ago and only the name was missing, so
+    // there is no reason to spend another second in Argon2 on it.
+    if (state.pendingRegistration && chosenName()) {
+      status($("seed-status"), "creating your account…");
+      return await registerWith(chosenName());
+    }
+
+    status($("seed-status"), "deriving your key — this takes a moment by design…");
+    await signIn(await identity.deriveFromSeed($("seed").value, state.config.seed.kdf));
   } catch (error) {
     status($("seed-status"), error.message, "error");
     $("unlock").disabled = false;
   }
 }
 
-async function signIn(derived) {
+// `restoring` means this came from a key left in IndexedDB rather than from
+// someone typing a seed, so nothing here may open a signup they did not ask for.
+async function signIn(derived, { restoring = false } = {}) {
   const { nonce } = await post("/api/challenge", {});
   const ts = Math.floor(Date.now() / 1000);
   const payload = identity.loginPayload({
@@ -172,17 +222,44 @@ async function signIn(derived) {
   });
 
   state.me = derived;
-  await identity.remember({ privateKey: derived.privateKey, pubkey: derived.pubkey });
 
   if (session.registered) return enterChat();
 
-  // Coming from the new-account page the name was given up front, so there is
-  // nothing left to ask. Reaching here any other way means an unregistered
-  // seed was typed in directly, which still needs a name and a warning.
+  // A remembered key whose account was never created -- someone started a
+  // signup and left. Drop it and stay on the login screen rather than making
+  // the new account screen the first thing anyone sees.
+  if (restoring) {
+    await identity.forget();
+    state.me = null;
+    return;
+  }
+
   if (creatingAccount() && chosenName()) return registerWith(chosenName());
 
-  $("register").classList.remove("hidden");
-  status($("seed-status"), "");
+  // An unregistered seed typed on the login screen. Send them to the new
+  // account screen for a display name rather than growing a name field on the
+  // login screen. The seed stays in its password field so the page works
+  // without ever putting it back on screen -- it is not one we generated.
+  state.pendingRegistration = true;
+  $("new-seed-block").classList.add("hidden");
+  $("unregistered-note").classList.remove("hidden");
+  $("new-name").value = "";
+  goTo(NEW_ACCOUNT_PATH);
+  $("new-name").focus();
+  refreshSeedField();
+}
+
+// A brand new seed, shown so it can be copied across.
+async function startNewAccount() {
+  $("new-seed-words").value = await seed.generate(state.config.seed.min_words);
+  $("new-name").value = "";
+  $("seed").value = "";
+  state.pendingRegistration = false;
+  $("new-seed-block").classList.remove("hidden");
+  $("unregistered-note").classList.add("hidden");
+  goTo(NEW_ACCOUNT_PATH);
+  refreshSeedField();
+  $("new-name").focus();
 }
 
 async function registerWith(username) {
@@ -192,12 +269,7 @@ async function registerWith(username) {
   await enterChat();
 }
 
-async function createAccount() {
-  const username = $("username").value.trim();
-  if (!username) return status($("seed-status"), "pick a display name", "error");
 
-  await registerWith(username);
-}
 
 async function logOff() {
   await identity.forget();
@@ -295,6 +367,13 @@ async function fetchConfigs(pubkeys) {
 // --- chat --------------------------------------------------------------
 
 async function enterChat() {
+  // Remembered only now: before the account exists, storing the key strands a
+  // signup nobody finished.
+  await identity.remember({ privateKey: state.me.privateKey, pubkey: state.me.pubkey });
+
+  goTo(LOGIN_PATH, { replace: true }); // do not leave /new-account in the bar
+  $("seed").value = ""; // the seed has done its job
+  state.pendingRegistration = false;
   $("login").classList.add("hidden");
   $("chat").classList.remove("hidden");
 
@@ -323,6 +402,7 @@ async function refreshMessages() {
 
   await fetchConfigs([...new Set([...messages.map((m) => m.author), ...emotes.map((e) => e.author)])]);
   state.seq = Math.max(0, ...messages.filter((m) => m.author === state.me.pubkey).map((m) => m.seq));
+  state.tip = chooseTip(messages);
 
   // Most polls find nothing new. Rebuilding the list anyway costs a full DOM
   // teardown, drops any text selection, and closes an open hover menu.
@@ -340,7 +420,7 @@ function renderKey(messages, emotes) {
   const stubs = [...state.recentlyBlocked.keys()].filter((key) => withinUndoWindow(key));
 
   return [
-    messages.map((m) => m.signature).join(","),
+    messages.map((m) => m.hash).join(","),
     emotes.map((e) => `${e.message}${e.emote}${e.author}`).join(","),
     stubs.join(","),
     state.renderEpoch,
@@ -362,7 +442,7 @@ function render(messages) {
 
   list.replaceChildren();
 
-  const bySignature = new Map(messages.map((m) => [m.signature, m]));
+  const byHash = new Map(messages.map((m) => [m.hash, m]));
 
   for (const message of messages) {
     const mine = message.author === state.me.pubkey;
@@ -384,7 +464,7 @@ function render(messages) {
 
     const row = document.createElement("div");
     row.className = `msg ${bucket}`;
-    row.id = domId(message.signature);
+    row.id = domId(message.hash);
 
     const main = document.createElement("div");
     main.className = "msg-main";
@@ -401,7 +481,7 @@ function render(messages) {
     const body = document.createElement("div");
     body.textContent = payload.body; // textContent, never innerHTML
 
-    if (payload.reply_to) main.append(replyQuote(payload.reply_to, bySignature));
+    if (payload.reply_to) main.append(replyQuote(payload.reply_to, byHash));
     main.append(who, fp, body, reactionBar(message, mine));
     row.append(avatarFor(message.author), main);
     list.append(row);
@@ -410,7 +490,7 @@ function render(messages) {
   list.scrollTop = wasFollowing ? list.scrollHeight : previousTop;
 }
 
-// message signature -> emote -> the people who gave it.
+// message record hash -> emote -> the people who gave it.
 //
 // Reactions from blocked people are dropped, so a pile of spam accounts cannot
 // inflate a count. Counts are therefore per-viewer, like everything else here.
@@ -497,15 +577,15 @@ function avatarFor(pubkey, extra = "", icon = state.profiles?.get(pubkey)?.icon)
   return placeholder;
 }
 
-// Signatures are base64url, so they are already safe as an element id.
-const domId = (signature) => `m-${signature}`;
+// Record hashes are hex, so they are already safe as an element id.
+const domId = (hash) => `m-${hash}`;
 
 // The quoted line above a reply. Clicking it scrolls to what was replied to.
-function replyQuote(targetSignature, bySignature) {
+function replyQuote(targetHash, byHash) {
   const quote = document.createElement("div");
   quote.className = "reply-quote";
 
-  const target = bySignature.get(targetSignature);
+  const target = byHash.get(targetHash);
   if (!target) {
     quote.classList.add("dangling");
     quote.textContent = "replying to a message you cannot see";
@@ -531,12 +611,12 @@ function replyQuote(targetSignature, bySignature) {
   snippet.textContent = body;
 
   quote.append(arrow, avatarFor(target.author), name, snippet);
-  quote.addEventListener("click", () => scrollToMessage(targetSignature));
+  quote.addEventListener("click", () => scrollToMessage(targetHash));
   return quote;
 }
 
-function scrollToMessage(signature) {
-  const row = document.getElementById(domId(signature));
+function scrollToMessage(hash) {
+  const row = document.getElementById(domId(hash));
   if (!row) return;
 
   row.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -567,9 +647,9 @@ function displayName(pubkey) {
 function reactionBar(message, mine) {
   const bar = document.createElement("div");
   bar.className = "reactions";
-  const reacted = state.voted.has(message.signature);
+  const reacted = state.voted.has(message.hash);
 
-  for (const [emote, people] of state.reactions.get(message.signature) || []) {
+  for (const [emote, people] of state.reactions.get(message.hash) || []) {
     const pill = document.createElement("button");
     pill.type = "button";
     pill.className = "pill";
@@ -588,19 +668,21 @@ function reactionBar(message, mine) {
   const actions = document.createElement("span");
   actions.className = "actions";
 
-  if (!reacted) {
-    actions.append(emoteRow(message, state.emotes.positive.slice(0, QUICK_EMOTES), "positive"));
-  }
-
+  // Reply rides the positive row and report the negative one, so each action
+  // sits with the emotes of its own sign, and reply lands above report.
+  const upper = emoteRow(message, reacted ? [] : state.emotes.positive.slice(0, QUICK_EMOTES), "positive");
   const lower = emoteRow(message, reacted ? [] : state.emotes.negative, "negative");
 
-  if (!reacted) lower.append(Object.assign(document.createElement("span"), { className: "divider" }));
+  if (!reacted) {
+    upper.append(divider());
+    lower.append(divider());
+  }
 
   const reply = document.createElement("button");
   reply.type = "button";
   reply.textContent = "reply";
   reply.addEventListener("click", () => startReply(message));
-  lower.append(reply);
+  upper.append(reply);
 
   const report = document.createElement("button");
   report.type = "button";
@@ -608,10 +690,12 @@ function reactionBar(message, mine) {
   report.addEventListener("click", () => reportUser(message.author));
   lower.append(report);
 
-  actions.append(lower);
+  actions.append(upper, lower);
   bar.append(actions);
   return bar;
 }
+
+const divider = () => Object.assign(document.createElement("span"), { className: "divider" });
 
 function emoteRow(message, emotes, kind) {
   const row = document.createElement("div");
@@ -629,10 +713,10 @@ function emoteRow(message, emotes, kind) {
   return row;
 }
 
-// One reaction per comment, which the server enforces too. The message
-// signature is its id.
+// One reaction per comment, which the server enforces too. The message's
+// record hash is its id.
 async function react(message, emote) {
-  if (state.voted.has(message.signature)) return;
+  if (state.voted.has(message.hash)) return;
 
   if (polarityOf(emote) < 0) {
     const sure = await confirmAction(
@@ -643,13 +727,14 @@ async function react(message, emote) {
   }
 
   const ts = Math.floor(Date.now() / 1000);
+  const ack = currentAck();
   const payload = identity.emotePayload({
-    author: state.me.pubkey, room: ROOM, message: message.signature, emote, ts,
+    author: state.me.pubkey, room: ROOM, message: message.hash, emote, ack, ts,
   });
 
   try {
     await post(`/api/room/${ROOM}/emote`, {
-      message: message.signature, emote, ts,
+      message: message.hash, emote, ack, ts,
       signature: await identity.sign(state.me, payload),
     });
 
@@ -670,14 +755,15 @@ async function compose(event) {
   const ts = Math.floor(Date.now() / 1000);
   const seq = state.seq + 1;
   const replyingTo = state.replyingTo;
-  const replyTo = replyingTo ? replyingTo.signature : null;
+  const replyTo = replyingTo ? replyingTo.hash : null;
+  const ack = currentAck();
   const payload = identity.messagePayload({
-    author: state.me.pubkey, room: ROOM, seq, prev: null, body, ts, replyTo,
+    author: state.me.pubkey, room: ROOM, seq, prev: null, body, ack, ts, replyTo,
   });
 
   try {
     await post(`/api/room/${ROOM}/message`, {
-      seq, prev: null, body, ts, reply_to: replyTo,
+      seq, prev: null, body, ack, ts, reply_to: replyTo,
       signature: await identity.sign(state.me, payload),
     });
     $("body").value = "";
@@ -697,11 +783,11 @@ async function compose(event) {
 // Shared by reacting and replying. Does nothing if this message has already
 // been voted on.
 async function countAsVote(message, polarity) {
-  if (state.voted.has(message.signature)) return;
+  if (state.voted.has(message.hash)) return;
 
   const current = state.ratings[message.author] || { friend: false, reported: false, net_votes: 0 };
   state.ratings[message.author] = { ...current, net_votes: (current.net_votes || 0) + polarity };
-  state.voted.add(message.signature);
+  state.voted.add(message.hash);
   touch();
 
   await publishConfig();
@@ -1052,13 +1138,18 @@ async function saveProfile() {
 // --- boot ---------------------------------------------------------------
 
 async function boot() {
-  [state.config, state.emotes] = await Promise.all([api("/api/defaults"), api("/api/emotes")]);
+  [state.config, state.emotes, state.genesis] = await Promise.all([
+    api("/api/defaults"), api("/api/emotes"), api("/api/genesis"),
+  ]);
   state.reputation = buildReputation();
   await seed.loadWordlist();
 
-  $("seed").addEventListener("input", refreshSeedField);
+  // Changing the seed invalidates the key derived from the previous one.
+  $("seed").addEventListener("input", () => {
+    state.pendingRegistration = false;
+    refreshSeedField();
+  });
   $("login-form").addEventListener("submit", unlock);
-  $("create").addEventListener("click", () => createAccount().catch((e) => status($("seed-status"), e.message, "error")));
   $("logout").addEventListener("click", logOff);
   $("composer").addEventListener("submit", compose);
   $("cancel-reply").addEventListener("click", cancelReply);
@@ -1077,15 +1168,8 @@ async function boot() {
   // across is what makes someone keep a copy of it.
   $("new-name").addEventListener("input", refreshSeedField);
 
-  $("generate").addEventListener("click", async () => {
-    $("new-seed-words").value = await seed.generate(state.config.seed.min_words);
-    $("new-name").value = "";
-    $("new-account").classList.remove("hidden");
-    $("login-intro").classList.add("hidden");
-    $("seed").value = "";
-    refreshSeedField();
-    $("new-name").focus();
-  });
+  $("generate").addEventListener("click", () => startNewAccount());
+  window.addEventListener("popstate", renderRoute);
 
   $("copy-seed").addEventListener("click", async () => {
     try {
@@ -1101,11 +1185,15 @@ async function boot() {
   const remembered = await identity.recall();
   if (remembered) {
     try {
-      await signIn(remembered);
+      await signIn(remembered, { restoring: true });
     } catch {
       await identity.forget();
     }
   }
+
+  // Landing on /new-account directly, or after a refresh, needs a seed to show.
+  if (!state.me && creatingAccount()) await startNewAccount();
+  renderRoute();
 }
 
 boot().catch((error) => status($("seed-status"), error.message, "error"));

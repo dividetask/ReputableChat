@@ -107,13 +107,14 @@ module ReputableChat
       rows = @db[:messages].order(Sequel.desc(:id)).limit(@limit).all.reverse
       heading("MESSAGES", @db[:messages].count)
 
-      seq_by_signature = @db[:messages].select(:id, :signature).to_h { |r| [r[:signature], r[:id]] }
+      by_hash = ids_by_hash
 
       rows.each do |row|
         payload = parse(row[:payload])
-        reply = row[:reply_to] ? " ↱ reply to ##{seq_by_signature[row[:reply_to]] || '?'}" : ""
+        reply = row[:reply_to] ? " ↱ reply to ##{by_hash[row[:reply_to]] || '?'}" : ""
         @out.puts format("  #%-4d %-20s %s%s", row[:id], named(row[:author]), at(row[:received_at]), reply)
         @out.puts "        #{clip(payload['body'])}"
+        @out.puts "        ack #{ack_label(row[:ack], by_hash)}"
       end
     end
 
@@ -126,14 +127,31 @@ module ReputableChat
       rows = @db[:emotes].order(:id).all
       heading("REACTIONS", rows.size)
 
-      ids = @db[:messages].select(:id, :signature).to_h { |r| [r[:signature], r[:id]] }
-      rows.group_by { |row| row[:message] }.each do |signature, group|
-        @out.puts "  on ##{ids[signature] || '?'}"
+      by_hash = ids_by_hash
+      rows.group_by { |row| row[:message] }.each do |target, group|
+        @out.puts "  on ##{by_hash[target] || '?'}"
         group.group_by { |row| row[:emote] }.each do |emote, people|
           @out.puts "      #{emote} #{people.size}  #{people.map { |p| named(p[:author]) }.join(', ')}"
         end
       end
     end
+
+    # Everything on the chain names a message by its record hash, so this is
+    # what turns an ack or a reply target back into something readable.
+    def ids_by_hash
+      @db[:messages].select(:id, :hash).to_h { |r| [r[:hash], r[:id]] }
+    end
+
+    # An ack naming a message in this room reads as that message; anything else
+    # is the genesis or a record this dump is not showing, so the hash itself
+    # is the only honest thing to print.
+    def ack_label(hash, by_hash)
+      return "-" unless hash
+
+      by_hash[hash] ? "##{by_hash[hash]}" : short_hash(hash)
+    end
+
+    def short_hash(hash) = "#{hash[0, 12]}…"
 
     def dump_private
       unless @db.table_exists?(:private_configs)

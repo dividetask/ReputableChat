@@ -7,6 +7,7 @@
 #
 #   for i in $(seq 1 12); do bin/bot personas/scammer.yml --name scam-$i & done
 
+category: "scammer"
 username: "WinnerAlerts"
 usernames:
   - "WinnerAlerts"
@@ -26,10 +27,10 @@ lines:
   - "FREE MONEY - DM me your SSN and routing number to claim"
   - "Congratulations!! You have been selected for a $5,000 gift card. Reply CLAIM"
   - "I made $12,000 last week from home. Ask me how!!"
-  - "URGENT: your account will be suspended. Send your seed phrase to verify"
+  - "URGENT: your account will be suspended. Verify here: http://not-a-real-site.example/verify"
   - "Doubling every deposit today only. Send 0.1 BTC receive 0.2 BTC"
   - "hot singles in your area are waiting, click my profile"
-  - "Need a loan? No credit check! 100% approval! DM NOW"
+  - "Need a loan? No credit check! 100% approval! http://not-a-real-site.example"
   - "Apple gift card giveaway!!! first 100 people only!!! DM me"
 
 posting:
@@ -43,6 +44,7 @@ posting:
 # Spam does not reply to anybody and does not make friends.
 reply_ratio: 0.0
 friend_per_visit: 0.0
+starting_friends: 0
 emote_bias:
   positive: 1
   neutral: 0

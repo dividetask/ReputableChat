@@ -11,7 +11,8 @@ class BotPersonaSpec < Minitest::Test
   Persona = ReputableChat::Bot::Persona
 
   def persona(overrides = {})
-    Persona.new({ "username" => "Ana", "brain" => "scripted", "lines" => ["hi"] }.merge(overrides))
+    Persona.new({ "username" => "Ana", "category" => "realperson",
+                  "brain" => "scripted", "lines" => ["hi"] }.merge(overrides))
   end
 
   def test_a_scripted_bot_with_nothing_to_say_is_refused
@@ -20,10 +21,27 @@ class BotPersonaSpec < Minitest::Test
     assert_match(/lines/, error.message)
   end
 
-  def test_an_llm_bot_without_a_disposition_is_refused
-    error = assert_raises(Persona::Invalid) { persona("brain" => "llm", "disposition" => "") }
+  def test_a_persona_must_say_what_kind_of_account_it_is
+    error = assert_raises(Persona::Invalid) { persona("category" => "wizard") }
 
-    assert_match(/disposition/, error.message)
+    assert_match(/category must be one of/, error.message)
+  end
+
+  # The category carries what a scammer or a troll is; a persona only has to
+  # add what is particular to this one. A bot with nothing particular about it
+  # is still a complete bot.
+  def test_the_category_briefs_the_model_even_with_no_disposition
+    briefing = persona("category" => "scammer", "brain" => "llm", "disposition" => "").briefing
+
+    assert_match(/scammer:/, briefing)
+    assert_match(/urgent/i, briefing)
+  end
+
+  def test_a_disposition_is_added_to_the_category_not_instead_of_it
+    briefing = persona("category" => "troll", "disposition" => "You are fourteen.").briefing
+
+    assert_match(/troll:/, briefing)
+    assert_match(/You are fourteen\./, briefing)
   end
 
   # The disposition is the system prompt, so it has to survive being a
@@ -50,12 +68,13 @@ class BotPersonaSpec < Minitest::Test
   def test_loading_a_persona_from_disk_round_trips
     Dir.mktmpdir do |dir|
       path = File.join(dir, "p.yml")
-      File.write(path, "username: Ana\nbrain: scripted\nlines:\n  - hello\n")
+      File.write(path, "username: Ana\ncategory: realperson\nbrain: scripted\nlines:\n  - hello\n")
       loaded = Persona.load(path)
 
       assert_equal "Ana", loaded.username
       assert_equal ["hello"], loaded.lines
       assert_equal "general", loaded.room
+      assert_equal "realperson", loaded.category
     end
   end
 
@@ -88,9 +107,16 @@ class BotPersonaSpec < Minitest::Test
     refute_predicate persona, :recycles?
   end
 
-  # Unrated accounts sit at exactly zero and are invisible to everyone. A
-  # swarm that could not see itself would have nothing to react to.
-  def test_bots_see_unrated_accounts_by_default
-    assert_equal({ "display" => { "show_unrated" => true } }, persona.display_overrides)
+  # A bot sees the room the way a person with the default settings does. It
+  # would be easy to switch show_unrated on and let the swarm see itself
+  # immediately, and it would make every visibility result meaningless.
+  def test_a_bot_sees_the_room_the_way_a_new_account_does
+    assert_equal({ "display" => { "show_unrated" => false } }, persona.display_overrides)
+  end
+
+  def test_a_bot_arrives_with_contacts_rather_than_with_nobody
+    assert_operator persona.starting_friends, :>=, 0
+    assert_equal 3.0, persona("starting_friends" => 3).starting_friends
+    assert_raises(Persona::Invalid) { persona("starting_friends" => -1) }
   end
 end

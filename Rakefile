@@ -50,4 +50,11 @@ task :curve do
        "k**3=#{k3.to_s('F')} < curve(2)=#{engine.curve.value(2).to_s('F')}"
 end
 
+desc "Generate the genesis user record (Tim) for committing"
+task :genesis do
+  # Options (--handle, --bio, --words, --path) mean running the script
+  # directly: rake reads anything after the task name as another task.
+  ruby "-Ilib", "script/generate_genesis.rb"
+end
+
 task default: :spec

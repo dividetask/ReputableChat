@@ -11,14 +11,18 @@ module ReputableChat
       # It costs nothing to run, which matters when the point of the exercise
       # is fifty of them at once.
       class Scripted
-        def initialize(persona:, random: Random.new)
+        def initialize(persona:, random: Random.new, links: [])
           @lines  = persona.lines
           @random = random
+          @links  = links
           @recent = []
         end
 
+        # Its lines go through the same cleanup a model's output does, so a
+        # link written into a persona file is replaced with a safe one rather
+        # than trusted because a person typed it.
         def compose(_context)
-          Brain.clean(pick)
+          Brain.clean(pick, links: @links, random: @random)
         end
 
         private

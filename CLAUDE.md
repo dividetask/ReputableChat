@@ -28,12 +28,21 @@ bundle exec rake spec       # full suite
 bundle exec rake curve      # print current curve, ladder and safety window
 bundle exec rake dump       # readable dump of the database
 bundle exec rake "dump[messages,reactions]"   # just those sections
+bundle exec rake genesis    # generate the genesis user record (once, ever)
 
+# The genesis account from a terminal, against a running server.
+bundle exec ruby script/tim.rb status
+bundle exec ruby script/tim.rb post "Planned outage 02:00-03:00 UTC on Friday"
+bundle exec ruby script/tim.rb visible <pubkey>   # least rating that makes them visible
+bundle exec ruby script/tim.rb friend <pubkey>
+
+bin/vouch --count 3                          # accounts that introduce new bots
 bin/bot personas/regular.yml --explain       # what a bot persona implies
 bin/bot personas/regular.yml --name ana      # run one
 ```
 
-See [docs/project/reputation.md](docs/project/reputation.md) and
+See [docs/project/reputation.md](docs/project/reputation.md),
+[docs/project/chain.md](docs/project/chain.md) and
 [docs/project/bots.md](docs/project/bots.md).
 
 ## Things that break silently
@@ -45,13 +54,25 @@ See [docs/project/reputation.md](docs/project/reputation.md) and
   either file.
 - **Signed payload shapes.** `cryptography/payload.rb` and the `*Payload` helpers in
   `public/js/identity.js` must stay in lockstep for the same reason.
-- **Key derivation for bots.** `tools/argon2-derive.mjs` derives a bot's key by
-  loading the same vendored hash-wasm the browser loads, so a bot account is
-  the browser's account by construction. If it ever stops agreeing, every bot
-  silently becomes a different account with no error anywhere.
-  `spec/bot_identity_spec.rb` runs the browser's own `deriveFromSeed` under
-  node and compares.
-
+- **The bots' half of the protocol.** The bot client signs the same record
+  shapes the browser does, so a change to one breaks the swarm at runtime,
+  hours in, with nothing failing at build time.
+  `spec/bot_integration_spec.rb` drives the real runner against the real app
+  in process, and is what turns that into a failing test.
+  `spec/bot_identity_spec.rb` does the same for key derivation, running the
+  browser's own `deriveFromSeed` under node and comparing.
+- **Record hashes.** `cryptography/record.rb` and `public/js/record.js` must agree,
+  and so must `reputation/fingerprint.rb` and `public/js/fingerprint.js`. If they
+  drift, every `ack` points at a record the other side cannot find and no
+  reference resolves. `spec/record_parity_spec.rb` guards both.
+- **The genesis record.** `config/genesis/tim.json` is the bottom of the chain.
+  Regenerating it orphans every record that acknowledged the old one, which is
+  the whole chain. `script/generate_genesis.rb` refuses to overwrite it, or the
+  seed beside it.
+- **The genesis seed.** `config/genesis/seed` is gitignored, 0600, and holds the
+  seed phrase rather than the derived key. It is the one place in this project
+  a private key lives outside a browser, and whoever holds it is the genesis
+  account. Never print it, never commit it, back it up outside the checkout.
 - **The seed derivation domain.** Changing `seed.kdf.domain` in
   `config/reputation.yml` changes every derived key, which strands every
   existing account. It is versioned (`:v1`) so a future change can be handled

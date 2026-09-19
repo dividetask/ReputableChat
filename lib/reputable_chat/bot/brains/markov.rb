@@ -19,8 +19,9 @@ module ReputableChat
         # falls back to the seed lines until it has read enough.
         MIN_SAMPLES = 20
 
-        def initialize(persona:, random: Random.new)
+        def initialize(persona:, random: Random.new, links: [])
           @random  = random
+          @links   = links
           @chain   = Hash.new { |h, k| h[k] = [] }
           @samples = 0
           @seeds   = persona.lines
@@ -32,9 +33,11 @@ module ReputableChat
         def compose(context)
           context.recent.each { |(_, body)| observe(body) }
 
-          return Brain.clean(@seeds.sample(random: @random)) if @samples < MIN_SAMPLES
+          if @samples < MIN_SAMPLES
+            return Brain.clean(@seeds.sample(random: @random), links: @links, random: @random)
+          end
 
-          Brain.clean(generate, name: context.name)
+          Brain.clean(generate, name: context.name, links: @links, random: @random)
         end
 
         # Each message is learned once, however many times it is seen in the

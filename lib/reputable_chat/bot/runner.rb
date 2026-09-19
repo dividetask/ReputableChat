@@ -4,10 +4,14 @@ require_relative "brain"
 require_relative "brains/scripted"
 require_relative "brains/markov"
 require_relative "brains/llm"
+require_relative "categories"
 require_relative "client"
 require_relative "identity"
+require_relative "roster"
 require_relative "state"
 require_relative "view"
+require_relative "vouchers"
+require_relative "../genesis"
 
 module ReputableChat
   module Bot
@@ -17,20 +21,28 @@ module ReputableChat
     # buckets are sorted on arrival and hold until the bot comes back, so a
     # reaction it makes at 9pm changes nothing it can see until tomorrow.
     class Runner
-      # `speed` compresses the waiting so a week of a swarm can be watched
-      # over lunch. It scales nothing but the sleeping: every rate and every
+      # How often a bot picks from the people its category is drawn to rather
+      # than from whoever spoke last. Not total: a gullible account that only
+      # ever answered scammers would be a caricature, and would never give the
+      # network the honest activity that makes its vouching cost anything.
+      ATTRACTION = 0.7
+
+      # `speed` compresses the waiting so a week of a swarm can be watched over
+      # lunch. It scales nothing but the sleeping: every rate and every
       # distribution stays exactly what the persona asked for.
-      def initialize(persona:, name:, state:, client:, logger:,
-                     random: Random.new, speed: 1.0)
-        @persona = persona
-        @name    = name
-        @state   = state
-        @client  = client
-        @log     = logger
-        @random  = random
-        @speed   = speed.to_f
-        @sleep   = ->(seconds) { Kernel.sleep(seconds) }
-        @brain   = Brain.for(persona, random: random)
+      def initialize(persona:, name:, state:, client:, logger:, vouchers: nil, state_dir: nil,
+                     random: Random.new, speed: 1.0, categories: Categories.current)
+        @persona    = persona
+        @name       = name
+        @state      = state
+        @client     = client
+        @log        = logger
+        @vouchers   = vouchers
+        @state_dir  = state_dir || File.dirname(state.path)
+        @random     = random
+        @speed      = speed.to_f
+        @categories = categories
+        @sleep      = ->(seconds) { Kernel.sleep(seconds) }
       end
 
       # `visits` caps the run for a smoke test; nil means until killed.
@@ -40,8 +52,11 @@ module ReputableChat
         @defaults = @client.defaults
         @emotes   = @client.emote_config
         @schedule = @persona.schedule(random: @random)
+        @brain    = Brain.for(@persona, random: @random, links: safe_links, logger: @log)
 
-        log "persona #{@persona.path || @persona.username} | #{@schedule.summary}"
+        agree_on_genesis!
+
+        log "#{@persona.category} | #{@schedule.summary}"
 
         ensure_account!
         wait(@schedule.initial_delay, "first visit") if wait_first
@@ -58,6 +73,26 @@ module ReputableChat
       end
 
       private
+
+      # The bottom of the chain has to be the same one the server is running,
+      # or every `ack` this bot signs points at a record nobody else has. A
+      # mismatch is a wrong checkout, not a hiccup, so it stops here.
+      def agree_on_genesis!
+        @genesis = Genesis.current
+        served   = @client.genesis
+
+        return if served["hash"] == @genesis.hash
+
+        raise Client::Error,
+              "this checkout's genesis is #{@genesis.hash[0, 12]} but the server is running " \
+              "#{served['hash'].to_s[0, 12]}; the bot would acknowledge records nobody else has"
+      end
+
+      def safe_links
+        return [] unless @persona.kind.posts_links?
+
+        @categories.safe_links(origin: @client.origin)
+      end
 
       # --- account ----------------------------------------------------------
 
@@ -86,7 +121,7 @@ module ReputableChat
         username = @persona.username_for(@state.generation, random: @random)
 
         @state.recycle!(seed: phrase, pubkey: identity.pubkey, username: username,
-                        retire_after_days: lifetime, now: now)
+                        category: @persona.category, retire_after_days: lifetime, now: now)
         @state.save
         @identity = identity
 
@@ -106,14 +141,19 @@ module ReputableChat
 
       def visit
         session = @client.log_in(identity)
-        unless session["registered"]
-          @client.register
-          log "registered #{identity.pubkey[0, 8]}"
-        end
+        fresh   = !session["registered"]
+        @client.register if fresh
 
-        view = View.new(client: @client, identity: identity, persona: @persona, defaults: @defaults)
+        view = build_view
         view.arrive!
-        publish_profile(view) if @state.version.zero? || view.version.zero?
+
+        if fresh || view.version.zero?
+          establish(view)
+          introduce!
+          # The ratings just published are what this bot can see through, and
+          # the session was sorted before they existed.
+          view.arrive!
+        end
 
         linger(view)
         consider_friending(view)
@@ -124,6 +164,65 @@ module ReputableChat
         log "login failed: #{e.message}"
       end
 
+      def build_view
+        View.new(client: @client, identity: identity, persona: @persona,
+                 defaults: @defaults, genesis_hash: @genesis.hash)
+      end
+
+      # A new account arrives with contacts, the way a person who joined a
+      # small server on somebody's recommendation does. The genesis account
+      # always, because that is the one name everybody here knows; a couple of
+      # other bots, because a network where nobody knows anybody but the
+      # operator is not a network.
+      def establish(view)
+        view.set_profile(username: @state.username || @persona.username, bio: @persona.bio)
+        view.adjust_rating(@genesis.pubkey, friend: true)
+
+        friends = starting_friends
+        friends.each { |member| view.adjust_rating(member.pubkey, friend: true) }
+
+        view.publish_config!
+        @state.version = view.version
+        @state.save
+
+        named = friends.map { |m| m.username || m.name }.join(", ")
+        log "published profile as #{@state.username}; friended the genesis account" \
+            "#{friends.empty? ? '' : " and #{named}"}"
+      end
+
+      def starting_friends
+        roster = Roster.read(@state_dir, except: identity.pubkey)
+        return [] if roster.empty?
+
+        wanted = poisson(@persona.starting_friends)
+        chosen = []
+        while chosen.size < wanted && chosen.size < roster.size
+          pick = Roster.preferred(roster - chosen, @persona.kind, random: @random)
+          break unless pick
+
+          chosen << pick
+        end
+
+        chosen
+      end
+
+      # An unrated account is invisible to everyone, so without this a bot
+      # posts into a room where nobody can see it -- including the other bots,
+      # which would leave the whole swarm talking to itself in separate silos.
+      def introduce!
+        return log("no vouchers configured; this account stays invisible") if @vouchers.nil? || @vouchers.empty?
+
+        voucher = @vouchers.sample(random: @random)
+        result  = @vouchers.introduce(
+          voucher: voucher, target: identity.pubkey, client: @client.fork,
+          seed_config: @defaults.fetch("seed"), defaults: @defaults
+        )
+
+        log "introduced by #{voucher.username} (#{result})"
+      rescue Client::Error, Vouchers::Empty => e
+        log "could not be introduced: #{e.message}"
+      end
+
       # Counted in scheduled seconds rather than read off the clock, so that
       # compressing time cannot quietly change how many actions fit in a
       # visit. Between actions the bot is watching the room, which is what
@@ -132,6 +231,7 @@ module ReputableChat
         length    = @schedule.visit_seconds
         remaining = length
         until_act = @schedule.gap_seconds
+        @roster   = Roster.read(@state_dir).to_h { |m| [m.pubkey, m.category] }
         mark_seen(view)
 
         while remaining.positive?
@@ -186,13 +286,14 @@ module ReputableChat
         # otherwise collide with its own history on every post.
         @state.seq = [@state.seq, view.highest_seq_for(identity.pubkey)].max
         seq        = @state.seq + 1
-        signature = @client.send_message(
+
+        record = @client.send_message(
           identity: identity, room: @persona.room, seq: seq, prev: @state.prev,
-          body: body, reply_to: reply_to&.signature
+          body: body, ack: view.ack, reply_to: reply_to&.hash
         )
 
         @state.seq  = seq
-        @state.prev = signature
+        @state.prev = record
         @state.save
 
         log "#{reply_to ? 'replied' : 'posted'}: #{body[0, 90]}"
@@ -203,19 +304,19 @@ module ReputableChat
       end
 
       def react(view)
-        target = pick(view.visible_from_others.reject { |m| @state.voted?(m.signature) })
+        target = pick(view.visible_from_others.reject { |m| @state.voted?(m.hash) })
         return unless target
 
         emote = pick_emote
         @client.send_emote(identity: identity, room: @persona.room,
-                           message: target.signature, emote: emote)
+                           message: target.hash, emote: emote, ack: view.ack)
 
         log "reacted #{emote} to #{view.display_name(target.author)}: #{target.body[0, 60]}"
         count_vote(view, target, polarity(emote))
       rescue Client::Conflict
-        # Already reacted to that message on another device or in a previous
-        # life of this state file. Remember it so it is not picked again.
-        @state.vote(target.signature)
+        # Already reacted to that message in a previous life of this state
+        # file. Remember it so it is not picked again.
+        @state.vote(target.hash)
         @state.save
       end
 
@@ -224,9 +325,9 @@ module ReputableChat
       # the reputation form.
       def count_vote(view, message, polarity)
         return if message.nil? || message.author == identity.pubkey
-        return if @state.voted?(message.signature)
+        return if @state.voted?(message.hash)
 
-        @state.vote(message.signature)
+        @state.vote(message.hash)
         view.adjust_rating(message.author, votes: polarity)
         view.publish_config!
         @state.version = view.version
@@ -237,29 +338,25 @@ module ReputableChat
       # Friending is worth 0.5 on its own, which is most of the way to Trusted
       # for anyone it reaches -- a bot that handed them out freely would make
       # the whole graph trusted within a day.
+      #
+      # A gullible account is the exception the categories exist to express:
+      # it vouches for exactly the people it should not, which is what makes
+      # its own standing worth watching.
       def consider_friending(view)
         return unless @random.rand < @persona.friend_per_visit
 
-        candidate = view.ratings.find do |pubkey, rating|
-          !rating["friend"] && rating.fetch("net_votes", 0).positive? && pubkey != identity.pubkey
+        candidates = view.ratings.reject do |pubkey, rating|
+          rating["friend"] || !rating.fetch("net_votes", 0).positive? || pubkey == identity.pubkey
         end
-        return unless candidate
+        return if candidates.empty?
 
-        view.adjust_rating(candidate.first, friend: true)
+        chosen = prefer_drawn(candidates.keys)
+        view.adjust_rating(chosen, friend: true)
         view.publish_config!
         @state.version = view.version
         @state.save
 
-        log "friended #{view.display_name(candidate.first)}"
-      end
-
-      def publish_profile(view)
-        view.set_profile(username: @state.username || @persona.username, bio: @persona.bio)
-        view.publish_config!
-        @state.version = view.version
-        @state.save
-
-        log "published profile as #{@state.username || @persona.username}"
+        log "friended #{view.display_name(chosen)}"
       end
 
       # --- choosing ---------------------------------------------------------
@@ -290,17 +387,35 @@ module ReputableChat
         pick(view.visible_from_others)
       end
 
-      # Recency-weighted. People answer what is in front of them, not a random
-      # message from three days ago, and the room hands back messages oldest
-      # first.
+      # Recency-weighted, after a pull towards whoever this category is drawn
+      # to. People answer what is in front of them; a gullible account answers
+      # whoever is offering it something.
       def pick(messages)
         return nil if messages.empty?
 
-        weights = messages.each_index.map { |i| (i + 1.0)**2 }
+        pool    = attracted(messages) || messages
+        weights = pool.each_index.map { |i| (i + 1.0)**2 }
         roll    = @random.rand * weights.sum
         running = 0.0
 
-        messages.zip(weights).find { |_, weight| (running += weight) > roll }&.first || messages.last
+        pool.zip(weights).find { |_, weight| (running += weight) > roll }&.first || pool.last
+      end
+
+      def attracted(messages)
+        return nil if @persona.kind.drawn_to.empty? || @random.rand >= ATTRACTION
+
+        drawn = messages.select { |m| drawn_to?(m.author) }
+        drawn.empty? ? nil : drawn
+      end
+
+      def prefer_drawn(pubkeys)
+        drawn = pubkeys.select { |pubkey| drawn_to?(pubkey) }
+
+        (drawn.any? && @random.rand < ATTRACTION ? drawn : pubkeys).sample(random: @random)
+      end
+
+      def drawn_to?(pubkey)
+        @persona.kind.drawn_to.include?((@roster || {})[pubkey])
       end
 
       def pick_emote
@@ -325,12 +440,31 @@ module ReputableChat
       end
 
       def mark_seen(view)
-        view.visible_messages.each { |m| @state.see(m.signature) }
+        view.visible_messages.each { |m| @state.see(m.hash) }
       end
 
       # --- plumbing ---------------------------------------------------------
 
       def now = Time.now.to_i
+
+      # Knuth's, which is exact for the small means a starting friend list
+      # uses and needs no tables.
+      def poisson(mean)
+        return 0 unless mean.positive?
+
+        limit = Math.exp(-mean)
+        count = 0
+        product = 1.0
+
+        loop do
+          product *= @random.rand
+          break if product <= limit
+
+          count += 1
+        end
+
+        count
+      end
 
       def wait(seconds, what)
         log "#{what} in #{human(seconds.round)}"

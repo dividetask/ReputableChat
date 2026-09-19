@@ -1,0 +1,9 @@
+[
+  { "payload": "{\"ack\":null,\"purpose\":\"reputablechat:user:v1\"}",
+    "signature": "MIyx9a6KHYTWOHvtFBO-HnFJ9vLUckZthgbJtaNNABQ9MGZARKfmdJDYYFm0PNt69O8h5ExvrfjQuAkMe-P-CA" },
+  { "payload": { "purpose": "reputablechat:message:v1", "body": "hi é中🚀 \"quoted\" \\slash\\ and\ttab and\nnewline", "ts": 9 },
+    "signature": "AAAA" },
+  { "payload": { "z": 1, "a": 2, "nested": { "b": [1, 2, 3], "a": null } },
+    "signature": "zz-_" },
+  { "payload": {}, "signature": "A" }
+]

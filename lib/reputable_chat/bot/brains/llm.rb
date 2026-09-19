@@ -16,18 +16,21 @@ module ReputableChat
       # bots ask for about forty tokens an hour each -- nowhere near enough
       # work to justify a second copy.
       class Llm
-        def initialize(persona:, random: Random.new, logger: nil)
-          @disposition = persona.disposition
-          @settings    = persona.llm
-          @random      = random
-          @logger      = logger
-          @uri         = URI.parse(@settings.fetch("endpoint"))
+        def initialize(persona:, random: Random.new, links: [], logger: nil)
+          # The category first, then what is particular to this bot. A persona
+          # can therefore be nothing more than a name and a voice.
+          @briefing = persona.briefing
+          @settings = persona.llm
+          @random   = random
+          @links    = links
+          @logger   = logger
+          @uri      = URI.parse(@settings.fetch("endpoint"))
         end
 
         def compose(context)
           reply = ask(prompt_for(context))
 
-          Brain.clean(reply, name: context.name)
+          Brain.clean(reply, name: context.name, links: @links, random: @random)
         end
 
         private
@@ -57,7 +60,7 @@ module ReputableChat
           body = {
             "model" => @settings.fetch("model"),
             "messages" => [
-              { "role" => "system", "content" => @disposition },
+              { "role" => "system", "content" => @briefing },
               { "role" => "user", "content" => prompt }
             ],
             "max_tokens" => @settings.fetch("max_tokens"),

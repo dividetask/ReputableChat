@@ -24,7 +24,7 @@ module ReputableChat
 
       attr_reader :path, :name
       attr_accessor :seed, :pubkey, :seq, :prev, :version, :born_at, :ratings,
-                    :retire_after_days, :username
+                    :retire_after_days, :username, :category
 
       def self.load(path, name:)
         data = File.exist?(path) ? JSON.parse(File.read(path)) : {}
@@ -41,6 +41,7 @@ module ReputableChat
         @version = data["version"] || 0
         @born_at = data["born_at"]
         @username = data["username"]
+        @category = data["category"]
         @retire_after_days = data["retire_after_days"]
         @ratings = data["ratings"] || {}
         @seen    = data["seen"] || []
@@ -80,7 +81,8 @@ module ReputableChat
       # Starts a new account under the same persona. The old phrase is kept in
       # the file so you can still log into an abandoned account and look at it;
       # the bot itself never touches it again, which is the point.
-      def recycle!(seed:, pubkey:, username: nil, retire_after_days: nil, now: Time.now.to_i)
+      def recycle!(seed:, pubkey:, username: nil, category: nil, retire_after_days: nil,
+                   now: Time.now.to_i)
         if @pubkey
           @retired = (@retired + [{ "seed" => @seed, "pubkey" => @pubkey, "username" => @username,
                                     "retired_at" => now }]).last(50)
@@ -93,6 +95,7 @@ module ReputableChat
         @version = 0
         @born_at = now
         @username = username
+        @category = category
         @retire_after_days = retire_after_days
         @ratings = {}
         @seen    = []
@@ -110,7 +113,8 @@ module ReputableChat
 
       def to_h
         { "name" => @name, "seed" => @seed, "pubkey" => @pubkey, "born_at" => @born_at,
-          "username" => @username, "retire_after_days" => @retire_after_days,
+          "username" => @username, "category" => @category,
+          "retire_after_days" => @retire_after_days,
           "seq" => @seq, "prev" => @prev, "version" => @version,
           "ratings" => @ratings, "seen" => @seen, "voted" => @voted, "retired" => @retired }
       end

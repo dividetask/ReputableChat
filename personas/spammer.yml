@@ -1,0 +1,46 @@
+# Volume nobody asked for. Scripted rather than generated: real spam is a
+# handful of templates on repeat, and it costs nothing to run fifty of these.
+#
+#   for i in $(seq 1 10); do bin/bot personas/spammer.yml --name spam-$i & done
+
+category: "spammer"
+username: "DealsDailyDeals"
+usernames:
+  - "DealsDailyDeals"
+  - "BestPricesNow"
+  - "megasavings4u"
+  - "OFFERS_HQ"
+bio: "unbeatable offers"
+room: general
+brain: scripted
+
+disposition: "Posts the same advertisement over and over."
+
+# Every link here is replaced before it is sent -- see config/bot-categories.yml.
+lines:
+  - "Lonely? Our premium companions are standing by. Very friendly. http://not-a-real-site.example"
+  - "BUY FOLLOWERS - 10,000 for $5 - instant delivery - DM for details"
+  - "Enlarge your storage capacity! Our members report 300% gains! http://not-a-real-site.example"
+  - "Tired of your old mattress? So is everyone else. Click here for relief."
+  - "Hot local deals in your area are waiting to be taken advantage of"
+  - "Unlock the secret the manufacturers do not want you to know about"
+  - "MAKE $$$ FROM HOME - no experience necessary - just enthusiasm"
+  - "Our herbal supplement has been described as life-changing by our marketing department"
+
+posting:
+  visits_per_week: 60.0
+  visit_minutes: 4.0
+  posts_per_week: 120.0
+  reactions_per_week: 5.0
+  min_gap_seconds: 4
+  mode_gap_seconds: 15
+
+reply_ratio: 0.0
+friend_per_visit: 0.0
+starting_friends: 0
+emote_bias:
+  positive: 1
+  neutral: 0
+  negative: 0
+
+recycle_after_days: 4

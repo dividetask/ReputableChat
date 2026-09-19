@@ -98,14 +98,24 @@ Three shapes, each domain-separated. `lib/reputable_chat/cryptography/payload.rb
 | purpose | fields |
 |---|---|
 | `reputablechat:login:v1` | purpose, pubkey, nonce, origin, ts |
-| `reputablechat:message:v1` | purpose, author, room, seq, prev, ts, body |
-| `reputablechat:config:v1` | purpose, pubkey, version, profile, ratings, ts |
+| `reputablechat:message:v1` | purpose, author, room, seq, prev, reply_to, ack, ts, body |
+| `reputablechat:emote:v1` | purpose, author, room, message, emote, ack, ts |
+| `reputablechat:user:v1` | purpose, pubkey, version, handle, bio, icon, master_pubkey, previous_pubkey, ack, ts |
+| `reputablechat:attestation:v1` | purpose, pubkey, version, scores, derived, ack, ts |
+| `reputablechat:adjustment:v1` | purpose, pubkey, base_version, seq, target, reputation, trust, ack, ts |
+| `reputablechat:release:v1` | purpose, publisher, version, label, files, notes, ack, ts |
+| `reputablechat:config:v1` | superseded by `user` + `attestation` |
 | `reputablechat:private-config:v1` | purpose, pubkey, version, settings, voted, ts |
-| `reputablechat:emote:v1` | purpose, author, room, message, emote, ts |
+
+Everything but `login` and `private-config` carries `ack`, the hash of the last
+record its author had seen. That is what makes these a chain rather than a pile
+— see [chain.md](chain.md). `private-config` has none because nobody else ever
+sees it, so there is nothing to anchor it to.
 
 `room` in the message payload stops a message being replanted in a different
-channel. `seq` and `prev` chain an author's messages so the server cannot
-silently drop or reorder one without it being detectable. `ts` is the client's
+channel. `seq` and `prev` chain an author's own messages so the server cannot
+silently drop or reorder one without it being detectable; `ack` chains it to
+everybody else's records. The two catch different failures and both are kept. `ts` is the client's
 clock and is attacker-controlled; the server records its own receipt time
 separately and unsigned.
 
@@ -129,6 +139,19 @@ Reactions are also folded into the reacting user's public config as
 the aggregate is the reputation form. They can in principle disagree, since
 nothing forces a client to publish both.
 
+## Record hashes
+
+`ack`, `prev`, `reply_to` and an emote's target all name a record by its hash:
+
+```
+SHA256("reputablechat:record:v1\n" + canonical_payload + "\n" + signature)
+```
+
+They used to name signatures. A signature identifies a payload; a record hash
+identifies the record, signature included, which is what a link has to cover to
+be tamper-evident as a whole. `cryptography/record.rb` and `public/js/record.js`
+are the two halves and `spec/record_parity_spec.rb` checks they agree.
+
 ## Canonical serialization
 
 The browser signs bytes and the server verifies bytes, so both must produce
@@ -143,6 +166,7 @@ fixtures and compares the bytes, and is the thing that catches that.
 ## Layout
 
 ```
+config/genesis/tim.json   the genesis user record; the chain hangs off its hash
 config/server.yml         origin, database and image paths (env overrides)
 config/reputation.yml     tunable reputation parameters (the defaults layer)
 config/emotes.yml         which emotes count positive, negative, neutral
@@ -153,12 +177,15 @@ lib/reputable_chat/
   server_config.rb        config/server.yml, with env winning
   config.rb               three-layer config resolution
   params.rb               input validation
-  cryptography/           canonical, payload, signature, seed (reference impl)
+  genesis.rb              loads and verifies the committed genesis record
+  cryptography/           canonical, payload, record, signature, seed
   reputation/             curve, ladder, rating, engine, session
   store/                  database (Sequel), images (content-addressed), memory
 
 public/js/
   canonical.js            must match cryptography/canonical.rb byte for byte
+  record.js               must match cryptography/record.rb
+  fingerprint.js          must match reputation/fingerprint.rb
   seed.js                 must match cryptography/seed.rb
   identity.js             Argon2id, non-extractable keys, signing
   reputation.js           mirrors reputation/ in BigInt fixed-point
@@ -168,6 +195,11 @@ public/js/
 
 ## Not built yet
 
+- Loading a published release off the chain. Release records are published and
+  verifiable; nothing executes off the chain, because every version would run
+  on the same origin as the private key. See the end of [chain.md](chain.md).
+- Encrypting the private vault under a seed-derived key (`seed.kdf.vault_domain`
+  is reserved for it)
 - Client-side verification of *other people's* configs
   (`session.verify_signatures`). Your own private config is already verified,
   since detecting tampering is why it is signed.

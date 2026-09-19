@@ -49,6 +49,31 @@ display:
   # until you log off.
   block_grace_seconds: 3600
 
+chain:
+  # A record acknowledges the most recent record its author has seen whose
+  # author they rate above this. Subjective by construction: it is read from
+  # the acknowledging user's own attestation under their own config, so two
+  # people disagree about which references were legitimate and the server --
+  # which never computes a reputation -- cannot check it at all.
+  # Defaults to trusted_at, so "acknowledge people you or your contacts rated".
+  min_reputation_to_acknowledge: "0.01"
+
+attestation:
+  # How far the published cache of calculated scores reaches. A cache for other
+  # readers, never an input to their own scores; see docs/project/chain.md.
+  published_hops: 3
+  # Republish the whole attestation after either limit, whichever comes first,
+  # superseding every adjustment against the previous version. Only score-
+  # changing events count toward the tally -- posting a comment cannot move a
+  # number in the file, so counting it would republish for no reason.
+  resubmit_after_changes: 10
+  resubmit_after_seconds: 604800
+  # The multiplier on what somebody recommends. Stored per user only when
+  # overridden, so an attestation carries a trust entry for the handful of
+  # people it has been set on rather than for everyone.
+  default_trust: "1"
+  blocked_trust: "0"
+
 session:
   # MVP only: configs are taken on trust. Flip on to verify every signature.
   verify_signatures: false
@@ -70,3 +95,10 @@ seed:
     iterations: 3
     parallelism: 1
     domain: "reputablechat:seed:v1"
+    # A second, separate domain deriving the symmetric key the private vault is
+    # encrypted under. Ed25519 cannot encrypt and the signing key is a
+    # non-extractable WebCrypto key whose bytes can never be read back, so the
+    # vault key has to come from the seed independently rather than from the
+    # identity key. Versioned for the same reason `domain` is: changing it
+    # strands every existing vault.
+    vault_domain: "reputablechat:vault:v1"

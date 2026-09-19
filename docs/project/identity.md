@@ -75,6 +75,25 @@ every page refresh, and a refresh is not a log off; IndexedDB survives refresh
 and is cleared on explicit logout, which matches "stays until you log off" more
 literally. The seed itself is never stored and never transmitted.
 
+## The vault key
+
+The private vault (settings, the voted list, and the friend and report lists
+that used to be public) is meant to be opaque to the server, not merely signed.
+
+It cannot be encrypted to the identity key. Ed25519 is a signature scheme with
+no encryption operation, and the usual workaround — converting to X25519 and
+doing ECDH — needs the private scalar, which for a non-extractable WebCrypto
+key can never be read back. That is not a limitation to route around; it is the
+property the whole key storage design is built on.
+
+So the vault key comes from the seed independently: the same Argon2id under a
+second domain, `seed.kdf.vault_domain`, giving a symmetric key the vault is
+encrypted under. The ciphertext is then signed with the identity key, so the
+server can neither read it nor alter it undetected.
+
+Versioned for the same reason `seed.kdf.domain` is: changing it strands every
+existing vault.
+
 ## Login
 
 Challenge–response:

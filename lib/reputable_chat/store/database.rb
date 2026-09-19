@@ -65,13 +65,18 @@ module ReputableChat
           Integer  :updated_at, null: false
         end
 
+        # `hash` is the record hash -- what everything else on the chain names
+        # this message by. Unique because a repeat means the identical record
+        # arrived twice, not that two records collided.
         @db.create_table?(:messages) do
           primary_key :id
+          String   :hash, null: false, unique: true
           String   :author, null: false, index: true
           String   :room, null: false, index: true
           Integer  :seq, null: false
           String   :prev
           String   :reply_to
+          String   :ack, null: false
           String   :payload, text: true, null: false
           String   :signature, null: false
           Integer  :received_at, null: false
@@ -82,10 +87,12 @@ module ReputableChat
         # trusted from the client.
         @db.create_table?(:emotes) do
           primary_key :id
+          String   :hash, null: false, unique: true
           String   :author, null: false
           String   :room, null: false, index: true
           String   :message, null: false, index: true
           String   :emote, null: false
+          String   :ack, null: false
           String   :payload, text: true, null: false
           String   :signature, null: false
           Integer  :received_at, null: false
@@ -93,10 +100,9 @@ module ReputableChat
         end
 
         # create_table? leaves an existing table alone, so a database made
-        # before reply_to existed needs the column adding explicitly.
-        unless @db[:messages].columns.include?(:reply_to)
-          @db.alter_table(:messages) { add_column :reply_to, String }
-        end
+        # before a column existed needs it adding explicitly.
+        add_missing(:messages, reply_to: String, ack: String, hash: String)
+        add_missing(:emotes, ack: String, hash: String)
 
         @db.create_table?(:nonces) do
           String   :nonce, primary_key: true
@@ -166,10 +172,10 @@ module ReputableChat
 
       # --- emotes -------------------------------------------------------------
 
-      def store_emote(author:, room:, message:, emote:, payload:, signature:)
+      def store_emote(hash:, author:, room:, message:, emote:, ack:, payload:, signature:)
         @db[:emotes].insert(
-          author: author, room: room, message: message, emote: emote,
-          payload: payload, signature: signature, received_at: now
+          hash: hash, author: author, room: room, message: message, emote: emote,
+          ack: ack, payload: payload, signature: signature, received_at: now
         )
         :ok
       rescue Sequel::UniqueConstraintViolation
@@ -206,18 +212,31 @@ module ReputableChat
         @db[:messages].where(author: author).order(Sequel.desc(:seq)).first
       end
 
-      def store_message(author:, room:, seq:, prev:, payload:, signature:, reply_to: nil)
+      def store_message(hash:, author:, room:, seq:, prev:, ack:, payload:, signature:, reply_to: nil)
         @db[:messages].insert(
-          author: author, room: room, seq: seq, prev: prev, reply_to: reply_to,
-          payload: payload, signature: signature, received_at: now
+          hash: hash, author: author, room: room, seq: seq, prev: prev, ack: ack,
+          reply_to: reply_to, payload: payload, signature: signature, received_at: now
         )
         :ok
       rescue Sequel::UniqueConstraintViolation
         :duplicate
       end
 
+      def message_by_hash(hash) = @db[:messages].where(hash: hash).first
+
       def room_messages(room, limit: 100)
         @db[:messages].where(room: room).order(Sequel.desc(:id)).limit(limit).reverse.all
+      end
+
+      # Adds only the columns a table is actually missing, so an existing
+      # database migrates forward without a separate migration framework.
+      def add_missing(table, columns)
+        existing = @db[table].columns
+        columns.each do |name, type|
+          next if existing.include?(name)
+
+          @db.alter_table(table) { add_column name, type }
+        end
       end
 
       def now = Time.now.to_i

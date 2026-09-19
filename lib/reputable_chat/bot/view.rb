@@ -19,17 +19,19 @@ module ReputableChat
     # rest of the visit -- which is the rule the design is built on, not a
     # shortcut. Reacting during a visit changes nobody's bucket until the bot
     # comes back.
-    Message = Struct.new(:signature, :author, :seq, :body, :ts, :reply_to, :received_at,
+    # `hash` is the record hash: what a reply, a reaction or an ack names.
+    Message = Struct.new(:hash, :signature, :author, :seq, :body, :ts, :reply_to, :received_at,
                          keyword_init: true)
 
     class View
       attr_reader :profile, :version, :ratings, :session, :messages, :reactions
 
-      def initialize(client:, identity:, persona:, defaults:)
-        @client   = client
-        @identity = identity
-        @persona  = persona
-        @config   = Config.new(defaults: defaults, overrides: persona.display_overrides)
+      def initialize(client:, identity:, persona:, defaults:, genesis_hash:)
+        @client       = client
+        @identity     = identity
+        @persona      = persona
+        @genesis_hash = genesis_hash
+        @config       = Config.new(defaults: defaults, overrides: persona.display_overrides)
       end
 
       # Everything a visit starts with: own config, the graph, the room.
@@ -63,6 +65,23 @@ module ReputableChat
       end
 
       def visible_messages = @messages.select { |m| @session.visible?(m.author) }
+
+      # The record this bot's next record acknowledges: the most recent one it
+      # can see whose author it rates above the bar, or the genesis if there is
+      # none. Subjective by construction -- it is the acknowledging user's own
+      # reputation that decides, which is why the server cannot check it.
+      def ack
+        bar = @config.decimal("chain.min_reputation_to_acknowledge")
+
+        recent = @messages.reverse.find do |message|
+          next false unless message.hash
+          next true if message.author == @identity.pubkey
+
+          @session.explain(message.author).fetch(:effective) > bar
+        end
+
+        recent ? recent.hash : @genesis_hash
+      end
 
       def visible_from_others
         visible_messages.reject { |m| m.author == @identity.pubkey }
@@ -212,9 +231,9 @@ module ReputableChat
         payload = JSON.parse(row["payload"])
 
         Message.new(
-          signature: row["signature"], author: row["author"], body: payload["body"],
-          seq: row["seq"], ts: payload["ts"], reply_to: row["reply_to"],
-          received_at: row["received_at"]
+          hash: row["hash"], signature: row["signature"], author: row["author"],
+          body: payload["body"], seq: row["seq"], ts: payload["ts"],
+          reply_to: row["reply_to"], received_at: row["received_at"]
         )
       rescue JSON::ParserError
         nil

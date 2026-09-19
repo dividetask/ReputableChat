@@ -1,0 +1,6 @@
+{
+  "pubkey": "4bc_7lVNceHwDttr5q8X-aNEdoIC7ZbxJMhhBz0YJ_w",
+  "payload": "{\"ack\":null,\"bio\":\"Tim is legally distinct from, and no relation to, Tom\",\"handle\":\"Tim\",\"icon\":null,\"master_pubkey\":null,\"previous_pubkey\":null,\"pubkey\":\"4bc_7lVNceHwDttr5q8X-aNEdoIC7ZbxJMhhBz0YJ_w\",\"purpose\":\"reputablechat:user:v1\",\"ts\":1789845696,\"version\":1}",
+  "signature": "aKyl892WTSWRw83GzGYzbHL6FM5NG4fVI5qcGr1xXX_wJd-0Su_3n5KcFRS_k8pFMvx0_pGv4N8sXZe_ntZBAg",
+  "hash": "f1284219a85b4b51922659cc7af9c7b1d3c25a9e11e6ac8e2465ecd876c2dd0a"
+}
