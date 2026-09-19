@@ -37,6 +37,22 @@ Split by **who needs to read it**.
   "ratings": { "<pubkey>": { "friend": true, "reported": false, "net_votes": 12 } } }
 ```
 
+**Two different things are called a version here**, and it is worth separating
+them before reading any further:
+
+- The `:v1` at the end of `purpose` is the **shape** of the payload — which
+  fields it has. It changes only if the field list changes, which invalidates
+  every signature ever made with the old shape. It is part of the domain
+  separation described under **Signed payloads** below.
+- `version: 7` is a **monotonic counter for this record**, climbing by one
+  every time its owner republishes. It says nothing about the shape.
+
+So `reputablechat:config:v1` at `version: 7` is the seventh copy of the first
+shape. The two never move together, and a record at `version: 7` alongside one
+at `version: 3` is not a contradiction: every record has its own counter, and
+a public config that has been saved seven times sits happily beside a private
+one saved three times.
+
 The profile is signed alongside the ratings, so the server cannot alter a
 display name, bio or icon. Names are not unique — the key is the identity, and
 the UI shows a key fingerprint beside every name.
@@ -70,10 +86,13 @@ check that has to stay correct.
 server operator, who can read it. Making it opaque to the server means
 encrypting under a key derived from the seed — worth doing, not done.
 
-`version` is a monotonic counter **inside the signed payload**. Without it the
-server could serve an old copy of someone's config to hide a report, and the
-signature on it would still verify perfectly. Cheap now, impossible to retrofit
-without invalidating every signature in the network.
+The counter is **inside the signed payload**, which is the whole point of it.
+Without it the server could serve an old copy of someone's config to hide a
+report, and the signature on that old copy would still verify perfectly —
+because it is genuine, just stale. A counter the server cannot alter without
+breaking the signature is what makes serving a stale copy detectable. Cheap
+now, impossible to retrofit without invalidating every signature in the
+network.
 
 Known limit: a public config accumulates an entry per person ever rated, and
 grows without bound. Fine for the MVP, needs chunking later.
@@ -92,7 +111,12 @@ script-bearing document, not an image.
 
 ## Signed payloads
 
-Three shapes, each domain-separated. `lib/reputable_chat/cryptography/payload.rb` and
+Each shape is domain-separated: the `purpose` string is signed along with
+everything else, so a signature made for one kind of record cannot be presented
+as another, and the trailing `:v1` pins which field list was signed. Adding or
+removing a field means a new suffix, because the canonical bytes change and
+every old signature stops verifying against the new shape.
+ `lib/reputable_chat/cryptography/payload.rb` and
 `public/js/identity.js` must agree exactly.
 
 | purpose | fields |
