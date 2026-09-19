@@ -226,46 +226,46 @@ module ReputableChat
 
     def store_private_config(r)
       pubkey   = current_pubkey(r)
-      version  = Params.integer(r.params["version"], min: 1) or bad_request(r, "bad version")
+      revision  = Params.integer(r.params["revision"], min: 1) or bad_request(r, "bad revision")
       settings = Params.settings(r.params["settings"])       or bad_request(r, "bad settings")
       voted    = Params.voted(r.params["voted"] || [])       or bad_request(r, "bad voted list")
       sig      = Params.signature(r.params["signature"])     or bad_request(r, "bad signature")
       ts       = Params.integer(r.params["ts"])              or bad_request(r, "bad timestamp")
 
       payload = Cryptography::Payload.private_config(
-        pubkey: pubkey, version: version, settings: settings, voted: voted, issued_at: ts
+        pubkey: pubkey, revision: revision, settings: settings, voted: voted, issued_at: ts
       )
       verify!(r, pubkey, sig, payload)
 
       result = store.store_private_config(
-        pubkey: pubkey, version: version,
+        pubkey: pubkey, revision: revision,
         payload: Cryptography::Canonical.dump(payload), signature: sig
       )
-      r.halt(409, { "error" => "version is not newer than the stored one" }) if result == :stale
+      r.halt(409, { "error" => "revision is not newer than the stored one" }) if result == :stale
 
-      { "stored" => true, "version" => version }
+      { "stored" => true, "revision" => revision }
     end
 
     def store_config(r)
       pubkey  = current_pubkey(r)
-      version = Params.integer(r.params["version"], min: 1) or bad_request(r, "bad version")
+      revision = Params.integer(r.params["revision"], min: 1) or bad_request(r, "bad revision")
       profile = Params.profile(r.params["profile"])         or bad_request(r, "bad profile")
       ratings = Params.ratings(r.params["ratings"])         or bad_request(r, "bad ratings")
       sig     = Params.signature(r.params["signature"])     or bad_request(r, "bad signature")
       ts      = Params.integer(r.params["ts"])              or bad_request(r, "bad timestamp")
 
       payload = Cryptography::Payload.config(
-        pubkey: pubkey, version: version, profile: profile, ratings: ratings, issued_at: ts
+        pubkey: pubkey, revision: revision, profile: profile, ratings: ratings, issued_at: ts
       )
       verify!(r, pubkey, sig, payload)
 
       result = store.store_config(
-        pubkey: pubkey, version: version,
+        pubkey: pubkey, revision: revision,
         payload: Cryptography::Canonical.dump(payload), signature: sig
       )
-      r.halt(409, { "error" => "version is not newer than the stored one" }) if result == :stale
+      r.halt(409, { "error" => "revision is not newer than the stored one" }) if result == :stale
 
-      { "stored" => true, "version" => version }
+      { "stored" => true, "revision" => revision }
     end
 
     # `ack` is the record this message's author had last seen. The server does
@@ -280,7 +280,7 @@ module ReputableChat
     # later have to honour or explain away.
     def put_user_record(r)
       pubkey  = current_pubkey(r)
-      version = Params.integer(r.params["version"], min: 1) or bad_request(r, "bad version")
+      revision = Params.integer(r.params["revision"], min: 1) or bad_request(r, "bad revision")
       handle  = Params.handle(r.params["handle"])           or bad_request(r, "bad handle")
       bio     = Params.bio(r.params["bio"])                 or bad_request(r, "bad bio")
       ack     = Params.record_hash(r.params["ack"])         or bad_request(r, "bad ack")
@@ -291,10 +291,10 @@ module ReputableChat
       bad_request(r, "key rotation is not implemented") if r.params["master_pubkey"] || r.params["previous_pubkey"]
 
       payload = Cryptography::Payload.user(
-        pubkey: pubkey, version: version, handle: handle, bio: bio, icon: icon,
+        pubkey: pubkey, revision: revision, handle: handle, bio: bio, icon: icon,
         ack: ack, issued_at: ts
       )
-      store_record(r, :store_user_record, pubkey, version, payload, sig)
+      store_record(r, :store_user_record, pubkey, revision, payload, sig)
     end
 
     # What somebody thinks of everyone else. The server checks the shape and
@@ -302,7 +302,7 @@ module ReputableChat
     # could not form one without computing a reputation.
     def put_attestation(r)
       pubkey  = current_pubkey(r)
-      version = Params.integer(r.params["version"], min: 1) or bad_request(r, "bad version")
+      revision = Params.integer(r.params["revision"], min: 1) or bad_request(r, "bad revision")
       scores  = Params.scores(r.params["scores"])           or bad_request(r, "bad scores")
       derived = Params.derived(r.params["derived"])         or bad_request(r, "bad derived scores")
       ack     = Params.record_hash(r.params["ack"])         or bad_request(r, "bad ack")
@@ -310,32 +310,32 @@ module ReputableChat
       ts      = Params.integer(r.params["ts"])              or bad_request(r, "bad timestamp")
 
       payload = Cryptography::Payload.attestation(
-        pubkey: pubkey, version: version, scores: scores, derived: derived,
+        pubkey: pubkey, revision: revision, scores: scores, derived: derived,
         ack: ack, issued_at: ts
       )
-      store_record(r, :store_attestation, pubkey, version, payload, sig)
+      store_record(r, :store_attestation, pubkey, revision, payload, sig)
     end
 
-    def store_record(r, method, pubkey, version, payload, signature)
+    def store_record(r, method, pubkey, revision, payload, signature)
       verify!(r, pubkey, signature, payload)
 
       canonical = Cryptography::Canonical.dump(payload)
       hash = Cryptography::Record.digest(payload: canonical, signature: signature)
-      result = store.public_send(method, pubkey: pubkey, version: version, hash: hash,
+      result = store.public_send(method, pubkey: pubkey, revision: revision, hash: hash,
                                          payload: canonical, signature: signature)
 
-      r.halt(409, { "error" => "version is not newer than the stored one" }) if result == :stale
+      r.halt(409, { "error" => "revision is not newer than the stored one" }) if result == :stale
 
-      { "stored" => true, "version" => version, "hash" => hash }
+      { "stored" => true, "revision" => revision, "hash" => hash }
     end
 
-    # One change to an attestation between republishes. `base_version` names
+    # One change to an attestation between republishes. `base_revision` names
     # the snapshot it amends and `seq` its place in that run, both inside the
     # signature, so the server can neither reorder a run nor replay one against
     # a later snapshot.
     def post_adjustment(r)
       pubkey  = current_pubkey(r)
-      base    = Params.integer(r.params["base_version"], min: 1) or bad_request(r, "bad base version")
+      base    = Params.integer(r.params["base_revision"], min: 1) or bad_request(r, "bad base revision")
       seq     = Params.integer(r.params["seq"], min: 1)          or bad_request(r, "bad seq")
       target  = Params.pubkey(r.params["target"])                or bad_request(r, "bad target")
       score   = Params.decimal(r.params["reputation"])           or bad_request(r, "bad reputation")
@@ -347,7 +347,7 @@ module ReputableChat
       bad_request(r, "an adjustment cannot be about its own author") if target == pubkey
 
       payload = Cryptography::Payload.adjustment(
-        pubkey: pubkey, base_version: base, seq: seq, target: target,
+        pubkey: pubkey, base_revision: base, seq: seq, target: target,
         reputation: score, trust: trust, ack: ack, issued_at: ts
       )
       verify!(r, pubkey, sig, payload)
@@ -355,7 +355,7 @@ module ReputableChat
       canonical = Cryptography::Canonical.dump(payload)
       hash = Cryptography::Record.digest(payload: canonical, signature: sig)
       result = store.store_adjustment(
-        hash: hash, pubkey: pubkey, base_version: base, seq: seq, target: target,
+        hash: hash, pubkey: pubkey, base_revision: base, seq: seq, target: target,
         ack: ack, payload: canonical, signature: sig
       )
       r.halt(409, { "error" => "that adjustment already exists" }) if result == :duplicate
@@ -364,12 +364,12 @@ module ReputableChat
     end
 
     # Only the run amending the snapshot the caller holds. An adjustment
-    # against an older version was superseded by the republish that followed.
+    # against an older revision was superseded by the republish that followed.
     def fetch_adjustments(r, pubkey_param)
       pubkey = Params.pubkey(pubkey_param) or bad_request(r, "bad pubkey")
-      base = Params.integer(r.params["base_version"], min: 1) or bad_request(r, "bad base version")
+      base = Params.integer(r.params["base_revision"], min: 1) or bad_request(r, "bad base revision")
 
-      { "adjustments" => store.adjustments_for(pubkey, base_version: base).map { |row| present_adjustment(row) } }
+      { "adjustments" => store.adjustments_for(pubkey, base_revision: base).map { |row| present_adjustment(row) } }
     end
 
     def fetch(kind, pubkey_param)
@@ -472,7 +472,7 @@ module ReputableChat
     def present_config(row)
       return nil unless row
 
-      { "pubkey" => row[:pubkey], "version" => row[:version],
+      { "pubkey" => row[:pubkey], "revision" => row[:revision],
         "payload" => row[:payload], "signature" => row[:signature] }
     end
 
@@ -482,14 +482,14 @@ module ReputableChat
     def present_record(row)
       return nil unless row
 
-      { "pubkey" => row[:pubkey], "version" => row[:version], "hash" => row[:hash],
+      { "pubkey" => row[:pubkey], "revision" => row[:revision], "hash" => row[:hash],
         "payload" => row[:payload], "signature" => row[:signature] }.compact
     end
 
-    # An adjustment has no version of its own -- it has the snapshot it amends
+    # An adjustment has no revision of its own -- it has the snapshot it amends
     # and its place in that run, which is what a reader replays it by.
     def present_adjustment(row)
-      { "pubkey" => row[:pubkey], "base_version" => row[:base_version], "seq" => row[:seq],
+      { "pubkey" => row[:pubkey], "base_revision" => row[:base_revision], "seq" => row[:seq],
         "target" => row[:target], "hash" => row[:hash], "payload" => row[:payload],
         "signature" => row[:signature] }
     end

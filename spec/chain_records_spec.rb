@@ -57,11 +57,11 @@ class ChainRecordsSpec < Minitest::Test
 
   # --- user records -------------------------------------------------------
 
-  def user_body(version: 1, handle: "alice", bio: "", icon: nil, extra: {})
+  def user_body(revision: 1, handle: "alice", bio: "", icon: nil, extra: {})
     ts = Time.now.to_i
-    payload = Payload.user(pubkey: @pubkey, version: version, handle: handle, bio: bio,
+    payload = Payload.user(pubkey: @pubkey, revision: revision, handle: handle, bio: bio,
                            icon: icon, ack: ack, issued_at: ts)
-    { "version" => version, "handle" => handle, "bio" => bio, "icon" => icon,
+    { "revision" => revision, "handle" => handle, "bio" => bio, "icon" => icon,
       "ack" => ack, "ts" => ts, "signature" => sign(payload) }.merge(extra)
   end
 
@@ -88,13 +88,13 @@ class ChainRecordsSpec < Minitest::Test
                  record["hash"]
   end
 
-  # RULE: a version must climb. Without it the server could serve an old copy
+  # RULE: a revision must climb. Without it the server could serve an old copy
   # to hide something and the signature on it would still verify perfectly.
   def test_refuses_a_rolled_back_user_record
-    put_json "/api/user", user_body(version: 2)
+    put_json "/api/user", user_body(revision: 2)
     assert_equal 200, last_response.status
 
-    put_json "/api/user", user_body(version: 1)
+    put_json "/api/user", user_body(revision: 1)
     assert_equal 409, last_response.status
   end
 
@@ -125,13 +125,13 @@ class ChainRecordsSpec < Minitest::Test
 
   # --- attestations -------------------------------------------------------
 
-  def attestation_body(version: 1, scores: nil, derived: nil)
+  def attestation_body(revision: 1, scores: nil, derived: nil)
     scores ||= { somebody => { "reputation" => "0.5", "trust" => "1" } }
     derived ||= { "hops" => 3, "params" => Digest::SHA256.hexdigest("params"), "scores" => {} }
     ts = Time.now.to_i
-    payload = Payload.attestation(pubkey: @pubkey, version: version, scores: scores,
+    payload = Payload.attestation(pubkey: @pubkey, revision: revision, scores: scores,
                                   derived: derived, ack: ack, issued_at: ts)
-    { "version" => version, "scores" => scores, "derived" => derived,
+    { "revision" => revision, "scores" => scores, "derived" => derived,
       "ack" => ack, "ts" => ts, "signature" => sign(payload) }
   end
 
@@ -169,7 +169,7 @@ class ChainRecordsSpec < Minitest::Test
   # reach the wire at all.
   def test_a_float_cannot_be_signed_in_the_first_place
     assert_raises(ArgumentError) do
-      Canon.bytes(Payload.attestation(pubkey: @pubkey, version: 1,
+      Canon.bytes(Payload.attestation(pubkey: @pubkey, revision: 1,
                                       scores: { somebody => { "reputation" => 0.5, "trust" => 1 } },
                                       derived: {}, ack: ack, issued_at: 1))
     end
@@ -210,8 +210,8 @@ class ChainRecordsSpec < Minitest::Test
   end
 
   def test_refuses_a_rolled_back_attestation
-    put_json "/api/attestation", attestation_body(version: 3)
-    put_json "/api/attestation", attestation_body(version: 2)
+    put_json "/api/attestation", attestation_body(revision: 3)
+    put_json "/api/attestation", attestation_body(revision: 2)
 
     assert_equal 409, last_response.status
   end
@@ -226,13 +226,13 @@ class ChainRecordsSpec < Minitest::Test
 
   # --- adjustments --------------------------------------------------------
 
-  def adjustment_body(base_version: 1, seq: 1, target: nil, reputation: "0.5032", trust: "1")
+  def adjustment_body(base_revision: 1, seq: 1, target: nil, reputation: "0.5032", trust: "1")
     target ||= somebody
     ts = Time.now.to_i
-    payload = Payload.adjustment(pubkey: @pubkey, base_version: base_version, seq: seq,
+    payload = Payload.adjustment(pubkey: @pubkey, base_revision: base_revision, seq: seq,
                                  target: target, reputation: reputation, trust: trust,
                                  ack: ack, issued_at: ts)
-    { "base_version" => base_version, "seq" => seq, "target" => target,
+    { "base_revision" => base_revision, "seq" => seq, "target" => target,
       "reputation" => reputation, "trust" => trust, "ack" => ack, "ts" => ts,
       "signature" => sign(payload) }
   end
@@ -243,7 +243,7 @@ class ChainRecordsSpec < Minitest::Test
     assert_equal 200, last_response.status
     post_json "/api/adjustment", adjustment_body(seq: 2, target: somebody)
 
-    get "/api/adjustment/#{@pubkey}?base_version=1"
+    get "/api/adjustment/#{@pubkey}?base_revision=1"
     run = json["adjustments"]
 
     assert_equal [1, 2], run.map { |a| a["seq"] }
@@ -254,13 +254,13 @@ class ChainRecordsSpec < Minitest::Test
   # snapshot was superseded by the republish that followed it, so it must not
   # surface in a later run.
   def test_an_adjustment_belongs_only_to_the_snapshot_it_amends
-    post_json "/api/adjustment", adjustment_body(base_version: 1, seq: 1)
-    post_json "/api/adjustment", adjustment_body(base_version: 2, seq: 1)
+    post_json "/api/adjustment", adjustment_body(base_revision: 1, seq: 1)
+    post_json "/api/adjustment", adjustment_body(base_revision: 2, seq: 1)
 
-    get "/api/adjustment/#{@pubkey}?base_version=2"
+    get "/api/adjustment/#{@pubkey}?base_revision=2"
 
     assert_equal 1, json["adjustments"].size
-    assert_equal 2, JSON.parse(json["adjustments"].first["payload"])["base_version"]
+    assert_equal 2, JSON.parse(json["adjustments"].first["payload"])["base_revision"]
   end
 
   def test_the_same_place_in_a_run_cannot_be_used_twice

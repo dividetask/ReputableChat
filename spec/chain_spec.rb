@@ -7,6 +7,7 @@ require "reputable_chat/cryptography/payload"
 require "reputable_chat/cryptography/canonical"
 require "reputable_chat/reputation/fingerprint"
 require "json"
+require "ed25519"
 require "tmpdir"
 
 # The rules that make a pile of signatures into a chain.
@@ -115,6 +116,33 @@ class ChainSpec < Minitest::Test
     end
   end
 
+  # RULE: a genesis written against an older payload shape is refused, even
+  # though its signature still verifies perfectly -- the signature covers the
+  # bytes it was made from, and those have not changed. Every record signed
+  # since carries a different field list, and a reader looking for a field this
+  # one lacks would find nil and carry on.
+  def test_a_genesis_written_against_an_older_shape_is_refused
+    Dir.mktmpdir do |dir|
+      genesis, path = GenesisFixture.write(dir)
+      stale = JSON.parse(genesis.payload)
+      stale["version"] = stale.delete("revision")
+
+      # Re-signed, so only the shape is wrong and nothing else.
+      signing = Ed25519::SigningKey.generate
+      canonical = Canonical.dump(stale.merge("pubkey" => genesis.pubkey))
+      signature = ReputableChat::Cryptography::Signature.encode(signing.sign(canonical.b))
+      File.write(path, JSON.generate(
+        "pubkey" => ReputableChat::Cryptography::Signature.encode(signing.verify_key.to_bytes),
+        "payload" => canonical, "signature" => signature,
+        "hash" => Record.digest(payload: canonical, signature: signature)
+      ))
+
+      error = assert_raises(ReputableChat::Genesis::Corrupt) { ReputableChat::Genesis.load(path: path) }
+      assert_match(/older payload shape/, error.message)
+      assert_match(/revision/, error.message)
+    end
+  end
+
   def test_a_missing_genesis_says_how_to_make_one
     Dir.mktmpdir do |dir|
       error = assert_raises(ReputableChat::Genesis::Missing) do
@@ -153,17 +181,17 @@ class ChainSpec < Minitest::Test
   # would be a record nothing else could anchor to.
   def test_every_shared_record_shape_carries_an_ack
     shapes = {
-      "user" => Payload.user(pubkey: "k", version: 1, handle: "t", bio: "", icon: nil,
+      "user" => Payload.user(pubkey: "k", revision: 1, handle: "t", bio: "", icon: nil,
                              ack: "a", issued_at: 1),
-      "attestation" => Payload.attestation(pubkey: "k", version: 1, scores: {}, derived: {},
+      "attestation" => Payload.attestation(pubkey: "k", revision: 1, scores: {}, derived: {},
                                            ack: "a", issued_at: 1),
-      "adjustment" => Payload.adjustment(pubkey: "k", base_version: 1, seq: 1, target: "t",
+      "adjustment" => Payload.adjustment(pubkey: "k", base_revision: 1, seq: 1, target: "t",
                                          reputation: "0.5", trust: "1", ack: "a", issued_at: 1),
       "message" => Payload.message(author: "k", room: "r", seq: 1, prev: nil, body: "b",
                                    ack: "a", issued_at: 1),
       "emote" => Payload.emote(author: "k", room: "r", message: "m", emote: "+",
                                ack: "a", issued_at: 1),
-      "release" => Payload.release(publisher: "k", version: 1, label: "0.1.0", files: {},
+      "release" => Payload.release(publisher: "k", revision: 1, label: "0.1.0", files: {},
                                    notes: "", ack: "a", issued_at: 1)
     }
 
@@ -173,7 +201,7 @@ class ChainSpec < Minitest::Test
   # RULE: the private vault has no ack. Nobody else ever sees it, so there is
   # nothing to anchor it to and nobody to prove anything to.
   def test_the_private_config_has_no_ack
-    payload = Payload.private_config(pubkey: "k", version: 1, settings: {}, voted: [], issued_at: 1)
+    payload = Payload.private_config(pubkey: "k", revision: 1, settings: {}, voted: [], issued_at: 1)
 
     refute payload.key?("ack")
   end
@@ -182,7 +210,7 @@ class ChainSpec < Minitest::Test
   # Adding a field later changes the canonical bytes of every record, which
   # invalidates every signature ever made.
   def test_the_key_rotation_placeholders_are_present_and_null
-    payload = Payload.user(pubkey: "k", version: 1, handle: "t", bio: "", icon: nil,
+    payload = Payload.user(pubkey: "k", revision: 1, handle: "t", bio: "", icon: nil,
                            ack: nil, issued_at: 1)
 
     assert payload.key?("master_pubkey")

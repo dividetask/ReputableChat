@@ -140,7 +140,7 @@ module Tim
     puts "  Handle       #{config['profile']['username']}"
     puts "  Public key   #{client.pubkey}"
     puts "  Genesis      #{ReputableChat::Genesis.current.hash}"
-    puts "  Config       version #{config['version']}, #{ratings.size} #{ratings.size == 1 ? 'rating' : 'ratings'}"
+    puts "  Config       revision #{config['revision']}, #{ratings.size} #{ratings.size == 1 ? 'rating' : 'ratings'}"
     puts
 
     return puts("  Nobody rated yet.\n\n") if ratings.empty?
@@ -262,23 +262,23 @@ module Tim
     return from_genesis if blob.nil?
 
     payload = JSON.parse(blob["payload"])
-    { "version" => payload["version"].to_i, "profile" => payload["profile"], "ratings" => payload["ratings"] || {} }
+    { "revision" => payload["revision"].to_i, "profile" => payload["profile"], "ratings" => payload["ratings"] || {} }
   end
 
   def from_genesis
     record = JSON.parse(ReputableChat::Genesis.current.payload)
 
-    { "version" => 0, "ratings" => {},
+    { "revision" => 0, "ratings" => {},
       "profile" => { "username" => record["handle"], "message" => record["bio"], "icon" => record["icon"] } }
   end
 
   def publish(client, config)
-    version = config["version"].to_i + 1
+    revision = config["revision"].to_i + 1
     ts = Time.now.to_i
-    payload = Payload.config(pubkey: client.pubkey, version: version, profile: config["profile"],
+    payload = Payload.config(pubkey: client.pubkey, revision: revision, profile: config["profile"],
                              ratings: config["ratings"], issued_at: ts)
 
-    client.put_json("/api/config", { "version" => version, "profile" => config["profile"],
+    client.put_json("/api/config", { "revision" => revision, "profile" => config["profile"],
                                      "ratings" => config["ratings"], "ts" => ts,
                                      "signature" => client.sign(payload) })
   end

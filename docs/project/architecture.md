@@ -7,7 +7,7 @@ reputation. What it does:
 
 - hands out single-use login challenges
 - **verifies every signature before storing anything**
-- rejects config rollbacks by version
+- rejects config rollbacks by revision
 - stores signed blobs and serves them back byte-identical
 - validates the shape of everything arriving from a client
 
@@ -31,27 +31,30 @@ Split by **who needs to read it**.
 ```json
 { "purpose": "reputablechat:config:v1",
   "pubkey":  "...",
-  "version": 7,
+  "revision": 7,
   "ts":      1710000000,
   "profile": { "username": "alice", "message": "hi", "icon": "<sha256>.png" },
   "ratings": { "<pubkey>": { "friend": true, "reported": false, "net_votes": 12 } } }
 ```
 
-**Two different things are called a version here**, and it is worth separating
-them before reading any further:
+**Two numbers here count different things**, and they are named apart on
+purpose:
 
 - The `:v1` at the end of `purpose` is the **shape** of the payload — which
-  fields it has. It changes only if the field list changes, which invalidates
-  every signature ever made with the old shape. It is part of the domain
+  fields it has. It moves only when the field list changes, which invalidates
+  every signature ever made under the old shape. It is part of the domain
   separation described under **Signed payloads** below.
-- `version: 7` is a **monotonic counter for this record**, climbing by one
-  every time its owner republishes. It says nothing about the shape.
+- `revision` is a **counter for this one record**, climbing by one every time
+  its owner republishes. It says nothing about the shape.
 
-So `reputablechat:config:v1` at `version: 7` is the seventh copy of the first
-shape. The two never move together, and a record at `version: 7` alongside one
-at `version: 3` is not a contradiction: every record has its own counter, and
-a public config that has been saved seven times sits happily beside a private
-one saved three times.
+So `reputablechat:config:v1` at `revision: 7` is the seventh copy of the first
+shape. They never move together. Every record carries its own counter, so a
+public config at 7 sitting beside a private one at 3 is two independent tallies
+rather than a disagreement — one has been saved seven times and the other
+three.
+
+They were both called `version` until it became clear that nobody could read
+the two lines together and tell them apart.
 
 The profile is signed alongside the ratings, so the server cannot alter a
 display name, bio or icon. Names are not unique — the key is the identity, and
@@ -64,7 +67,7 @@ Actions, not scores — see the end of [reputation.md](reputation.md) for why.
 ```json
 { "purpose":  "reputablechat:private-config:v1",
   "pubkey":   "...",
-  "version":  3,
+  "revision":  3,
   "ts":       1710000000,
   "settings": { "display": { "show_unrated": true } },
   "voted":    ["<message signature>", "..."] }
@@ -124,12 +127,12 @@ every old signature stops verifying against the new shape.
 | `reputablechat:login:v1` | purpose, pubkey, nonce, origin, ts |
 | `reputablechat:message:v1` | purpose, author, room, seq, prev, reply_to, ack, ts, body |
 | `reputablechat:emote:v1` | purpose, author, room, message, emote, ack, ts |
-| `reputablechat:user:v1` | purpose, pubkey, version, handle, bio, icon, master_pubkey, previous_pubkey, ack, ts |
-| `reputablechat:attestation:v1` | purpose, pubkey, version, scores, derived, ack, ts |
-| `reputablechat:adjustment:v1` | purpose, pubkey, base_version, seq, target, reputation, trust, ack, ts |
-| `reputablechat:release:v1` | purpose, publisher, version, label, files, notes, ack, ts |
+| `reputablechat:user:v1` | purpose, pubkey, revision, handle, bio, icon, master_pubkey, previous_pubkey, ack, ts |
+| `reputablechat:attestation:v1` | purpose, pubkey, revision, scores, derived, ack, ts |
+| `reputablechat:adjustment:v1` | purpose, pubkey, base_revision, seq, target, reputation, trust, ack, ts |
+| `reputablechat:release:v1` | purpose, publisher, revision, label, files, notes, ack, ts |
 | `reputablechat:config:v1` | superseded by `user` + `attestation` |
-| `reputablechat:private-config:v1` | purpose, pubkey, version, settings, voted, ts |
+| `reputablechat:private-config:v1` | purpose, pubkey, revision, settings, voted, ts |
 
 Everything but `login` and `private-config` carries `ack`, the hash of the last
 record its author had seen. That is what makes these a chain rather than a pile

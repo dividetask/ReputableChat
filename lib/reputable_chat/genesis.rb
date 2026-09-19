@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "json"
+require_relative "cryptography/payload"
 require_relative "cryptography/record"
 require_relative "cryptography/signature"
 
@@ -62,6 +63,8 @@ module ReputableChat
         raise Corrupt, "#{path} is missing #{field}" if send(field).to_s.empty?
       end
 
+      shape!(path)
+
       recomputed = Cryptography::Record.digest(payload: payload, signature: signature)
       unless recomputed == hash
         raise Corrupt, "#{path} records hash #{hash} but its contents hash to #{recomputed}"
@@ -72,6 +75,30 @@ module ReputableChat
       )
 
       raise Corrupt, "the signature on #{path} does not verify against #{pubkey}"
+    end
+
+    # A genesis written against an older payload shape still verifies -- its
+    # signature covers the bytes it was made from, and those have not changed.
+    # It is still wrong: every record signed since has a different field list,
+    # and a reader looking for a field this one does not carry would find nil
+    # and carry on. Caught here rather than discovered downstream.
+    def shape!(path)
+      record = JSON.parse(payload)
+
+      unless record["purpose"] == Cryptography::Payload::USER
+        raise Corrupt, "#{path} is not a #{Cryptography::Payload::USER} record"
+      end
+
+      expected = Cryptography::Payload.user(
+        pubkey: pubkey, revision: 1, handle: "x", bio: "", icon: nil, ack: nil, issued_at: 0
+      ).keys.sort
+
+      missing = expected - record.keys
+      return if missing.empty?
+
+      raise Corrupt, "#{path} was written against an older payload shape and is missing " \
+                     "#{missing.join(', ')}. Delete it and the seed beside it, then run " \
+                     "`bundle exec rake genesis` again -- nothing has been published from it yet."
     end
   end
 end

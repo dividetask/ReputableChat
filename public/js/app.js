@@ -17,9 +17,9 @@ const PUBKEY = /^[A-Za-z0-9_-]{42,44}$/;
 const $ = (id) => document.getElementById(id);
 
 const state = {
-  config: null, emotes: null, me: null, profile: null, version: 0,
+  config: null, emotes: null, me: null, profile: null, revision: 0,
   ratings: {}, graph: new Graph(), reputation: null, session: null,
-  seq: 0, voted: new Set(), viewing: null, settings: {}, privateVersion: 0,
+  seq: 0, voted: new Set(), viewing: null, settings: {}, privateRevision: 0,
   reactions: new Map(), recentlyBlocked: new Map(), replyingTo: null,
   genesis: null, tip: null,
   renderEpoch: 0, renderedKey: null, pendingRegistration: false,
@@ -104,7 +104,7 @@ async function loadPrivateConfig() {
 
   state.settings = {};
   state.voted = new Set();
-  state.privateVersion = 0;
+  state.privateRevision = 0;
   if (!config) return;
 
   // Verified even though the MVP takes other people's configs on trust --
@@ -115,22 +115,22 @@ async function loadPrivateConfig() {
   }
 
   const payload = JSON.parse(config.payload);
-  state.privateVersion = payload.version || 0;
+  state.privateRevision = payload.revision || 0;
   state.settings = payload.settings || {};
   state.voted = new Set(payload.voted || []);
 }
 
 async function publishPrivateConfig() {
-  state.privateVersion += 1;
+  state.privateRevision += 1;
   const ts = Math.floor(Date.now() / 1000);
   const voted = [...state.voted];
   const payload = identity.privateConfigPayload({
-    pubkey: state.me.pubkey, version: state.privateVersion,
+    pubkey: state.me.pubkey, revision: state.privateRevision,
     settings: state.settings, voted, ts,
   });
 
   await send("PUT", "/api/private-config", {
-    version: state.privateVersion, settings: state.settings, voted, ts,
+    revision: state.privateRevision, settings: state.settings, voted, ts,
     signature: await identity.sign(state.me, payload),
   });
 }
@@ -279,17 +279,17 @@ async function logOff() {
 // --- config ------------------------------------------------------------
 
 // Every change to friends, reports or emote tallies is re-signed and
-// re-uploaded. The version must climb or the server rejects it as a rollback.
+// re-uploaded. The revision must climb or the server rejects it as a rollback.
 async function publishConfig() {
-  state.version += 1;
+  state.revision += 1;
   const ts = Math.floor(Date.now() / 1000);
   const payload = identity.configPayload({
-    pubkey: state.me.pubkey, version: state.version,
+    pubkey: state.me.pubkey, revision: state.revision,
     profile: state.profile, ratings: state.ratings, ts,
   });
 
   await send("PUT", "/api/config", {
-    version: state.version, profile: state.profile, ratings: state.ratings,
+    revision: state.revision, profile: state.profile, ratings: state.ratings,
     ts, signature: await identity.sign(state.me, payload),
   });
 }
@@ -307,7 +307,7 @@ async function loadOwnConfig() {
   const { config } = await api(`/api/config/${state.me.pubkey}`);
   const payload = parseConfig(config);
 
-  state.version = payload ? payload.version : 0;
+  state.revision = payload ? payload.revision : 0;
   state.ratings = payload?.ratings || {};
   state.profile = payload?.profile || { username: "anonymous", message: "", icon: null };
 }

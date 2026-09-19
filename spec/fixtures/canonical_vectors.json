@@ -59,7 +59,7 @@
   {
     "purpose": "reputablechat:user:v1",
     "pubkey": "k",
-    "version": 1,
+    "revision": 1,
     "handle": "Tom",
     "bio": "hi é中",
     "icon": null,
@@ -71,7 +71,7 @@
   {
     "purpose": "reputablechat:attestation:v1",
     "pubkey": "k",
-    "version": 4,
+    "revision": 4,
     "scores": {
       "bbb": {
         "reputation": "0.5",
@@ -95,7 +95,7 @@
   {
     "purpose": "reputablechat:adjustment:v1",
     "pubkey": "k",
-    "base_version": 4,
+    "base_revision": 4,
     "seq": 7,
     "target": "t",
     "reputation": "0.5032",
@@ -106,7 +106,7 @@
   {
     "purpose": "reputablechat:release:v1",
     "publisher": "k",
-    "version": 12,
+    "revision": 12,
     "label": "0.4.0",
     "files": {
       "js/app.js": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",

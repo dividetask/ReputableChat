@@ -39,12 +39,12 @@ module ReputableChat
       # and are always null for now. They are in the signed shape from the
       # start because adding a field later changes the canonical bytes of every
       # record, which invalidates every signature ever made.
-      def user(pubkey:, version:, handle:, bio:, icon:, ack:, issued_at:,
+      def user(pubkey:, revision:, handle:, bio:, icon:, ack:, issued_at:,
                master_pubkey: nil, previous_pubkey: nil)
         {
           "purpose"         => USER,
           "pubkey"          => pubkey,
-          "version"         => version.to_i,
+          "revision"         => revision.to_i,
           "handle"          => handle,
           "bio"             => bio,
           "icon"            => icon,
@@ -68,11 +68,11 @@ module ReputableChat
       # that hash a reader cannot tell whether the numbers mean anything to
       # them, and taking them anyway would mean silently adopting a stranger's
       # settings.
-      def attestation(pubkey:, version:, scores:, derived:, ack:, issued_at:)
+      def attestation(pubkey:, revision:, scores:, derived:, ack:, issued_at:)
         {
           "purpose" => ATTESTATION,
           "pubkey"  => pubkey,
-          "version" => version.to_i,
+          "revision" => revision.to_i,
           "scores"  => scores,
           "derived" => derived,
           "ack"     => ack,
@@ -84,14 +84,14 @@ module ReputableChat
       # attestation per emote would mean re-uploading an entry for every person
       # the author has ever rated to change one number in it.
       #
-      # `base_version` names the attestation this amends and `seq` orders it
+      # `base_revision` names the attestation this amends and `seq` orders it
       # within that run, both inside the signature, so the server cannot
       # reorder a run or replay one against a later snapshot.
-      def adjustment(pubkey:, base_version:, seq:, target:, reputation:, trust:, ack:, issued_at:)
+      def adjustment(pubkey:, base_revision:, seq:, target:, reputation:, trust:, ack:, issued_at:)
         {
           "purpose"      => ADJUSTMENT,
           "pubkey"       => pubkey,
-          "base_version" => base_version.to_i,
+          "base_revision" => base_revision.to_i,
           "seq"          => seq.to_i,
           "target"       => target,
           "reputation"   => reputation,
@@ -101,18 +101,18 @@ module ReputableChat
         }
       end
 
-      # A published version of the client: a manifest of path => sha256, not an
+      # A published revision of the client: a manifest of path => sha256, not an
       # archive. A zip's bytes depend on entry order, timestamps and
       # compression level, so the same source tree hashes differently on two
       # machines -- and a hash that depends on who built it proves nothing.
       #
       # `publisher` is carried so a per-user trusted-developer setting can
       # arrive later without re-signing anything. Nothing consults it yet.
-      def release(publisher:, version:, label:, files:, notes:, ack:, issued_at:)
+      def release(publisher:, revision:, label:, files:, notes:, ack:, issued_at:)
         {
           "purpose"   => RELEASE,
           "publisher" => publisher,
-          "version"   => version.to_i,
+          "revision"   => revision.to_i,
           "label"     => label,
           "files"     => files,
           "notes"     => notes,
@@ -172,11 +172,11 @@ module ReputableChat
       # Signed, not encrypted -- this is private from other users, not from the
       # server operator, who can read it. Superseded by the encrypted vault;
       # see docs/project/identity.md.
-      def private_config(pubkey:, version:, settings:, voted:, issued_at:)
+      def private_config(pubkey:, revision:, settings:, voted:, issued_at:)
         {
           "purpose"  => PRIVATE_CONFIG,
           "pubkey"   => pubkey,
-          "version"  => version.to_i,
+          "revision"  => revision.to_i,
           "settings" => settings,
           "voted"    => voted,
           "ts"       => issued_at.to_i
@@ -186,11 +186,11 @@ module ReputableChat
       # Superseded by `user` (identity and presentation) and `attestation`
       # (ratings). Kept until the routes that serve it are replaced, so that
       # the running client does not break mid-migration.
-      def config(pubkey:, version:, profile:, ratings:, issued_at:)
+      def config(pubkey:, revision:, profile:, ratings:, issued_at:)
         {
           "purpose" => CONFIG,
           "pubkey"  => pubkey,
-          "version" => version.to_i,
+          "revision" => revision.to_i,
           "profile" => profile,
           "ratings" => ratings,
           "ts"      => issued_at.to_i

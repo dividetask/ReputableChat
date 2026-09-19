@@ -127,7 +127,7 @@ let every reader run the curve themselves. An attestation carries **scores**:
 ```json
 { "purpose": "reputablechat:attestation:v1",
   "pubkey":  "...",
-  "version": 4,
+  "revision": 4,
   "ack":     "<64 hex>",
   "ts":      1710000000,
   "scores":  { "<pubkey>": { "reputation": "0.5", "trust": "1" } },
@@ -192,7 +192,7 @@ So between republishes, each change is its own small record:
 ```json
 { "purpose": "reputablechat:adjustment:v1",
   "pubkey":  "...",
-  "base_version": 4,
+  "base_revision": 4,
   "seq":     7,
   "target":  "<pubkey>",
   "reputation": "0.5032",
@@ -201,7 +201,7 @@ So between republishes, each change is its own small record:
   "ts":      1710000000 }
 ```
 
-`base_version` names the attestation it amends and `seq` orders it within that
+`base_revision` names the attestation it amends and `seq` orders it within that
 run, so a reader takes the snapshot and replays the adjustments on top in a
 fixed order. Both are inside the signature, so the server cannot reorder them.
 
@@ -213,7 +213,7 @@ private; only their arithmetic result is published.
 
 A full attestation is republished after `attestation.resubmit_after_changes`
 changes or `attestation.resubmit_after_seconds`, whichever comes first, and
-supersedes every adjustment against the previous version. Only score-changing
+supersedes every adjustment against the previous revision. Only score-changing
 events count toward the tally. Posting a comment is not one — it cannot move a
 number in the file, so counting it would republish for a reason that could not
 have changed anything.
@@ -225,7 +225,7 @@ A release record pins a version of the client:
 ```json
 { "purpose":   "reputablechat:release:v1",
   "publisher": "<Tim's pubkey>",
-  "version":   12,
+  "revision":  12,
   "label":     "0.4.0",
   "files":     { "index.html": "<64 hex>", "js/app.js": "<64 hex>" },
   "notes":     "...",
@@ -284,7 +284,7 @@ whatever else is decided.
 ## What the server does with all this
 
 The same as it did before, which is as little as possible. It verifies a
-signature, rejects a rollback by version, stores a row, and serves the bytes
+signature, rejects a rollback by revision, stores a row, and serves the bytes
 back unchanged. It does not validate an `ack`, does not know what a reputation
 is, and cannot tell a well-chosen reference from a bad one.
 

@@ -92,7 +92,7 @@ module GenerateGenesis
   # nothing, because there was nothing to acknowledge.
   def record_for(pubkey, options)
     Crypto::Payload.user(
-      pubkey: pubkey, version: 1, handle: options[:handle], bio: options[:bio],
+      pubkey: pubkey, revision: 1, handle: options[:handle], bio: options[:bio],
       icon: nil, ack: nil, issued_at: Time.now.to_i
     )
   end

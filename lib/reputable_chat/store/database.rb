@@ -8,7 +8,7 @@ require "securerandom"
 module ReputableChat
   module Store
     # Persistence. Signed blobs in, signed blobs out. Of a config the server reads
-    # only the pubkey and version -- enough to verify and reject a rollback.
+    # only the pubkey and revision -- enough to verify and reject a rollback.
     # Ratings are never parsed server-side.
     class Database
       IN_MEMORY       = ["sqlite:/", "sqlite::memory:"].freeze
@@ -49,7 +49,7 @@ module ReputableChat
 
         @db.create_table?(:configs) do
           String   :pubkey, primary_key: true
-          Integer  :version, null: false
+          Integer  :revision, null: false
           String   :payload, text: true, null: false
           String   :signature, null: false
           Integer  :updated_at, null: false
@@ -59,7 +59,7 @@ module ReputableChat
         # uses the session's -- so asking for someone else's is not expressible.
         @db.create_table?(:private_configs) do
           String   :pubkey, primary_key: true
-          Integer  :version, null: false
+          Integer  :revision, null: false
           String   :payload, text: true, null: false
           String   :signature, null: false
           Integer  :updated_at, null: false
@@ -69,14 +69,14 @@ module ReputableChat
         # this message by. Unique because a repeat means the identical record
         # arrived twice, not that two records collided.
         # Who somebody is, and what they think of everyone else. Both replace
-        # halves of the old config blob, and both are versioned for the same
+        # halves of the old config blob, and both are revisioned for the same
         # reason it was: without a monotonic counter inside the signature, the
         # server could serve an old copy to hide something and the signature on
         # it would still verify perfectly.
         %i[user_records attestations].each do |table|
           @db.create_table?(table) do
             String   :pubkey, primary_key: true
-            Integer  :version, null: false
+            Integer  :revision, null: false
             String   :hash, null: false
             String   :payload, text: true, null: false
             String   :signature, null: false
@@ -91,14 +91,14 @@ module ReputableChat
           primary_key :id
           String   :hash, null: false, unique: true
           String   :pubkey, null: false, index: true
-          Integer  :base_version, null: false
+          Integer  :base_revision, null: false
           Integer  :seq, null: false
           String   :target, null: false
           String   :ack, null: false
           String   :payload, text: true, null: false
           String   :signature, null: false
           Integer  :received_at, null: false
-          unique %i[pubkey base_version seq]
+          unique %i[pubkey base_revision seq]
         end
 
         @db.create_table?(:messages) do
@@ -185,14 +185,14 @@ module ReputableChat
         @db[:configs].where(pubkey: pubkeys.first(MAX_BATCH)).all
       end
 
-      # Rejects a stale version. Without this the server could serve an old
+      # Rejects a stale revision. Without this the server could serve an old
       # copy of someone's config to hide a report, and the signature on it
       # would still verify perfectly.
-      def store_config(pubkey:, version:, payload:, signature:)
+      def store_config(pubkey:, revision:, payload:, signature:)
         existing = config_blob(pubkey)
-        return :stale if existing && version <= existing[:version]
+        return :stale if existing && revision <= existing[:revision]
 
-        row = { pubkey: pubkey, version: version, payload: payload,
+        row = { pubkey: pubkey, revision: revision, payload: payload,
                 signature: signature, updated_at: now }
 
         if existing
@@ -208,26 +208,26 @@ module ReputableChat
       # Same shape and same rules, so one pair of methods serves both rather
       # than two copies that can drift apart.
 
-      def user_record(pubkey) = versioned(:user_records, pubkey)
-      def user_records(pubkeys) = versioned_batch(:user_records, pubkeys)
-      def attestation(pubkey) = versioned(:attestations, pubkey)
-      def attestations(pubkeys) = versioned_batch(:attestations, pubkeys)
+      def user_record(pubkey) = revisioned(:user_records, pubkey)
+      def user_records(pubkeys) = revisioned_batch(:user_records, pubkeys)
+      def attestation(pubkey) = revisioned(:attestations, pubkey)
+      def attestations(pubkeys) = revisioned_batch(:attestations, pubkeys)
 
-      def store_user_record(**row) = store_versioned(:user_records, **row)
-      def store_attestation(**row) = store_versioned(:attestations, **row)
+      def store_user_record(**row) = store_revisioned(:user_records, **row)
+      def store_attestation(**row) = store_revisioned(:attestations, **row)
 
-      def versioned(table, pubkey) = @db[table].where(pubkey: pubkey).first
+      def revisioned(table, pubkey) = @db[table].where(pubkey: pubkey).first
 
-      def versioned_batch(table, pubkeys)
+      def revisioned_batch(table, pubkeys)
         @db[table].where(pubkey: pubkeys.first(MAX_BATCH)).all
       end
 
-      # Rejects a stale version, exactly as a config does.
-      def store_versioned(table, pubkey:, version:, hash:, payload:, signature:)
-        existing = versioned(table, pubkey)
-        return :stale if existing && version <= existing[:version]
+      # Rejects a stale revision, exactly as a config does.
+      def store_revisioned(table, pubkey:, revision:, hash:, payload:, signature:)
+        existing = revisioned(table, pubkey)
+        return :stale if existing && revision <= existing[:revision]
 
-        row = { pubkey: pubkey, version: version, hash: hash, payload: payload,
+        row = { pubkey: pubkey, revision: revision, hash: hash, payload: payload,
                 signature: signature, updated_at: now }
 
         existing ? @db[table].where(pubkey: pubkey).update(row) : @db[table].insert(row)
@@ -236,9 +236,9 @@ module ReputableChat
 
       # --- adjustments ---------------------------------------------------------
 
-      def store_adjustment(hash:, pubkey:, base_version:, seq:, target:, ack:, payload:, signature:)
+      def store_adjustment(hash:, pubkey:, base_revision:, seq:, target:, ack:, payload:, signature:)
         @db[:adjustments].insert(
-          hash: hash, pubkey: pubkey, base_version: base_version, seq: seq,
+          hash: hash, pubkey: pubkey, base_revision: base_revision, seq: seq,
           target: target, ack: ack, payload: payload, signature: signature, received_at: now
         )
         :ok
@@ -249,9 +249,9 @@ module ReputableChat
       # Only the run that amends the attestation the caller actually holds.
       # An adjustment against an older snapshot has already been superseded by
       # the republish that followed it.
-      def adjustments_for(pubkey, base_version:, limit: 1_000)
+      def adjustments_for(pubkey, base_revision:, limit: 1_000)
         @db[:adjustments]
-          .where(pubkey: pubkey, base_version: base_version)
+          .where(pubkey: pubkey, base_revision: base_revision)
           .order(:seq).limit(limit).all
       end
 
@@ -276,11 +276,11 @@ module ReputableChat
 
       def private_config(pubkey) = @db[:private_configs].where(pubkey: pubkey).first
 
-      def store_private_config(pubkey:, version:, payload:, signature:)
+      def store_private_config(pubkey:, revision:, payload:, signature:)
         existing = private_config(pubkey)
-        return :stale if existing && version <= existing[:version]
+        return :stale if existing && revision <= existing[:revision]
 
-        row = { pubkey: pubkey, version: version, payload: payload,
+        row = { pubkey: pubkey, revision: revision, payload: payload,
                 signature: signature, updated_at: now }
 
         if existing

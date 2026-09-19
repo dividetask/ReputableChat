@@ -155,16 +155,16 @@ export function messagePayload({ author, room, seq, prev, body, ack, ts, replyTo
   return { purpose: PURPOSE.MESSAGE, author, room, seq, prev, reply_to: replyTo, ack, ts, body };
 }
 
-export function configPayload({ pubkey, version, profile, ratings, ts }) {
-  return { purpose: PURPOSE.CONFIG, pubkey, version, profile, ratings, ts };
+export function configPayload({ pubkey, revision, profile, ratings, ts }) {
+  return { purpose: PURPOSE.CONFIG, pubkey, revision, profile, ratings, ts };
 }
 
 export function emotePayload({ author, room, message, emote, ack, ts }) {
   return { purpose: PURPOSE.EMOTE, author, room, message, emote, ack, ts };
 }
 
-export function privateConfigPayload({ pubkey, version, settings, voted, ts }) {
-  return { purpose: PURPOSE.PRIVATE_CONFIG, pubkey, version, settings, voted, ts };
+export function privateConfigPayload({ pubkey, revision, settings, voted, ts }) {
+  return { purpose: PURPOSE.PRIVATE_CONFIG, pubkey, revision, settings, voted, ts };
 }
 
 // `master_pubkey` and `previous_pubkey` are placeholders for key rotation and
@@ -172,11 +172,11 @@ export function privateConfigPayload({ pubkey, version, settings, voted, ts }) {
 // adding a field later changes the canonical bytes of every record, which
 // invalidates every signature ever made.
 export function userPayload({
-  pubkey, version, handle, bio, icon, ack, ts,
+  pubkey, revision, handle, bio, icon, ack, ts,
   masterPubkey = null, previousPubkey = null,
 }) {
   return {
-    purpose: PURPOSE.USER, pubkey, version, handle, bio, icon,
+    purpose: PURPOSE.USER, pubkey, revision, handle, bio, icon,
     master_pubkey: masterPubkey, previous_pubkey: previousPubkey, ack, ts,
   };
 }
@@ -186,19 +186,19 @@ export function userPayload({
 // `reputation > 0`, which binary floating point cannot be trusted to land on.
 // `derived` is a cache and carries the hash of the parameters it was computed
 // under, so a reader can tell whether the numbers mean anything to them.
-export function attestationPayload({ pubkey, version, scores, derived, ack, ts }) {
-  return { purpose: PURPOSE.ATTESTATION, pubkey, version, scores, derived, ack, ts };
+export function attestationPayload({ pubkey, revision, scores, derived, ack, ts }) {
+  return { purpose: PURPOSE.ATTESTATION, pubkey, revision, scores, derived, ack, ts };
 }
 
-export function adjustmentPayload({ pubkey, baseVersion, seq, target, reputation, trust, ack, ts }) {
+export function adjustmentPayload({ pubkey, baseRevision, seq, target, reputation, trust, ack, ts }) {
   return {
-    purpose: PURPOSE.ADJUSTMENT, pubkey, base_version: baseVersion, seq,
+    purpose: PURPOSE.ADJUSTMENT, pubkey, base_revision: baseRevision, seq,
     target, reputation, trust, ack, ts,
   };
 }
 
-export function releasePayload({ publisher, version, label, files, notes, ack, ts }) {
-  return { purpose: PURPOSE.RELEASE, publisher, version, label, files, notes, ack, ts };
+export function releasePayload({ publisher, revision, label, files, notes, ack, ts }) {
+  return { purpose: PURPOSE.RELEASE, publisher, revision, label, files, notes, ack, ts };
 }
 
 // Verifies a blob the server handed back against a public key.

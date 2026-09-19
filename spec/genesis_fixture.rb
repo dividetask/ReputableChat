@@ -25,7 +25,7 @@ module GenesisFixture
     pubkey  = Crypto::Signature.encode(signing.verify_key.to_bytes)
 
     payload = Crypto::Payload.user(
-      pubkey: pubkey, version: 1, handle: handle, bio: "", icon: nil,
+      pubkey: pubkey, revision: 1, handle: handle, bio: "", icon: nil,
       ack: nil, issued_at: Time.now.to_i
     )
     canonical = Crypto::Canonical.dump(payload)
