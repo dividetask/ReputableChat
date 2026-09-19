@@ -107,12 +107,66 @@ people looking at the same room will disagree about which references were
 legitimate, and there is no view from nowhere that settles it.
 
 This has a consequence worth stating plainly rather than discovering later:
-**records from new and low-reputation accounts are never acknowledged by
-anyone, so they never get anchored.** A troll's messages sit off to the side of
-the history, referenced by nothing, and disappear the moment the server stops
-serving them. That is not a gap in the design, it is the point of it — the
-chain is a structure the reputable part of the network builds for itself, and
-exclusion from it is the cost of being unvouched for.
+**records from new and low-reputation accounts are rarely acknowledged, so they
+mostly go unanchored.** A troll's messages sit off to the side of the history,
+referenced by nothing, and disappear the moment the server stops serving them.
+That is the point of it — the chain is a structure the reputable part of the
+network builds for itself, and exclusion from it is the cost of being
+unvouched for.
+
+### Exclusion is weaker than it looks
+
+"Never acknowledged" would be too strong a claim, and it is worth being honest
+about why.
+
+Acknowledgement is subjective, so it only takes **one** person who clears
+somebody else's bar and has poor judgement about what to acknowledge. If B can
+see a troll that A cannot, B may acknowledge the troll's message; if A then
+acknowledges B, the troll is transitively inside the history that A's own
+records hang from. Exclusion from the chain is therefore not a property of the
+network's collective judgement. It is a property of the **weakest acknowledger
+who clears anybody's bar**.
+
+What that buys the troll is limited, and worth naming precisely. Being anchored
+means being tamper-evident: the record can no longer be silently dropped
+without leaving a gap. It buys no visibility — A still never renders the
+message — no reputation, and no reach. A troll gets durable timestamping and
+nothing else.
+
+There is no lever against it either. A trust multiplier governs what somebody's
+recommendations are worth, not what they acknowledge, so "B is careless about
+what they anchor" is not currently expressible. That is a fair gap to leave
+open while the only harm is timestamping.
+
+The alternative — refusing to acknowledge B because of what B acknowledged —
+is worse. It means walking B's ancestry before every post, and it fragments the
+DAG: everyone's chain diverges according to their own visibility, and a shared
+history stops being shared.
+
+### Walking the chain is reputation-blind
+
+The above only stays harmless because of a rule that is easy to violate by
+accident:
+
+**Chain traversal ignores reputation entirely. Only rendering is filtered.**
+
+Every record is content-addressed and independently signed, so a viewer can
+fetch and verify a record whose author they would never display — the server
+has no opinion about who can see whom, and a signature verifies without
+trusting the signer. That is what keeps the walk back to the genesis intact
+across a link through somebody hidden.
+
+If a client ever gates *hash resolution* on visibility rather than gating
+display, the walk stops at the first record it will not show, and the chain
+genuinely does break from that viewer's perspective — not because the structure
+is wrong, but because the client refused to look. Filter at the point of
+rendering, never at the point of fetching.
+
+The cost is that a viewer's ancestry is not confined to people they can see. A
+full verification back to the genesis pulls in records from strangers, blocked
+accounts and trolls alike, because all of them may sit on the path. Anyone
+trading completeness for bandwidth is choosing how far back tamper-evidence
+actually reaches.
 
 The server does not check any of this. It cannot: it never computes a
 reputation, so it has no opinion about whether an `ack` was well chosen. It
@@ -251,6 +305,13 @@ repository.
 **Tim is the only publisher for now.** The record carries `publisher` so that a
 per-user trusted-developer setting can arrive later without re-signing
 anything, but nothing today consults it.
+
+### Not built: fetching a record by hash
+
+There is no route that resolves a record hash to its record. Messages are
+served per room, and `ack` names records that may be in another room, another
+kind, or from somebody the viewer never fetched. Walking the chain at all needs
+`GET` by hash, and it has to serve any record to anyone, for the reason above.
 
 ### Not built: actually loading one
 
