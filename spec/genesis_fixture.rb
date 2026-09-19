@@ -20,7 +20,7 @@ module GenesisFixture
 
   module_function
 
-  def build(handle: "Tom")
+  def build(handle: "Tim")
     signing = Ed25519::SigningKey.generate
     pubkey  = Crypto::Signature.encode(signing.verify_key.to_bytes)
 

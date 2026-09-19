@@ -77,7 +77,7 @@ reputation bar, which is subjective and which no server can check. New and
 low-reputation accounts therefore go unacknowledged and unanchored — that is
 the point of it, not a gap in it.
 
-Tom's user record is the genesis. Generate it once with `bundle exec rake
+Tim's user record is the genesis. Generate it once with `bundle exec rake
 genesis` and commit it; every client needs the same hash before it has fetched
 anything, so it cannot be downloaded.
 

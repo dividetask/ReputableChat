@@ -33,7 +33,7 @@ module ReputableChat
       end
 
       # Who somebody is. The genesis record is one of these with every optional
-      # field null -- see config/genesis/tom.json.
+      # field null -- see config/genesis/tim.json.
       #
       # `master_pubkey` and `previous_pubkey` are placeholders for key rotation
       # and are always null for now. They are in the signed shape from the

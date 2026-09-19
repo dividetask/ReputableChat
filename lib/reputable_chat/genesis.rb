@@ -5,7 +5,7 @@ require_relative "cryptography/record"
 require_relative "cryptography/signature"
 
 module ReputableChat
-  # The bottom of the chain: Tom's user record.
+  # The bottom of the chain: Tim's user record.
   #
   # Every record that has seen nothing else acknowledges this one, and it is the
   # only record whose own `ack` is null. It is also the only record stored as a
@@ -15,7 +15,7 @@ module ReputableChat
   #
   # Generated once by script/generate_genesis.rb and committed.
   class Genesis
-    PATH = File.expand_path("../../config/genesis/tom.json", __dir__)
+    PATH = File.expand_path("../../config/genesis/tim.json", __dir__)
 
     class Missing < StandardError; end
     class Corrupt < StandardError; end

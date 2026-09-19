@@ -65,11 +65,11 @@ system, which addresses image and asset bytes directly.
 
 ## Genesis
 
-Tom's user record is the bottom of the chain. It is the only record whose `ack`
-is null; every record that has seen nothing else acknowledges Tom.
+Tim's user record is the bottom of the chain. It is the only record whose `ack`
+is null; every record that has seen nothing else acknowledges Tim.
 
 It is generated once by `script/generate_genesis.mjs` and committed to
-`config/genesis/tom.json`. That file is the only record stored as a file, and it
+`config/genesis/tim.json`. That file is the only record stored as a file, and it
 is stored as one because every client needs to agree on the hash before it has
 fetched anything — a genesis you have to download from the server is not a
 genesis.
@@ -201,7 +201,7 @@ A release record pins a version of the client:
 
 ```json
 { "purpose":   "reputablechat:release:v1",
-  "publisher": "<Tom's pubkey>",
+  "publisher": "<Tim's pubkey>",
   "version":   12,
   "label":     "0.4.0",
   "files":     { "index.html": "<64 hex>", "js/app.js": "<64 hex>" },
@@ -225,7 +225,7 @@ is the whole point; the version history is a pleasant side effect.
 Releases are cut when one is published, not per commit. The chain is not the
 repository.
 
-**Tom is the only publisher for now.** The record carries `publisher` so that a
+**Tim is the only publisher for now.** The record carries `publisher` so that a
 per-user trusted-developer setting can arrive later without re-signing
 anything, but nothing today consults it.
 

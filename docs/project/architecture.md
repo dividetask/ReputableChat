@@ -166,7 +166,7 @@ fixtures and compares the bytes, and is the thing that catches that.
 ## Layout
 
 ```
-config/genesis/tom.json   the genesis user record; the chain hangs off its hash
+config/genesis/tim.json   the genesis user record; the chain hangs off its hash
 config/server.yml         origin, database and image paths (env overrides)
 config/reputation.yml     tunable reputation parameters (the defaults layer)
 config/emotes.yml         which emotes count positive, negative, neutral

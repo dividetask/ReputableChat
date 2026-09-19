@@ -47,7 +47,7 @@ See [docs/project/reputation.md](docs/project/reputation.md) and
   and so must `reputation/fingerprint.rb` and `public/js/fingerprint.js`. If they
   drift, every `ack` points at a record the other side cannot find and no
   reference resolves. `spec/record_parity_spec.rb` guards both.
-- **The genesis record.** `config/genesis/tom.json` is the bottom of the chain.
+- **The genesis record.** `config/genesis/tim.json` is the bottom of the chain.
   Regenerating it orphans every record that acknowledged the old one, which is
   the whole chain. `script/generate_genesis.rb` refuses to overwrite it.
 - **The seed derivation domain.** Changing `seed.kdf.domain` in

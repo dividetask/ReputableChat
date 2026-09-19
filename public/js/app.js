@@ -32,7 +32,7 @@ const touch = () => { state.renderEpoch += 1; };
 
 // The record this client will name as the last thing it saw. `tip` is the most
 // recent record whose author cleared the bar; with nothing yet seen it is the
-// genesis, which is why Tom exists.
+// genesis, which is why Tim exists.
 function currentAck() {
   return state.tip || state.genesis.hash;
 }

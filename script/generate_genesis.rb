@@ -1,10 +1,10 @@
 # frozen_string_literal: true
 
-# Generates the genesis user record -- Tom's -- and writes it to
-# config/genesis/tom.json for committing.
+# Generates the genesis user record -- Tim's -- and writes it to
+# config/genesis/tim.json for committing.
 #
 #   bundle exec rake genesis
-#   bundle exec ruby script/generate_genesis.rb --handle Tom --words 12
+#   bundle exec ruby script/generate_genesis.rb --handle Tim --words 12
 #
 # Prints the seed phrase and the private key to the terminal ONCE and writes
 # neither anywhere. There is no recovery: lose them and the publisher identity
@@ -20,6 +20,7 @@ require "open3"
 require "securerandom"
 require "fileutils"
 require "reputable_chat/config"
+require "reputable_chat/params"
 require "reputable_chat/cryptography/seed"
 require "reputable_chat/cryptography/canonical"
 require "reputable_chat/cryptography/payload"
@@ -135,7 +136,10 @@ module GenerateGenesis
 
   # --- options ----------------------------------------------------------
 
-  DEFAULTS = { handle: "Tom", bio: "", words: 12, path: ReputableChat::Genesis::PATH }.freeze
+  DEFAULT_BIO = "Tim is legally distinct from, and no relation to, Tom"
+
+  DEFAULTS = { handle: "Tim", bio: DEFAULT_BIO, words: 12,
+               path: ReputableChat::Genesis::PATH }.freeze
 
   def parse(argv)
     options = DEFAULTS.dup
@@ -156,10 +160,22 @@ module GenerateGenesis
     options
   end
 
+  # Checked through the same helpers every other profile goes through. The
+  # genesis is written once and can never be reissued without orphaning the
+  # chain, so a handle or bio the rest of the system would reject has to be
+  # caught here rather than discovered later.
   def validate_options!(options)
     minimum = ReputableChat::Config.load.integer("seed.min_words")
     abort "a seed needs at least #{minimum} words" if options[:words] < minimum
-    abort "a handle is required" if options[:handle].strip.empty?
+
+    unless ReputableChat::Params.string(options[:handle], max: ReputableChat::Params::MAX_USERNAME)
+      abort "a handle is required, at most #{ReputableChat::Params::MAX_USERNAME} bytes and no control characters"
+    end
+
+    return if options[:bio].empty?
+    return if ReputableChat::Params.string(options[:bio], max: ReputableChat::Params::MAX_BIO)
+
+    abort "a bio is at most #{ReputableChat::Params::MAX_BIO} bytes and has no control characters"
   end
 
   # Overwriting would orphan every record that acknowledges the old genesis,
@@ -180,11 +196,12 @@ module GenerateGenesis
     <<~TEXT
       usage: bundle exec ruby script/generate_genesis.rb [options]
 
-        --handle NAME   display handle for the genesis account (default: Tom)
-        --bio TEXT      bio for the genesis account (default: empty)
+        --handle NAME   display handle for the genesis account (default: Tim)
+        --bio TEXT      bio for the genesis account
+                        (default: "#{DEFAULT_BIO}")
         --words N       seed length; more than the 8-word minimum, since this
                         key signs releases (default: 12)
-        --path FILE     where to write (default: config/genesis/tom.json)
+        --path FILE     where to write (default: config/genesis/tim.json)
     TEXT
   end
 end
