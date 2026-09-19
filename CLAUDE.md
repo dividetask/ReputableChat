@@ -28,9 +28,13 @@ bundle exec rake spec       # full suite
 bundle exec rake curve      # print current curve, ladder and safety window
 bundle exec rake dump       # readable dump of the database
 bundle exec rake "dump[messages,reactions]"   # just those sections
+
+bin/bot personas/regular.yml --explain       # what a bot persona implies
+bin/bot personas/regular.yml --name ana      # run one
 ```
 
-See [docs/project/reputation.md](docs/project/reputation.md).
+See [docs/project/reputation.md](docs/project/reputation.md) and
+[docs/project/bots.md](docs/project/bots.md).
 
 ## Things that break silently
 
@@ -41,6 +45,13 @@ See [docs/project/reputation.md](docs/project/reputation.md).
   either file.
 - **Signed payload shapes.** `cryptography/payload.rb` and the `*Payload` helpers in
   `public/js/identity.js` must stay in lockstep for the same reason.
+- **Key derivation for bots.** `tools/argon2-derive.mjs` derives a bot's key by
+  loading the same vendored hash-wasm the browser loads, so a bot account is
+  the browser's account by construction. If it ever stops agreeing, every bot
+  silently becomes a different account with no error anywhere.
+  `spec/bot_identity_spec.rb` runs the browser's own `deriveFromSeed` under
+  node and compares.
+
 - **The seed derivation domain.** Changing `seed.kdf.domain` in
   `config/reputation.yml` changes every derived key, which strands every
   existing account. It is versioned (`:v1`) so a future change can be handled

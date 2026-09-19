@@ -1,0 +1,100 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# One bot, one process. Run as many as you need:
+#
+#   bin/bot personas/regular.yml --name ana
+#   bin/bot personas/scammer.yml --name scam-01 --server https://chat.example
+#
+# A persona file can back any number of instances; --name is what separates
+# their accounts and their state.
+
+$LOAD_PATH.unshift File.expand_path("../lib", __dir__)
+
+require "optparse"
+require "reputable_chat/bot/persona"
+require "reputable_chat/bot/runner"
+
+options = {
+  server: ENV.fetch("BOT_SERVER", "http://localhost:9292"),
+  origin: ENV["BOT_ORIGIN"],
+  state_dir: ENV.fetch("BOT_STATE_DIR", "data/bots"),
+  name: nil, visits: nil, seed: nil, explain: false, speed: 1.0
+}
+
+parser = OptionParser.new do |opts|
+  opts.banner = "Usage: bin/bot PERSONA.yml [options]"
+
+  opts.on("--name NAME", "Instance name; one persona can back many bots") { |v| options[:name] = v }
+  opts.on("--server URL", "Where to reach the server (default #{options[:server]})") { |v| options[:server] = v }
+  opts.on("--origin URL", "Origin to sign; must match the server's configured origin") { |v| options[:origin] = v }
+  opts.on("--state DIR", "Where account state lives (default #{options[:state_dir]})") { |v| options[:state_dir] = v }
+  opts.on("--visits N", Integer, "Stop after N visits") { |v| options[:visits] = v }
+  opts.on("--once", "A single visit, starting now") { options[:visits] = 1 }
+  opts.on("--seed N", Integer, "Fix the RNG, for a reproducible run") { |v| options[:seed] = v }
+  opts.on("--speed N", Float, "Run the clock N times faster (60 = a week in under 3 hours)") do |v|
+    options[:speed] = v
+  end
+  opts.on("--explain", "Print the schedule this persona implies and exit") { options[:explain] = true }
+  opts.on("-h", "--help") { puts opts; exit }
+end
+parser.parse!
+
+path = ARGV.shift
+unless path
+  warn parser
+  exit 1
+end
+
+log = lambda do |message|
+  puts "[#{Time.now.strftime('%H:%M:%S')}] #{message}"
+  $stdout.flush
+end
+
+begin
+  persona = ReputableChat::Bot::Persona.load(path)
+rescue ReputableChat::Bot::Persona::Invalid, ReputableChat::Bot::Schedule::Invalid => e
+  warn "#{path}: #{e.message}"
+  exit 1
+end
+
+name   = options[:name] || File.basename(path, ".*")
+random = options[:seed] ? Random.new(options[:seed]) : Random.new
+
+if options[:explain]
+  schedule = persona.schedule(random: random)
+  puts "#{name} (#{persona.brain} brain, room ##{persona.room})"
+  puts "  #{schedule.summary}"
+  puts format("  ~%.1f posts/week, ~%.1f reactions/week, %.0f%% of posts are replies",
+              schedule.posts_per_week, schedule.reactions_per_week, persona.reply_ratio * 100)
+  puts "  recycles every ~#{persona.recycle_after_days} days" if persona.recycles?
+  exit
+end
+
+state = ReputableChat::Bot::State.load(
+  File.join(options[:state_dir], "#{name}.json"), name: name
+)
+
+client = ReputableChat::Bot::Client.new(
+  base_url: options[:server], origin: options[:origin] || options[:server], logger: log
+)
+
+runner = ReputableChat::Bot::Runner.new(
+  persona: persona, name: name, state: state, client: client, logger: log,
+  random: random, speed: options[:speed]
+)
+
+begin
+  # A capped run is someone watching it work; arriving hours from now is
+  # correct behaviour and useless in a smoke test.
+  runner.run(visits: options[:visits], wait_first: options[:visits].nil?)
+rescue Interrupt
+  log.call("#{name}: stopped")
+rescue ReputableChat::Bot::Identity::DerivationFailed => e
+  warn "#{name}: #{e.message}"
+  warn "The key derivation needs node on PATH (or BOT_NODE=/path/to/node)."
+  exit 1
+rescue ReputableChat::Bot::Client::Error => e
+  warn "#{name}: #{e.message}"
+  exit 1
+end

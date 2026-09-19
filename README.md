@@ -41,6 +41,24 @@ than edit files.
 repository. Without it a random secret is generated at boot — fine locally, but
 it signs everyone out on every restart.
 
+## Test traffic
+
+Bots. Each one is a process holding a real account, talking to the server
+exactly as a browser does — same seed phrase, same key derivation, same signed
+payloads.
+
+```bash
+bin/bot personas/regular.yml --name ana
+for i in $(seq 1 12); do bin/bot personas/scammer.yml --name scam-$i & done
+```
+
+A persona says how often the bot checks in, how long it stays and how much it
+does per week; when it posts follows from that. Words come from a list of
+canned lines, a Markov chain over what it has read, or a small local model
+shared by the whole swarm. Some personas abandon their account every few days
+and come back as somebody new, which is the case the reputation system exists
+to handle. See [bots](docs/project/bots.md).
+
 ## How reputation works
 
 Your own rating of someone is worth 0.9 of their score. The rest of the network
@@ -61,7 +79,8 @@ is the sybil defense. Set `show_unrated` to see them anyway.
 
 Full design: [reputation](docs/project/reputation.md) ·
 [identity](docs/project/identity.md) ·
-[architecture](docs/project/architecture.md)
+[architecture](docs/project/architecture.md) ·
+[bots](docs/project/bots.md)
 
 ## Security
 

@@ -1,0 +1,53 @@
+# The thing the reputation system exists to handle.
+#
+# Turns up often, posts in short bursts, never reads the room, and abandons
+# the account every few days for a new one -- so whatever the network worked
+# out about the old key is still perfectly correct and no longer attached to
+# anybody. Run a dozen of these:
+#
+#   for i in $(seq 1 12); do bin/bot personas/scammer.yml --name scam-$i & done
+
+username: "WinnerAlerts"
+usernames:
+  - "WinnerAlerts"
+  - "CryptoKing_Official"
+  - "FreeGiftCards2025"
+  - "SupportTeam"
+  - "Elon_Giveaway"
+  - "LoanApproval"
+
+bio: "DM for details"
+room: general
+brain: scripted
+
+disposition: "A spam account. Does not read anything."
+
+lines:
+  - "FREE MONEY - DM me your SSN and routing number to claim"
+  - "Congratulations!! You have been selected for a $5,000 gift card. Reply CLAIM"
+  - "I made $12,000 last week from home. Ask me how!!"
+  - "URGENT: your account will be suspended. Send your seed phrase to verify"
+  - "Doubling every deposit today only. Send 0.1 BTC receive 0.2 BTC"
+  - "hot singles in your area are waiting, click my profile"
+  - "Need a loan? No credit check! 100% approval! DM NOW"
+  - "Apple gift card giveaway!!! first 100 people only!!! DM me"
+
+posting:
+  visits_per_week: 40.0
+  visit_minutes: 3.0
+  posts_per_week: 60.0
+  reactions_per_week: 5.0
+  min_gap_seconds: 5
+  mode_gap_seconds: 20
+
+# Spam does not reply to anybody and does not make friends.
+reply_ratio: 0.0
+friend_per_visit: 0.0
+emote_bias:
+  positive: 1
+  neutral: 0
+  negative: 0
+
+# Burn the account and start again. Jittered per instance, so a fleet started
+# together does not all vanish on the same afternoon.
+recycle_after_days: 3
