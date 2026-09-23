@@ -226,6 +226,7 @@ fixtures and compares the bytes, and is the thing that catches that.
 
 ```
 config/genesis/<env>.json the genesis identity declaration; the chain hangs off its hash
+config/host/<env>.json    this server's host account, acknowledging the genesis (optional)
 config/server.yml         origin, database and image paths, size limits (env overrides)
 config/reputation.yml     tunable reputation parameters (the defaults layer)
 config/emotes.yml         which emotes count positive, negative, neutral
@@ -236,9 +237,11 @@ lib/reputable_chat/
   server_config.rb        config/server.yml, with env winning
   config.rb               three-layer config resolution
   params.rb               input validation
+  committed_declaration.rb  what the genesis and host records share: loading, checks, icon
   genesis.rb              loads and verifies the committed genesis record
+  host.rb                 loads and verifies the host account, which must ack the genesis
   dump.rb                 readable view of the database for an operator
-  operator.rb             the genesis account's seed file, and signing from a terminal
+  operator.rb             the genesis and host accounts' seed files, and signing from a terminal
   cryptography/           canonical, payload, record, signature, seed, vault
   reputation/             curve, ladder, rating, score, engine, session, fingerprint
   store/                  database (Sequel), images (content-addressed), memory

@@ -4,6 +4,7 @@ require "ed25519"
 require "json"
 require "tmpdir"
 require "reputable_chat/genesis"
+require "reputable_chat/host"
 require "reputable_chat/cryptography/canonical"
 require "reputable_chat/cryptography/payload"
 require "reputable_chat/cryptography/record"
@@ -35,6 +36,27 @@ module GenesisFixture
       "pubkey" => pubkey, "payload" => canonical, "signature" => signature,
       "hash" => Crypto::Record.digest(payload: canonical, signature: signature)
     })
+  end
+
+  # A host account acknowledging `genesis`, or whatever `ack` says instead.
+  # `host_record` is the raw hash, for the paths that must see a check refuse it.
+  def host_record(genesis:, ack: genesis.hash, handle: "Host")
+    signing = Ed25519::SigningKey.generate
+    pubkey  = Crypto::Signature.encode(signing.verify_key.to_bytes)
+
+    payload = Crypto::Payload.identity(
+      pubkey: pubkey, revision: 1, handle: handle, bio: "", icon: nil,
+      ack: ack, issued_at: Time.now.to_i
+    )
+    canonical = Crypto::Canonical.dump(payload)
+    signature = Crypto::Signature.encode(signing.sign(canonical.b))
+
+    { "pubkey" => pubkey, "payload" => canonical, "signature" => signature,
+      "hash" => Crypto::Record.digest(payload: canonical, signature: signature) }
+  end
+
+  def build_host(genesis:, **kwargs)
+    ReputableChat::Host.new(host_record(genesis: genesis, **kwargs), genesis: genesis)
   end
 
   # Writes one to disk, for the paths that load rather than receive it.

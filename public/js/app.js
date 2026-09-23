@@ -7,7 +7,7 @@ import * as identity from "./identity.js";
 import { Reputation, Graph, toNumber, toFixed, toDecimal } from "./reputation.js";
 import * as fingerprintOf from "./fingerprint.js";
 import { Session } from "./session.js";
-import { initialRatings, genesisProfile } from "./defaults.js";
+import { initialRatings, declarationProfile } from "./defaults.js";
 import * as vault from "./vault.js";
 import * as names from "./names.js";
 
@@ -27,7 +27,7 @@ const state = {
   seq: 0, voted: new Set(), viewing: null, settings: {}, vaultRevision: 0,
   vaultDirty: false,
   reactions: new Map(), recentlyBlocked: new Map(), replyingTo: null,
-  genesis: null, tip: null, newFriends: {}, limits: null,
+  genesis: null, host: null, tip: null, newFriends: {}, limits: null,
   seen: [], friendList: [], names: {},
   renderEpoch: 0, renderedKey: null, pendingRegistration: false,
 };
@@ -42,6 +42,14 @@ const touch = () => { state.renderEpoch += 1; };
 // genesis, which is why Tim exists.
 function currentAck() {
   return state.tip || state.genesis.hash;
+}
+
+// The genesis account's committed declaration or this server's host
+// account's, whichever `pubkey` belongs to. Both are in hand before anything
+// has been fetched, which is what lets the default friends have a name and a
+// face on the account creation screen.
+function committedFor(pubkey) {
+  return [state.genesis, state.host].find((record) => record && record.pubkey === pubkey) || null;
 }
 
 // The bar is the viewer's own, read through the viewer's own config, so two
@@ -371,18 +379,20 @@ async function signIn(derived, { restoring = false } = {}) {
 // still a perfectly good thing to write down. That is what makes it possible
 // to choose here, before the account being created has said anything.
 
-// Before login there are no fetched profiles, so the only name available is the
-// genesis account's, out of the declaration already in hand.
+// Before login there are no fetched profiles, so the only names available are
+// the default friends', out of the declarations already in hand.
 function newAccountName(pubkey) {
-  if (state.genesis && pubkey === state.genesis.pubkey) {
-    return genesisProfile(state.genesis)?.handle || "the genesis account";
-  }
-  return "unknown";
+  const record = committedFor(pubkey);
+  if (!record) return "unknown";
+
+  const fallback = record === state.genesis ? "the genesis account" : "this server's account";
+  return declarationProfile(record)?.handle || fallback;
 }
 
 function resetNewFriends() {
   state.newFriends = initialRatings({
     genesisPubkey: state.genesis?.pubkey,
+    hostPubkey: state.host?.pubkey,
     ownPubkey: state.me?.pubkey,
   });
   renderNewFriends();
@@ -423,11 +433,11 @@ function renderNewFriends() {
   }
 }
 
-// Removing the genesis account here is the one choice on this screen with a
+// Removing a default friend here is the one choice on this screen with a
 // consequence somebody might not have in mind, so it is the one that asks.
 // Removing a key pasted in ten seconds ago is not worth a dialog.
 async function removeNewFriend(pubkey) {
-  if (state.genesis && pubkey === state.genesis.pubkey) {
+  if (committedFor(pubkey)) {
     const sure = await confirmAction(
       `Start without ${newAccountName(pubkey)}? Nothing it vouches for will reach ` +
       "you, and accounts nobody else has vouched for will be invisible. You can " +
@@ -658,11 +668,13 @@ async function loadNetwork() {
   state.graph.add(state.me.pubkey, state.ratings);
   state.profiles = new Map([[state.me.pubkey, state.profile]]);
 
-  // The genesis account has no declaration to fetch -- its declaration is the
-  // genesis record itself -- so its name comes from the copy already in hand.
-  // Seeded before the walk, so one it has published since wins over it.
-  const genesis = genesisProfile(state.genesis);
-  if (genesis) state.profiles.set(state.genesis.pubkey, genesis);
+  // The default friends' first declarations are committed files rather than
+  // published records, so their names come from the copies already in hand.
+  // Seeded before the walk, so one they have published since wins over it.
+  for (const record of [state.genesis, state.host]) {
+    const profile = declarationProfile(record);
+    if (profile) state.profiles.set(record.pubkey, profile);
+  }
 
   let frontier = [state.me.pubkey];
   const seen = new Set(frontier);
@@ -919,19 +931,17 @@ function blockedStub(message) {
 // Names are not unique, so an avatar derived from the key gives every person a
 // stable look even before they upload one. Same key, same colour, always.
 // Where an icon comes from, in order: a declaration fetched during the walk,
-// then the genesis declaration the client holds before it has fetched anything.
+// then the committed declaration of a default friend, which the client holds
+// before it has fetched anything.
 //
-// The second is why the genesis account has a face on the account creation
-// screen, where no config has been fetched and none can be -- the account
+// The second is why the default friends have faces on the account creation
+// screen, where nothing has been fetched and nothing can be -- the account
 // doing the looking does not exist yet.
 function iconFor(pubkey) {
   const known = state.profiles?.get(pubkey)?.icon;
   if (known) return known;
 
-  if (state.genesis && pubkey === state.genesis.pubkey) {
-    return genesisProfile(state.genesis)?.icon || null;
-  }
-  return null;
+  return declarationProfile(committedFor(pubkey))?.icon || null;
 }
 
 function avatarFor(pubkey, extra = "", icon = iconFor(pubkey)) {
@@ -1340,7 +1350,7 @@ function showProfile(pubkey) {
     renderRelations();
   } else {
     // iconFor rather than the fetched profile's icon, so an account with no
-    // config to fetch -- the genesis -- still has a face here.
+    // declaration to fetch -- a default friend -- still has a face here.
     $("profile-icon").replaceChildren(avatarFor(pubkey, "avatar-large"));
     $("profile-name").textContent = profile.handle || "someone";
     $("profile-fp").textContent = fingerprint(pubkey);
@@ -1703,9 +1713,12 @@ async function saveProfile() {
 // --- boot ---------------------------------------------------------------
 
 async function boot() {
-  [state.config, state.emotes, state.genesis, state.limits] = await Promise.all([
-    api("/api/defaults"), api("/api/emotes"), api("/api/genesis"), api("/api/limits"),
+  let host;
+  [state.config, state.emotes, state.genesis, host, state.limits] = await Promise.all([
+    api("/api/defaults"), api("/api/emotes"), api("/api/genesis"), api("/api/host"),
+    api("/api/limits"),
   ]);
+  state.host = host.host;
   state.reputation = buildReputation();
   await seed.loadWordlist();
 

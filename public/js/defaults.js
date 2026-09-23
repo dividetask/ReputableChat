@@ -1,7 +1,8 @@
 // What a client knows before it has fetched anything, and what a brand new
 // identity declares about the world.
 
-// The genesis account starts as everybody's friend.
+// The genesis account starts as everybody's friend, and so does this server's
+// host account when it has one -- two default friends, or one.
 //
 // It has to, or nothing works: an unrated account sits at exactly zero and is
 // invisible to everyone, so a network where nobody has vouched for anybody has
@@ -20,33 +21,35 @@
 // And it is seeded ONCE, when the identity is created. Re-adding it whenever
 // it is missing would mean removing it never took, which is the same thing as
 // not being able to remove it.
-export function initialRatings({ genesisPubkey, ownPubkey }) {
-  // The genesis account does not vouch for itself. Nobody contributes to their
-  // own score anywhere else either.
-  if (!genesisPubkey || genesisPubkey === ownPubkey) return {};
+export function initialRatings({ genesisPubkey, hostPubkey, ownPubkey }) {
+  const ratings = {};
 
-  return {
-    [genesisPubkey]: { friend: true, reported: false, net_votes: 0, cleared: false },
-  };
+  // Neither account vouches for itself. Nobody contributes to their own
+  // reputation anywhere else either.
+  for (const pubkey of [genesisPubkey, hostPubkey]) {
+    if (!pubkey || pubkey === ownPubkey) continue;
+    ratings[pubkey] = { friend: true, reported: false, net_votes: 0, cleared: false };
+  }
+  return ratings;
 }
 
-// The genesis account's handle, read out of the declaration the client already
-// holds at boot.
+// A default friend's handle, bio and icon, read out of the committed
+// declaration the client already holds at boot -- the genesis account's or the
+// host account's.
 //
-// Every other name comes from a fetched config, and the genesis has none to
-// fetch -- it has an identity declaration, which is the thing a config is being
-// replaced by. Without this the one account everybody trusts by default is the
-// one account nobody can see the name of, which is how it ended up rendering as
-// "someone" in the friend list.
+// Every other name comes from a fetched identity declaration, and these two
+// are committed files rather than published records. Without this the
+// accounts everybody trusts by default are the ones nobody can see the name
+// of, which is how the genesis once rendered as "someone" in the friend list.
 //
 // Returns the same shape a fetched identity declaration yields, so nothing
 // downstream has to know where a profile came from.
-export function genesisProfile(genesis) {
-  if (!genesis?.payload) return null;
+export function declarationProfile(record) {
+  if (!record?.payload) return null;
 
   let declaration;
   try {
-    declaration = JSON.parse(genesis.payload);
+    declaration = JSON.parse(record.payload);
   } catch {
     return null;
   }

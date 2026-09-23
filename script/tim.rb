@@ -1,13 +1,19 @@
 # frozen_string_literal: true
 
-# The genesis account, driven from a terminal.
+# The genesis account or the host account, driven from a terminal.
 #
 #   bundle exec ruby script/tim.rb status
-#   bundle exec ruby script/tim.rb post "Planned outage 02:00-03:00 UTC on Friday"
+#   bundle exec ruby script/tim.rb --host post "Planned outage 02:00-03:00 UTC on Friday"
 #   bundle exec ruby script/tim.rb friend <pubkey>
-#   bundle exec ruby script/tim.rb visible <pubkey>
+#   bundle exec ruby script/tim.rb --host visible <pubkey>
 #
-# Reads the seed written by `rake genesis` (config/genesis/seed, gitignored),
+# Signs as the genesis account (the developer's) by default, and as this
+# server's host account with --host. Nothing enforces who signs what, but by
+# convention the genesis account signs what covers the whole network -- releases
+# and the rules -- and the host account signs what concerns one server, such as
+# an outage.
+#
+# Reads the seed written by `rake genesis` or `rake host`,
 # derives the same key the browser would from the same phrase, and talks to a
 # running server over the ordinary API. Nothing here is a back door: every
 # request is signed and the server verifies it exactly as it verifies a
@@ -16,8 +22,8 @@
 # `visible` is the useful one for a new network. An unrated account sits at
 # exactly zero and is therefore invisible to everyone -- that is the sybil
 # defense, and it also means nobody can get started. One positive rating from
-# the genesis account is enough to lift somebody over the line for anyone who
-# rates the genesis account.
+# the account is enough to lift somebody over the line for anyone who rates
+# that account.
 
 $LOAD_PATH.unshift File.expand_path("../lib", __dir__)
 
@@ -26,6 +32,7 @@ require "net/http"
 require "uri"
 require "reputable_chat/config"
 require "reputable_chat/genesis"
+require "reputable_chat/host"
 require "reputable_chat/operator"
 require "reputable_chat/server_config"
 require "reputable_chat/cryptography/canonical"
@@ -74,8 +81,8 @@ module Tim
       self
     end
 
-    # A valid but unregistered key reaches here the first time the genesis
-    # account is used against a fresh database.
+    # A valid but unregistered key reaches here the first time the account is
+    # used against a fresh database.
     def register = post_json("/api/register", {})
 
     def sign(payload) = ReputableChat::Operator.sign(@private_key, payload)
@@ -130,23 +137,25 @@ module Tim
     else usage
     end
   rescue Failed, ReputableChat::Operator::MissingSeed, ReputableChat::Genesis::Missing,
-         Crypto::Seed::InvalidSeed => e
+         ReputableChat::Host::Missing, Crypto::Seed::InvalidSeed => e
     abort "  #{e.message}"
   end
 
   def status(options)
     client = connect(options)
-    declaration = own_identity(client)
+    declaration = own_identity(client, options)
     vault = own_vault(client)
     ratings = vault.fetch("ratings")
 
     puts
+    puts "  Account      #{options[:account] == :host ? 'host' : 'genesis'}"
     puts "  Handle       #{declaration['handle']}"
     puts "  Public key   #{client.pubkey}"
     puts "  Genesis      #{ReputableChat::Genesis.current.hash}"
+    puts "  Host         #{ReputableChat::Host.current&.hash || 'none on this server'}"
     puts "  Identity     revision #{declaration['revision']}"
     puts "  Attestation  revision #{attestation_revision(client)}, " \
-         "#{ratings.size} #{ratings.size == 1 ? 'score' : 'scores'}"
+         "#{ratings.size} #{ratings.size == 1 ? 'rating' : 'ratings'}"
     puts "  Vault        revision #{vault['revision']} (private: the server cannot read it)"
     puts
 
@@ -160,7 +169,7 @@ module Tim
     puts
   end
 
-  # An announcement from the genesis account: a planned outage, a new feature.
+  # A message from the account: a planned outage, a new feature.
   def post(options)
     body = options[:args].join(" ").strip
     abort "  nothing to post" if body.empty?
@@ -205,7 +214,7 @@ module Tim
     abort "  that is not a public key" unless ReputableChat::Params.pubkey(target)
 
     client = connect(options)
-    abort "  that is the genesis account's own key" if target == client.pubkey
+    abort "  that is this account's own key" if target == client.pubkey
 
     vault = own_vault(client)
     ratings = vault.fetch("ratings")
@@ -267,12 +276,12 @@ module Tim
 
   # --- the identity declaration --------------------------------------------
 
-  # Falls back to the genesis record, which is itself an identity declaration:
-  # the handle and bio the chain was created with are the ones the network sees
-  # rather than a placeholder that has to be corrected later.
-  def own_identity(client)
+  # Falls back to the committed record, which is itself an identity
+  # declaration: the handle and bio the account was created with are the ones
+  # the network sees rather than a placeholder that has to be corrected later.
+  def own_identity(client, options)
     blob = client.get_json("/api/identity/#{client.pubkey}")["identity"]
-    return JSON.parse(ReputableChat::Genesis.current.payload).merge("revision" => 0) if blob.nil?
+    return JSON.parse(committed(options).payload).merge("revision" => 0) if blob.nil?
 
     JSON.parse(blob["payload"])
   end
@@ -411,10 +420,10 @@ module Tim
       ReputableChat::Operator.seed_readable_by_others?(path: options[:seed_path])
 
     keys = ReputableChat::Operator.derive(phrase)
-    expected = ReputableChat::Genesis.current.pubkey
+    expected = committed(options).pubkey
     unless keys["pubkey"] == expected
-      abort "  the seed derives #{keys['pubkey']} but the committed genesis is #{expected}. " \
-            "Wrong seed file, or a changed seed.kdf.domain."
+      abort "  the seed derives #{keys['pubkey']} but the committed #{options[:account]} account is " \
+            "#{expected}. Wrong seed file, or a changed seed.kdf.domain."
     end
 
     # The raw Argon2id output IS the Ed25519 private key, and the vault key is
@@ -429,10 +438,18 @@ module Tim
                pubkey: keys["pubkey"], vault_key: vault_key).log_in
   end
 
+  # The committed record of whichever account this run signs as.
+  def committed(options)
+    return ReputableChat::Genesis.current unless options[:account] == :host
+
+    ReputableChat::Host.current or
+      raise ReputableChat::Host::Missing, ReputableChat::Host.missing_message(ReputableChat::Host.path)
+  end
+
   def parse(argv)
     settings = ReputableChat::ServerConfig.load
     options = { command: nil, args: [], room: ROOM, origin: settings.fetch("origin"),
-                url: nil, seed_path: ReputableChat::Operator.seed_path, note: nil }
+                url: nil, seed_path: nil, note: nil, account: :genesis }
 
     until argv.empty?
       flag = argv.shift
@@ -441,6 +458,7 @@ module Tim
       when "--origin" then options[:origin]    = argv.shift.to_s
       when "--url"    then options[:url]       = argv.shift.to_s
       when "--seed"   then options[:seed_path] = File.expand_path(argv.shift.to_s)
+      when "--host"   then options[:account]   = :host
       when "--note"   then options[:note]      = ReputableChat::Params.note(argv.shift)
       when "--help", "-h" then usage
       else options[:command] ? options[:args] << flag : options[:command] = flag
@@ -451,6 +469,7 @@ module Tim
     # They differ when the server is reached over a tunnel or on localhost
     # while configured with its public name.
     options[:url] ||= options[:origin]
+    options[:seed_path] ||= ReputableChat::Operator.seed_path(account: options[:account])
     options
   end
 
@@ -459,19 +478,22 @@ module Tim
 
       usage: bundle exec ruby script/tim.rb <command> [options]
 
-        status              who the genesis account is, and everyone it has rated
-        post <text>         post an announcement to a room
+        status              who the account is, and everyone it has rated
+        post <text>         send a message to a room
         friend <pubkey>     friend somebody
         visible <pubkey>    lift somebody to the least rating that makes them
                             visible, without claiming to know them
 
       options:
+        --host              sign as this server's host account rather than the
+                            genesis account
         --room NAME         room for `post` (default: #{ROOM})
         --note TEXT         free text signed into the record for anyone reading
                             the raw chain; the software never reads it
         --url URL           where to reach the server (default: the origin)
         --origin ORIGIN     the origin inside the signature (default: config/server.yml)
-        --seed FILE         seed file (default: config/genesis/seed)
+        --seed FILE         seed file (default: config/genesis/<env>.seed,
+                            or config/host/<env>.seed with --host)
 
     TEXT
     exit 0

@@ -11,6 +11,7 @@ require_relative "cryptography/canonical"
 require_relative "cryptography/payload"
 require_relative "cryptography/record"
 require_relative "genesis"
+require_relative "host"
 require_relative "store/database"
 require_relative "store/images"
 
@@ -70,7 +71,8 @@ module ReputableChat
     ALLOWED_EMOTES = EMOTES.values_at("positive", "negative", "neutral").compact.flatten.freeze
 
     class << self
-      attr_accessor :store, :images, :origin, :genesis
+      # `host` is nil when this server runs without a host account.
+      attr_accessor :store, :images, :origin, :genesis, :host
       attr_writer :limits
 
       # Defaulted rather than required, so a test or a script can build the app
@@ -82,6 +84,7 @@ module ReputableChat
     def images = self.class.images
     def origin = self.class.origin
     def genesis = self.class.genesis
+    def host = self.class.host
     def limits = self.class.limits
     def limit(name) = limits.fetch(name.to_s)
 
@@ -119,6 +122,9 @@ module ReputableChat
         # was built with against the one this server is running, rather than
         # discovering a mismatch as signatures that will not verify.
         r.get("genesis")  { genesis.to_h }
+        # This server's own account, or null. Served beside the genesis so a new
+        # account can start with both as friends before it has fetched anything else.
+        r.get("host")     { { "host" => host&.to_h } }
         r.post("session")   { open_session(r) }
         r.post("register")  { register(r) }
         r.post("image")     { upload_image(r) }

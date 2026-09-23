@@ -31,10 +31,15 @@ bundle exec rake dump       # readable dump of the database
 bundle exec rake "dump[messages,emotes]"      # just those sections
 bundle exec rake genesis    # development genesis (already committed)
 RACK_ENV=production bundle exec rake genesis   # production genesis (once, ever)
+bundle exec rake host       # development host account (already committed)
+RACK_ENV=production bundle exec rake host      # a server's production host account
+# Handle, bio and icon: run the script directly with --handle, --bio, --icon.
+bundle exec ruby script/generate_genesis.rb --host --production --handle Ops --icon ops.png
 
-# The genesis account from a terminal, against a running server.
+# The genesis account from a terminal, against a running server; --host signs
+# as the host account instead.
 bundle exec ruby script/tim.rb status             # uses this environment's seed
-bundle exec ruby script/tim.rb post "Planned outage 02:00-03:00 UTC on Friday"
+bundle exec ruby script/tim.rb --host post "Planned outage 02:00-03:00 UTC on Friday"
 bundle exec ruby script/tim.rb visible <pubkey>   # least rating that makes them visible
 bundle exec ruby script/tim.rb friend <pubkey>
 ```
@@ -63,16 +68,19 @@ inventing a word for something that already has one.
   the chain. Regenerating one orphans every record that acknowledged the old
   one, which is the whole chain. `script/generate_genesis.rb` refuses to
   overwrite either it or the seed beside it.
-- **Two genesis accounts, and only one is secret.**
-  `config/genesis/development.seed` is **committed on purpose** — that identity
-  is public, so a fresh clone can sign as the genesis account without being
-  handed a secret. `config/genesis/production.seed` is gitignored, 0600, and
-  never printed. `.gitignore` ignores every `*.seed` and then un-ignores
-  development's, so a new environment's seed is refused by default rather than
-  committed by omission.
-  A production deployment **refuses to boot on the development genesis**,
+- **Two accounts, two environments each, and only development's are public.**
+  The genesis account is the developer's; the host account
+  (`config/host/`) is a server's own, optional, and must acknowledge the
+  genesis. `config/genesis/development.seed` and `config/host/development.seed`
+  are **committed on purpose** — those identities are public, so a fresh clone
+  can sign as either without being handed a secret. Every other seed is
+  gitignored, 0600, and never printed. `.gitignore` ignores every `*.seed` in
+  both folders and then un-ignores development's, so a new environment's seed
+  is refused by default rather than committed by omission.
+  A production deployment **refuses to boot on either development account**,
   compared by key rather than by filename, because the realistic mistake is
-  copying the record into place rather than misnaming it.
+  copying the record into place rather than misnaming it. The production
+  genesis seed belongs with the developer, never on a server.
   Both hold the seed phrase rather than the derived key, so there is one secret
   to look after rather than two that must not disagree.
 - **The vault key.** `public/js/vault.js` derives it from the Argon2id output
@@ -106,7 +114,7 @@ inventing a word for something that already has one.
   are worse than comments, because they look live.
 - Tests name the **rule** they protect, not the method they call. A failing test
   should say what behaviour broke.
-- Reputation records carry **scores**, not the actions behind them. `friend`,
+- Reputation records carry **ratings**, not the actions behind them. `friend`,
   `reported` and `net_votes` live in the author's vault; the curve runs once,
   where it is authored. Anything published carries the parameter fingerprint it
   was computed under.

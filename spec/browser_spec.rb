@@ -56,10 +56,13 @@ class BrowserSpec < Minitest::Test
     assert_equal "Create Account", buttons.fetch("submit_label").strip
   end
 
-  # RULE: the genesis account is on the list before the account exists, named
-  # and with its face, from the declaration the client already holds.
-  def test_the_genesis_account_is_listed_with_its_name_and_face
-    assert_equal 1, seen.fetch("friend_rows_before_creating")
+  # RULE: the default friends are on the list before the account exists, named
+  # and, where they have one, with their faces, from the declarations the client
+  # already holds. Development runs a host account, so there are two: the
+  # genesis account and this server's host account.
+  def test_the_default_friends_are_listed_with_their_names_and_faces
+    assert_equal 2, seen.fetch("friend_rows_before_creating")
+    assert_equal "Host", seen.fetch("host_named")
     assert_equal "Tim", seen.fetch("genesis_named")
     assert seen.fetch("genesis_has_an_image"), "the genesis avatar must be its image, not a placeholder"
     assert_equal 43, seen.fetch("whole_key_shown").length, "the whole key must be shown"
@@ -67,7 +70,7 @@ class BrowserSpec < Minitest::Test
 
   # RULE: a pasted key still gets an avatar, so the list looks like one list.
   def test_an_added_key_gets_the_generated_placeholder
-    assert_equal 2, seen.fetch("friend_rows_after_adding")
+    assert_equal 3, seen.fetch("friend_rows_after_adding")
     assert seen.fetch("added_row_has_a_placeholder")
   end
 

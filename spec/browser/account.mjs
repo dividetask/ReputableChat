@@ -41,6 +41,7 @@ try {
   results.genesis_named = (await rows.first().locator(".name").textContent()).trim();
   results.genesis_has_an_image = await rows.first().locator("img.avatar").count() > 0;
   results.whole_key_shown = (await rows.first().locator(".pubkey").textContent()).trim();
+  results.host_named = (await rows.nth(1).locator(".name").textContent()).trim();
 
   // A pasted key gets the generated placeholder, so the list stays consistent.
   const invented = "z".repeat(43);
@@ -48,7 +49,7 @@ try {
   await page.click("#new-friend-add");
   results.friend_rows_after_adding = await rows.count();
   results.added_row_has_a_placeholder =
-    await rows.nth(1).locator("span.avatar.placeholder").count() > 0;
+    await rows.last().locator("span.avatar.placeholder").count() > 0;
 
   // --- creating the account ---------------------------------------------
   const phrase = await page.inputValue("#new-seed-words");

@@ -54,6 +54,27 @@ class DefaultsSpec < Minitest::Test
     assert_empty defaults.fetch("no_genesis")
   end
 
+  # RULE: a server with a host account gives a new identity two default
+  # friends, the genesis account and the host account. Both are ordinary
+  # friendships, removable like any other.
+  def test_a_server_with_a_host_account_seeds_both_default_friends
+    seeded = defaults.fetch("newcomer_with_host")
+
+    assert_equal [defaults.fetch("genesis_key"), defaults.fetch("host_key")].sort, seeded.keys.sort
+    seeded.each_value { |rating| assert rating.fetch("friend") }
+  end
+
+  # RULE: a host account is optional. Without one the genesis account is the
+  # only default friend.
+  def test_a_server_without_a_host_account_seeds_the_genesis_alone
+    assert_equal [defaults.fetch("genesis_key")], defaults.fetch("newcomer").keys
+  end
+
+  # RULE: the host account does not vouch for itself either.
+  def test_the_host_account_does_not_friend_itself
+    assert_equal [defaults.fetch("genesis_key")], defaults.fetch("host_itself").keys
+  end
+
   # RULE: the genesis account's name is shown, not a placeholder. Every other
   # name comes from a fetched config and the genesis has none -- it has an
   # identity declaration. Without reading it, the one account everybody trusts
@@ -73,14 +94,14 @@ class DefaultsSpec < Minitest::Test
     assert_nil defaults.fetch("genesis_profile_missing")
   end
 
-  # RULE: the seeded profile must not beat an identity declaration the genesis
-  # has since published. It is a fallback for having nothing, not a pin.
+  # RULE: the seeded profile must not beat an identity declaration a default
+  # friend has since published. It is a fallback for having nothing, not a pin.
   def test_the_seeded_profile_is_set_before_the_walk_fetches_declarations
     app = File.read(File.expand_path("../public/js/app.js", __dir__), encoding: "UTF-8")
-    seeded = app.index("genesisProfile(state.genesis)")
+    seeded = app.index("declarationProfile(record)")
     fetched = app.index("state.profiles.set(blob.pubkey")
 
-    refute_nil seeded, "the genesis profile is never seeded"
+    refute_nil seeded, "the default friends' profiles are never seeded"
     refute_nil fetched, "fetched declarations never populate profiles"
     assert_operator seeded, :<, fetched,
                     "seed the genesis profile before fetched declarations overwrite it"

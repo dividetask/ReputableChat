@@ -45,10 +45,19 @@ else acknowledges. Its `note` carries version 1 of the rules.
 Committed as a file because clients must agree on its hash before fetching
 anything. There are two: development's seed is public, production's is not.
 
-**Genesis account** — the account that signs the genesis. Its handle on this
-server is Tim; another server may run its own under another name. Every new
-account starts with it as a friend, and what that account publishes in its
-attestation is the only way it reaches anyone.
+**Genesis account** — the developer's account, which signs the genesis. The
+same on every server, because there is one network and one chain. Every new
+account starts with it as a friend, and what it publishes in its attestation is
+the only way it reaches anyone. By convention it signs what covers the whole
+network: releases and the rules. Tim by default, but the handle is only a
+handle.
+
+**Host account** — a server's own account, optional. Its first identity
+declaration acknowledges the genesis, so it hangs off the one chain. Committed
+beside the genesis under `config/host/`. Where a server has one, a new account
+starts with it as a second friend. By convention it signs what concerns one
+server, such as an outage notice. Nothing enforces either convention.
+[chain.md](chain.md)
 
 **Rules** — what every field of every record means and what makes a record
 valid. Carried in the `note` of the genesis account's identity declaration, one
@@ -187,6 +196,7 @@ Do not reintroduce these; they each have a current name above.
 | reaction | emote |
 | announcement | notice |
 | Tim (as the general term) | genesis account |
+| server's Tim, server account | host account |
 | score | rating (given) or reputation (calculated) |
 
 And one word to avoid rather than replace: **troll** is not a category this
