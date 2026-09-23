@@ -6,6 +6,7 @@ import * as seed from "./seed.js";
 import * as identity from "./identity.js";
 import { Reputation, Graph, toNumber, toFixed } from "./reputation.js";
 import { Session } from "./session.js";
+import { initialRatings } from "./defaults.js";
 
 const ROOM = "general";
 const LOGIN_PATH = "/";
@@ -265,6 +266,15 @@ async function startNewAccount() {
 async function registerWith(username) {
   await post("/api/register", {});
   state.profile = { username, message: "", icon: null };
+
+  // Seeded here and only here, in the first declaration this identity ever
+  // publishes. Anywhere else would re-add it after it was removed, which is
+  // the same as not being able to remove it.
+  state.ratings = initialRatings({
+    genesisPubkey: state.genesis?.pubkey,
+    ownPubkey: state.me.pubkey,
+  });
+
   await publishConfig();
   await enterChat();
 }

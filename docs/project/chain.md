@@ -104,6 +104,36 @@ file, and it is stored as one because every client needs to agree on the hash
 before it has fetched anything — a genesis you have to download from the server
 is not a genesis.
 
+### Everyone starts by trusting it
+
+A new identity's first published declaration friends the genesis account.
+
+It has to. An unrated account sits at exactly zero and is invisible to
+everyone, which is the sybil defense — but it also means a newcomer who trusts
+nobody sees nobody, and a network where nobody has vouched for anybody shows a
+blank screen. Trusting the genesis gives a new arrival one anchor to see
+through, and it is what makes `script/tim.rb visible <pubkey>` do anything:
+lifting somebody over the line in the genesis account's own ratings lifts them
+for everyone who has the genesis at one hop.
+
+Two things about how it is done matter more than the fact of it.
+
+**It is an ordinary rating in the user's own config** — not a rule in the
+client, not a rule on the server, and not a special case anywhere. It sits in
+the friend list beside everybody else and it can be removed like anybody else.
+A trust that cannot be seen or withdrawn is not a default, it is a policy
+wearing a default's clothes, and avoiding a reputation nobody chose is the
+entire point of this project.
+
+**It is seeded once, when the identity is created.** Re-adding it whenever it
+is missing would mean removing it never took, which is the same thing as not
+being able to remove it. `public/js/defaults.js` holds the rule, and
+`spec/defaults_spec.rb` asserts there is exactly one call site.
+
+Removing it is a real choice with real consequences: without the genesis at one
+hop, nothing it vouches for reaches you, and nobody it has made visible is
+visible. That is the user's decision to make, which is why they get to make it.
+
 ### Two of them
 
 Development and production have different genesis accounts, and the difference
