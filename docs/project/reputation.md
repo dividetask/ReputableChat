@@ -275,16 +275,14 @@ An attestation carries **scores**, not the actions behind them. `friend`,
 `reported` and `net_votes` stay in the author's vault; what gets published is
 what they came to.
 
-The other way round was tried first, and the argument for it was real: action
-counts never go stale, while a published score goes stale the moment its author
-retunes their curve. What decided it was that publishing actions asks every
-reader to apply *their own* curve to *somebody else's* counts, which computes a
-number neither of them holds. Whose curve should a stranger's net_votes go
-through? Under actions there is no answer to that; under scores the author runs
-their own curve once and publishes the result, and the curve becomes an
-authoring parameter rather than a reading one.
+Publishing the actions instead would ask every reader to apply *their own*
+curve to *somebody else's* counts, which computes a number neither of them
+holds — there is no answer to whose curve a stranger's `net_votes` should go
+through. The author runs their own curve once and publishes the result, so the
+curve is an authoring parameter rather than a reading one.
 
-What a score cannot do is claim to mean the same to everybody, which is why
+The cost is that a score goes stale when its author retunes, where an action
+count never would. That is why
 `derived` carries a **parameter fingerprint** — a reader whose parameters differ
 can see that the cache is not theirs to use, rather than silently adopting a
 stranger's settings. See **Derived cache** in [glossary.md](glossary.md).

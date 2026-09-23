@@ -72,10 +72,10 @@ signed into a record that other records will acknowledge.
 
 ## Record hashes
 
-`ack` points at hashes, and `reply_to` and an emote's `message` field now do
-too, replacing the signatures they used to name. A signature identifies a
-payload; a hash identifies the *record*, signature included, which is what you
-want when the thing you are linking to needs to be tamper-evident as a whole.
+`ack`, `reply_to` and an emote's `message` field all point at record hashes. A
+signature identifies a payload; a hash identifies the *record*, signature
+included, which is what you want when the thing you are linking to needs to be
+tamper-evident as a whole.
 
 ```
 record_hash = SHA256("reputablechat:record:v1\n" + canonical_payload + "\n" + signature)
@@ -344,8 +344,7 @@ only a reader running the author's own parameters can even attempt it.
 
 ## Attestations
 
-The record this replaced carried `{friend, reported, net_votes}` per person and
-let every reader run the curve themselves. An attestation carries **scores**:
+An attestation is what one author thinks of everyone else, as **scores**:
 
 ```json
 { "purpose": "reputablechat:attestation:v1",
@@ -359,8 +358,8 @@ let every reader run the curve themselves. An attestation carries **scores**:
 ```
 
 `reputation` is what the author thinks of that person. Most people never set it
-by hand — friending and emoting move it, and the curve that used to run in
-every reader now runs once in the author. Advanced users can set it directly.
+by hand — friending and emoting move it, and the curve runs once, in the author.
+Advanced users can set it directly.
 
 `trust` is the multiplier on everything that person recommends. It defaults to
 1 for anyone positive and 0 for anyone blocked, so it only needs storing when
@@ -375,9 +374,8 @@ hops, which is both correct and cheaper. A negative inverts, which is what
 "I trust this person to be reliably wrong" means, and it compounds like any
 other factor, so two negatives in a chain do multiply back to positive.
 
-The friend and report lists that used to be public are not here. They moved
-into the private vault. What the network sees is the score that resulted, never
-the act that caused it.
+The friend and report lists are not here. They are in the private vault: what
+the network sees is the score that resulted, never the act that caused it.
 
 ### The derived cache
 

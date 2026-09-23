@@ -113,9 +113,6 @@ shape. They never move together. Every record carries its own counter, so a
 declaration at 7 beside a vault at 3 is two independent tallies rather than a
 disagreement — one has been saved seven times and the other three.
 
-They were both called `version` until it became clear that nobody could read
-the two lines together and tell them apart.
-
 The counter is **inside the signed payload**, which is the whole point of it.
 Without it the server could serve an old copy of somebody's attestation to hide
 a report, and the signature on that old copy would still verify perfectly —
@@ -208,10 +205,10 @@ record is itself the adjustment that says so — see **Adjustments** in
 SHA256("reputablechat:record:v1\n" + canonical_payload + "\n" + signature)
 ```
 
-They used to name signatures. A signature identifies a payload; a record hash
-identifies the record, signature included, which is what a link has to cover to
-be tamper-evident as a whole. `cryptography/record.rb` and `public/js/record.js`
-are the two halves and `spec/record_parity_spec.rb` checks they agree.
+A signature identifies a payload; a record hash identifies the record, signature
+included, which is what a link has to cover to be tamper-evident as a whole.
+`cryptography/record.rb` and `public/js/record.js` are the two halves, and
+`spec/record_parity_spec.rb` checks they agree.
 
 ## Canonical serialization
 
