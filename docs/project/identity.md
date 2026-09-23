@@ -122,6 +122,61 @@ The read route takes **no pubkey** — it uses the session's — so serving some
 else's vault is not expressible through the API rather than being a check that
 has to stay correct.
 
+## Who is called what
+
+Handles are not unique and never will be, so something has to decide which Joe
+is "Joe" and which is "Joe a4f2c1de". The rule is seniority, in this order:
+
+1. **friends**, in the order they were added
+2. **accounts you have seen**, earliest sighting first
+3. everybody else
+
+Whoever comes first holds the handle bare; everyone else carries a suffix,
+which is the same eight characters the fingerprint has always been. A handle
+nobody is competing for is always shown bare, because there is nobody to tell
+apart.
+
+The ordering is what makes this worth anything. An impersonator arrives *after*
+the person they are copying, so they are always the one wearing the suffix, and
+the person being copied never has to do anything to keep their name.
+
+Three details carry real weight:
+
+**A rename forfeits seniority.** An account seen long ago could otherwise
+rename itself to somebody else's handle and outrank them on seniority it never
+earned under that name. So a sighting records the handle it was made under, and
+seeing that account under a different one starts its clock over.
+
+**Friend order comes from the vault, not from the ratings.** Canonical
+serialization sorts keys, so a ratings map comes back from the server in
+public-key order and cannot say who was added first. Taking the order from
+there would make "first friend wins" mean "lowest key wins" — and a key is
+something an impersonator can grind until it sorts above yours.
+
+**A stranger sorts last.** Somebody neither chosen nor previously seen never
+takes a contested name from an account the viewer has a record of.
+
+This is a real change to what [the identity rules](#usernames) promised: a
+fingerprint used to sit beside every name, everywhere, unconditionally. Now it
+appears only where a name is contested. The gain is that a suffix means
+something when you see one; the cost is that a stranger with an unfamiliar
+handle is shown bare, which is exactly when a reader knows least about them.
+That trade was made deliberately.
+
+### The seen set
+
+The accounts a message has been seen from that are neither friends nor blocked,
+held in the vault. It records seniority and nothing else.
+
+Friends and blocked accounts leave it: one ranks above it, the other is never
+shown, so a record of either is one nothing reads.
+
+It is bounded by `seen_entries`, and over budget the **newest** sightings are
+dropped. Seniority is the entire content of the set, so discarding the oldest
+would throw away the only thing it holds — and dropping the newest leaves the
+conservative bias in place, where an account with no sighting on file loses a
+contested name to one that has.
+
 ## Two devices editing one vault
 
 A vault is a single encrypted blob with a monotonic revision, so two signed-in

@@ -8,6 +8,7 @@ import { Reputation, Graph, toNumber, toFixed } from "./reputation.js";
 import { Session } from "./session.js";
 import { initialRatings, genesisProfile } from "./defaults.js";
 import * as vault from "./vault.js";
+import * as names from "./names.js";
 
 const ROOM = "general";
 const LOGIN_PATH = "/";
@@ -25,6 +26,7 @@ const state = {
   vaultDirty: false,
   reactions: new Map(), recentlyBlocked: new Map(), replyingTo: null,
   genesis: null, tip: null, newFriends: {}, limits: null,
+  seen: [], friendOrder: [], names: {},
   renderEpoch: 0, renderedKey: null, pendingRegistration: false,
 };
 
@@ -110,12 +112,25 @@ function buildReputation() {
 // since the last one.
 
 function vaultContents() {
-  return { settings: state.settings, voted: [...state.voted] };
+  return {
+    settings: state.settings,
+    voted: [...state.voted],
+    seen: state.seen,
+    // Canonical serialization sorts keys, so the ratings object comes back from
+    // the server in public-key order and cannot carry "who I added first". That
+    // order has to be recorded somewhere it survives, and it matters twice: the
+    // friend list is shown in it, and it breaks ties over a contested handle.
+    // Left to key order, an impersonator could grind a key that sorts above
+    // yours and take your name.
+    friend_order: state.friendOrder,
+  };
 }
 
 function applyVault(contents) {
   state.settings = contents.settings || {};
   state.voted = new Set(contents.voted || []);
+  state.seen = contents.seen || [];
+  state.friendOrder = contents.friend_order || [];
 }
 
 async function loadVault() {
@@ -430,6 +445,11 @@ async function registerWith(username) {
   // here by being pasted before they had one, so it goes now.
   state.ratings = { ...state.newFriends };
   delete state.ratings[state.me.pubkey];
+  // Captured before anything round-trips through the server, which is the only
+  // moment this order exists: canonical serialization sorts keys, so it cannot
+  // be recovered from the ratings afterwards.
+  state.friendOrder = Object.keys(state.ratings);
+  vaultChanged();
 
   await publishConfig();
   await enterChat();
@@ -583,6 +603,8 @@ async function refreshMessages() {
   await fetchConfigs([...new Set([...messages.map((m) => m.author), ...emotes.map((e) => e.author)])]);
   state.seq = Math.max(0, ...messages.filter((m) => m.author === state.me.pubkey).map((m) => m.seq));
   state.tip = chooseTip(messages);
+  recordSightings(messages);
+  recomputeNames();
 
   // Most polls find nothing new. Rebuilding the list anyway costs a full DOM
   // teardown, drops any text selection, and closes an open hover menu.
@@ -651,18 +673,17 @@ function render(messages) {
 
     const who = document.createElement("span");
     who.className = "who";
+    // displayName already carries a key suffix when the handle is contested,
+    // so a separate fingerprint beside it would be the same eight characters
+    // twice on the names that need them and clutter on the ones that do not.
     who.textContent = displayName(message.author);
     who.addEventListener("click", () => showProfile(message.author));
-
-    const fp = document.createElement("span");
-    fp.className = "fp";
-    fp.textContent = fingerprint(message.author);
 
     const body = document.createElement("div");
     body.textContent = payload.body; // textContent, never innerHTML
 
     if (payload.reply_to) main.append(replyQuote(payload.reply_to, byHash));
-    main.append(who, fp, body, reactionBar(message, mine));
+    main.append(who, body, reactionBar(message, mine));
     row.append(avatarFor(message.author), main);
     list.append(row);
   }
@@ -888,8 +909,73 @@ function cancelReply() {
   $("replying").classList.add("hidden");
 }
 
+// Recomputed rather than cached per person: a handle becomes contested when
+// somebody else turns up, so one new arrival can change what an account
+// already on screen is called.
+function recomputeNames() {
+  const handles = {};
+  for (const [pubkey, profile] of state.profiles || []) {
+    if (profile?.username) handles[pubkey] = profile.username;
+  }
+
+  state.names = names.resolveNames({
+    handles,
+    friends: friendsInOrder(),
+    seen: state.seen,
+  });
+}
+
 function displayName(pubkey) {
-  return state.profiles?.get(pubkey)?.username || "someone";
+  const resolved = state.names?.[pubkey];
+  if (!resolved) return state.profiles?.get(pubkey)?.username || "someone";
+
+  return resolved.suffix ? `${resolved.handle} ${resolved.suffix}` : resolved.handle;
+}
+
+// Recorded order first, then anyone the record does not know about -- a
+// rating that arrived before the vault carried an order, or from another
+// device mid-merge.
+function friendsInOrder() {
+  const friends = Object.entries(state.ratings).filter(([, r]) => r.friend).map(([pubkey]) => pubkey);
+  const known = state.friendOrder.filter((pubkey) => friends.includes(pubkey));
+
+  return [...known, ...friends.filter((pubkey) => !known.includes(pubkey))];
+}
+
+function rememberFriendOrder(pubkey) {
+  if (!state.friendOrder.includes(pubkey)) state.friendOrder = [...state.friendOrder, pubkey];
+}
+
+function forgetFriendOrder(pubkey) {
+  state.friendOrder = state.friendOrder.filter((key) => key !== pubkey);
+}
+
+// Everybody whose message has crossed the screen and who is neither a friend
+// nor blocked. Friends outrank sightings, so keeping one for a friend would be
+// a record nothing ever reads.
+function recordSightings(messages) {
+  const before = state.seen;
+  let seen = state.seen;
+
+  for (const message of messages) {
+    const author = message.author;
+    if (!author || author === state.me?.pubkey) continue;
+
+    const rating = state.ratings[author];
+    if (rating?.friend || rating?.reported) {
+      seen = names.forget(seen, author);
+      continue;
+    }
+
+    const handle = state.profiles?.get(author)?.username;
+    if (handle) seen = names.recordSighting(seen, author, handle, Math.floor(Date.now() / 1000));
+  }
+
+  seen = names.prune(seen, state.limits?.seen_entries);
+  if (seen === before) return;
+
+  state.seen = seen;
+  vaultChanged();
 }
 
 // Reactions a message actually has, always visible with their counts, plus a
@@ -1169,6 +1255,8 @@ async function unfriend(pubkey) {
 
   const current = state.ratings[pubkey];
   if (current) state.ratings[pubkey] = { ...current, friend: false };
+  forgetFriendOrder(pubkey);
+  vaultChanged();
 
   await publishConfig();
   renderRelations();
@@ -1179,7 +1267,8 @@ async function unfriend(pubkey) {
 
 // Who you have friended and who you have blocked, each with a way back.
 function renderRelations() {
-  fillRelations($("friend-list"), ([, r]) => r.friend, "unfriend", unfriend);
+  recomputeNames();
+  fillRelations($("friend-list"), ([, r]) => r.friend, "unfriend", unfriend, friendsInOrder());
   fillRelations($("blocked-list"), ([, r]) => r.reported, "unblock", undoReport);
   renderRatings();
 }
@@ -1245,8 +1334,15 @@ async function clearRating(pubkey) {
   status($("profile-status"), "Rating removed.", "ok");
 }
 
-function fillRelations(box, predicate, verb, action) {
+function fillRelations(box, predicate, verb, action, order = null) {
   const entries = Object.entries(state.ratings).filter(predicate);
+  // The stored ratings come back in public-key order, because canonical
+  // serialization sorts. Anything that should read as "first added" has to be
+  // sorted by the order the vault remembers.
+  if (order) {
+    const position = new Map(order.map((pubkey, index) => [pubkey, index]));
+    entries.sort((a, b) => (position.get(a[0]) ?? Infinity) - (position.get(b[0]) ?? Infinity));
+  }
   box.replaceChildren();
 
   if (!entries.length) {
@@ -1306,6 +1402,9 @@ async function addByKey() {
 
   const current = state.ratings[pubkey] || { friend: false, reported: false, net_votes: 0 };
   state.ratings[pubkey] = { ...current, friend: true, reported: false };
+  rememberFriendOrder(pubkey);
+  state.seen = names.forget(state.seen, pubkey);
+  vaultChanged();
 
   await publishConfig();
   await fetchConfigs([pubkey]);

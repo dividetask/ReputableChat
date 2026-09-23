@@ -33,7 +33,7 @@ class UiRulesSpec < Minitest::Test
   # RULE: a person is shown with their avatar wherever they are named. The
   # friend list was the one place that named somebody without one.
   def test_relations_lists_show_avatars
-    relations = within(app_js, from: "function fillRelations(", lines: 40)
+    relations = within(app_js, from: "function fillRelations(", lines: 60)
 
     assert_includes relations, "avatarFor(pubkey)",
                     "friend and blocked lists must show the avatar, like everywhere else"
@@ -97,7 +97,7 @@ class UiRulesSpec < Minitest::Test
   # somebody checks that who they vouched for is who they meant, and a prefix
   # is exactly what an impersonator would match.
   def test_relations_lists_show_the_whole_key
-    relations = within(app_js, from: "function fillRelations(", lines: 45)
+    relations = within(app_js, from: "function fillRelations(", lines: 60)
 
     assert_includes relations, "key.textContent = pubkey", "the full key must be shown"
     refute_includes relations, "fingerprint(pubkey)", "a prefix is not enough here"

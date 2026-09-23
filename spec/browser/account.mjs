@@ -64,6 +64,9 @@ try {
 
   const friends = page.locator("#friend-list .row");
   results.friends_after_creating = await friends.count();
+  // The order the friends were chosen in, which survives only because the
+  // vault records it: the ratings come back sorted by public key.
+  results.friend_order = await friends.locator(".name").allTextContents();
   results.friend_list_shows_an_image = await friends.first().locator("img.avatar").count() > 0;
   results.friend_list_shows_a_whole_key =
     (await friends.first().locator(".pubkey").textContent()).trim().length;

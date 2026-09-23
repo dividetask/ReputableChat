@@ -97,5 +97,23 @@ export function merge(mine, theirs) {
     ...before,
     ...mine,
     voted: [...new Set([...(before.voted || []), ...(mine.voted || [])])],
+    // Earliest sighting wins: when it happened is the whole content of the
+    // record, so the older one is the true one.
+    seen: mergeSeen(mine.seen || [], before.seen || []),
+    // Order is a union that keeps what this device already knew and appends
+    // what the other one added, because there are no per-entry timestamps to
+    // interleave them by -- see docs/project/identity.md.
+    friend_order: [...new Set([...(mine.friend_order || []), ...(before.friend_order || [])])],
   };
+}
+
+function mergeSeen(mine, theirs) {
+  const byPubkey = new Map();
+
+  for (const entry of [...theirs, ...mine]) {
+    if (!entry?.pubkey) continue;
+    const kept = byPubkey.get(entry.pubkey);
+    if (!kept || entry.at < kept.at) byPubkey.set(entry.pubkey, entry);
+  }
+  return [...byPubkey.values()].sort((a, b) => a.at - b.at);
 }

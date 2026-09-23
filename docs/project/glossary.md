@@ -82,9 +82,16 @@ sees it. [identity.md](identity.md)
 **Private config** (`reputablechat:private-config:v1`) — the vault's
 predecessor, signed but not encrypted. Being replaced.
 
-**First-seen set** — the accounts you have seen a message from that are
-neither friends nor blocked, held in the vault. What decides whose handle shows
-bare and whose carries a key suffix.
+**Seen set** — the accounts you have seen a message from that are neither
+friends nor blocked, held in the vault. It records seniority, which is what
+decides whose handle shows bare and whose carries a suffix.
+
+**Suffix** — the eight key characters appended to a handle somebody else holds
+ahead of them. The same string as a key fingerprint, shown only where a handle
+is contested.
+
+**Friend order** — the order friends were added, kept in the vault because a
+ratings map comes back sorted by public key and cannot carry it.
 
 **Sealed** — the vault's ciphertext, as the server sees it. Named apart from
 "encrypted" because the server never handles a key, only a blob.

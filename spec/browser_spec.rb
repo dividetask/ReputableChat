@@ -78,6 +78,14 @@ class BrowserSpec < Minitest::Test
     assert_equal 43, seen.fetch("friend_list_shows_a_whole_key")
   end
 
+  # RULE: the friend list reads first-added at the top. The ratings come back
+  # from the server sorted by public key, because canonical serialization
+  # sorts, so this order exists only because the vault records it.
+  def test_the_friend_list_is_ordered_by_when_they_were_added
+    assert_equal "Tim", seen.fetch("friend_order").first.strip,
+                 "the genesis account was added first and belongs at the top"
+  end
+
   private
 
   def chromium_builds
