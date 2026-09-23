@@ -171,6 +171,13 @@ function renderRoute() {
   const newAccount = creatingAccount();
   $("new-account").classList.toggle("hidden", !newAccount);
   $("login-intro").classList.toggle("hidden", newAccount);
+
+  // On the new account screen there is one button and it creates the account.
+  // Two buttons there read as two different destinations when only one of them
+  // goes anywhere -- "New Account" would only regenerate the seed already on
+  // screen, and "Login" was what actually created the account.
+  $("unlock").textContent = newAccount ? "Create Account" : "Login";
+  $("generate").classList.toggle("hidden", newAccount);
 }
 const chosenName = () => $("new-name").value.trim();
 
@@ -559,7 +566,7 @@ function blockedStub(message) {
   const undo = document.createElement("button");
   undo.type = "button";
   undo.textContent = "undo report";
-  undo.addEventListener("click", () => undoReport(message.author).catch(
+  undo.addEventListener("click", () => undoReport(message.author, { confirm: false }).catch(
     (e) => status($("chat-status"), e.message, "error"),
   ));
   actions.append(undo);
@@ -897,7 +904,18 @@ async function reportUser(pubkey) {
   }
 }
 
-async function undoReport(pubkey) {
+// `confirm` defaults on, so a call site added later asks by default. The undo
+// beside a just-blocked message passes it off: that one exists for a misclick,
+// and a dialog guarding an undo is a dialog guarding the wrong direction.
+async function undoReport(pubkey, { confirm = true } = {}) {
+  if (confirm) {
+    const sure = await confirmAction(
+      `Unblock ${displayName(pubkey)}? Their messages become visible to you again.`,
+      "Yes, unblock",
+    );
+    if (!sure) return;
+  }
+
   const current = state.ratings[pubkey];
   if (current) state.ratings[pubkey] = { ...current, reported: false };
 
@@ -912,6 +930,13 @@ async function undoReport(pubkey) {
 }
 
 async function unfriend(pubkey) {
+  const sure = await confirmAction(
+    `Remove ${displayName(pubkey)} from your friends? Everything they vouch for ` +
+    "stops reaching you, and anyone only they made visible becomes invisible.",
+    "Yes, unfriend",
+  );
+  if (!sure) return;
+
   const current = state.ratings[pubkey];
   if (current) state.ratings[pubkey] = { ...current, friend: false };
 
@@ -1021,7 +1046,7 @@ function fillRelations(box, predicate, verb, action) {
       (e) => status($("profile-status"), e.message, "error"),
     ));
 
-    row.append(name, fp, button);
+    row.append(avatarFor(pubkey), name, fp, button);
     box.append(row);
   }
 }
