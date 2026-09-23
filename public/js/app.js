@@ -26,7 +26,7 @@ const state = {
   vaultDirty: false,
   reactions: new Map(), recentlyBlocked: new Map(), replyingTo: null,
   genesis: null, tip: null, newFriends: {}, limits: null,
-  seen: [], friendOrder: [], names: {},
+  seen: [], friendList: [], names: {},
   renderEpoch: 0, renderedKey: null, pendingRegistration: false,
 };
 
@@ -117,12 +117,10 @@ function vaultContents() {
     voted: [...state.voted],
     seen: state.seen,
     // Canonical serialization sorts keys, so the ratings object comes back from
-    // the server in public-key order and cannot carry "who I added first". That
-    // order has to be recorded somewhere it survives, and it matters twice: the
-    // friend list is shown in it, and it breaks ties over a contested handle.
-    // Left to key order, an impersonator could grind a key that sorts above
-    // yours and take your name.
-    friend_order: state.friendOrder,
+    // the server in public-key order and cannot carry "who I added first".
+    // Each entry also records the handle that friend is using and when they
+    // took it, because a name claim is only as old as the name.
+    friends: state.friendList,
   };
 }
 
@@ -130,7 +128,7 @@ function applyVault(contents) {
   state.settings = contents.settings || {};
   state.voted = new Set(contents.voted || []);
   state.seen = contents.seen || [];
-  state.friendOrder = contents.friend_order || [];
+  state.friendList = names.normalizeFriends(contents.friends || contents.friend_order || []);
 }
 
 async function loadVault() {
@@ -448,7 +446,9 @@ async function registerWith(username) {
   // Captured before anything round-trips through the server, which is the only
   // moment this order exists: canonical serialization sorts keys, so it cannot
   // be recovered from the ratings afterwards.
-  state.friendOrder = Object.keys(state.ratings);
+  state.friendList = Object.keys(state.ratings).map((pubkey) => ({
+    pubkey, handle: newAccountName(pubkey), at: now(),
+  }));
   vaultChanged();
 
   await publishConfig();
@@ -920,7 +920,7 @@ function recomputeNames() {
 
   state.names = names.resolveNames({
     handles,
-    friends: friendsInOrder(),
+    friends: state.friendList,
     seen: state.seen,
   });
 }
@@ -932,23 +932,29 @@ function displayName(pubkey) {
   return resolved.suffix ? `${resolved.handle} ${resolved.suffix}` : resolved.handle;
 }
 
-// Recorded order first, then anyone the record does not know about -- a
-// rating that arrived before the vault carried an order, or from another
-// device mid-merge.
+// Display order: when each was added, which never changes. Distinct from the
+// name-claim clock in each entry, which resets on a rename.
+//
+// Recorded first, then anyone the record does not know about -- a rating from
+// before the vault carried this, or from another device mid-merge.
 function friendsInOrder() {
   const friends = Object.entries(state.ratings).filter(([, r]) => r.friend).map(([pubkey]) => pubkey);
-  const known = state.friendOrder.filter((pubkey) => friends.includes(pubkey));
+  const known = state.friendList.map((entry) => entry.pubkey).filter((pubkey) => friends.includes(pubkey));
 
   return [...known, ...friends.filter((pubkey) => !known.includes(pubkey))];
 }
 
-function rememberFriendOrder(pubkey) {
-  if (!state.friendOrder.includes(pubkey)) state.friendOrder = [...state.friendOrder, pubkey];
+function rememberFriend(pubkey) {
+  state.friendList = names.rememberFriend(
+    state.friendList, pubkey, state.profiles?.get(pubkey)?.username || null, now(),
+  );
 }
 
-function forgetFriendOrder(pubkey) {
-  state.friendOrder = state.friendOrder.filter((key) => key !== pubkey);
+function forgetFriend(pubkey) {
+  state.friendList = names.forgetFriend(state.friendList, pubkey);
 }
+
+const now = () => Math.floor(Date.now() / 1000);
 
 // Everybody whose message has crossed the screen and who is neither a friend
 // nor blocked. Friends outrank sightings, so keeping one for a friend would be
@@ -972,9 +978,21 @@ function recordSightings(messages) {
   }
 
   seen = names.prune(seen, state.limits?.seen_entries);
-  if (seen === before) return;
+
+  // A friend who renames forfeits their claim too: otherwise somebody
+  // befriended years ago could rename onto a newer friend's handle and outrank
+  // them on time they never served under that name.
+  const friendsBefore = state.friendList;
+  let friends = state.friendList;
+  for (const entry of friendsBefore) {
+    const handle = state.profiles?.get(entry.pubkey)?.username;
+    if (handle) friends = names.refreshFriendHandle(friends, entry.pubkey, handle, now());
+  }
+
+  if (seen === before && friends === friendsBefore) return;
 
   state.seen = seen;
+  state.friendList = friends;
   vaultChanged();
 }
 
@@ -1255,7 +1273,7 @@ async function unfriend(pubkey) {
 
   const current = state.ratings[pubkey];
   if (current) state.ratings[pubkey] = { ...current, friend: false };
-  forgetFriendOrder(pubkey);
+  forgetFriend(pubkey);
   vaultChanged();
 
   await publishConfig();
@@ -1402,7 +1420,7 @@ async function addByKey() {
 
   const current = state.ratings[pubkey] || { friend: false, reported: false, net_votes: 0 };
   state.ratings[pubkey] = { ...current, friend: true, reported: false };
-  rememberFriendOrder(pubkey);
+  rememberFriend(pubkey);
   state.seen = names.forget(state.seen, pubkey);
   vaultChanged();
 

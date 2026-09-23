@@ -100,11 +100,29 @@ export function merge(mine, theirs) {
     // Earliest sighting wins: when it happened is the whole content of the
     // record, so the older one is the true one.
     seen: mergeSeen(mine.seen || [], before.seen || []),
-    // Order is a union that keeps what this device already knew and appends
-    // what the other one added, because there are no per-entry timestamps to
-    // interleave them by -- see docs/project/identity.md.
-    friend_order: [...new Set([...(mine.friend_order || []), ...(before.friend_order || [])])],
+    // Friends keep this device's order and gain anything the other one added.
+    // Where both know somebody, the later record of their handle wins: it is
+    // the more recent observation of what they are calling themselves.
+    friends: mergeFriends(mine.friends || [], before.friends || []),
   };
+}
+
+function mergeFriends(mine, theirs) {
+  const latest = new Map();
+  for (const entry of [...theirs, ...mine]) {
+    if (!entry?.pubkey) continue;
+    const kept = latest.get(entry.pubkey);
+    if (!kept || (entry.at || 0) > (kept.at || 0)) latest.set(entry.pubkey, entry);
+  }
+
+  const ordered = [];
+  const taken = new Set();
+  for (const entry of [...mine, ...theirs]) {
+    if (!entry?.pubkey || taken.has(entry.pubkey)) continue;
+    taken.add(entry.pubkey);
+    ordered.push(latest.get(entry.pubkey));
+  }
+  return ordered;
 }
 
 function mergeSeen(mine, theirs) {

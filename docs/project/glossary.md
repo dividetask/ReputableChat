@@ -91,7 +91,9 @@ ahead of them. The same string as a key fingerprint, shown only where a handle
 is contested.
 
 **Friend order** — the order friends were added, kept in the vault because a
-ratings map comes back sorted by public key and cannot carry it.
+ratings map comes back sorted by public key and cannot carry it. Distinct from
+a **name claim**, which is dated from when that account took the handle it is
+using now and resets when they change it.
 
 **Sealed** — the vault's ciphertext, as the server sees it. Named apart from
 "encrypted" because the server never handles a key, only a blob.

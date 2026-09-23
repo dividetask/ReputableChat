@@ -127,7 +127,7 @@ has to stay correct.
 Handles are not unique and never will be, so something has to decide which Joe
 is "Joe" and which is "Joe a4f2c1de". The rule is seniority, in this order:
 
-1. **friends**, in the order they were added
+1. **friends**, longest-held handle first
 2. **accounts you have seen**, earliest sighting first
 3. everybody else
 
@@ -142,10 +142,15 @@ the person being copied never has to do anything to keep their name.
 
 Three details carry real weight:
 
-**A rename forfeits seniority.** An account seen long ago could otherwise
-rename itself to somebody else's handle and outrank them on seniority it never
-earned under that name. So a sighting records the handle it was made under, and
-seeing that account under a different one starts its clock over.
+**A rename forfeits seniority, for friends as much as for sightings.** An
+account could otherwise rename onto somebody else's handle and outrank them on
+time it never served under that name — and being a long-standing friend would
+make that worse rather than better. So both records store the handle they were
+made under, and seeing that account under a different one restarts its clock.
+
+That means a friend carries two clocks. The **friend list** is ordered by when
+each was added and a rename never moves anybody; the **name claim** is dated
+from when they took the handle they are using now. Only the second one resets.
 
 **Friend order comes from the vault, not from the ratings.** Canonical
 serialization sorts keys, so a ratings map comes back from the server in
@@ -154,7 +159,11 @@ there would make "first friend wins" mean "lowest key wins" — and a key is
 something an impersonator can grind until it sorts above yours.
 
 **A stranger sorts last.** Somebody neither chosen nor previously seen never
-takes a contested name from an account the viewer has a record of.
+takes a contested name from an account the viewer has a record of. In practice
+this is a narrow case, because an account nobody has vouched for is invisible
+and so never gets seen in the first place — the seen set is a record of what
+this viewer could actually read. Turning on `show_unrated` widens it, and those
+sightings keep their seniority afterwards, so the setting has a memory.
 
 This is a real change to what [the identity rules](#usernames) promised: a
 fingerprint used to sit beside every name, everywhere, unconditionally. Now it

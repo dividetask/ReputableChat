@@ -46,15 +46,59 @@ class NamesSpec < Minitest::Test
     assert_equal "a" * 8, resolved.fetch(A).fetch("suffix"), "the older sighting is qualified"
   end
 
-  # RULE: between two friends, the one added first keeps the name. That order
-  # comes from the vault, because canonical serialization sorts the ratings by
-  # public key -- leaving it to key order would let an impersonator grind a key
-  # that sorts above yours and take your name.
-  def test_between_friends_the_earlier_addition_keeps_the_name
-    resolved = seen.fetch("friends_use_list_order")
+  # RULE: between two friends, whoever has held the handle longest keeps it.
+  # That clock comes from the vault, because canonical serialization sorts the
+  # ratings by public key -- leaving it to key order would let an impersonator
+  # grind a key that sorts above yours and take your name.
+  def test_between_friends_the_longer_held_handle_keeps_the_name
+    resolved = seen.fetch("friends_use_claim_age")
 
     assert_nil resolved.fetch(A).fetch("suffix")
     assert_equal "b" * 8, resolved.fetch(B).fetch("suffix")
+  end
+
+  # RULE: a friend who renames forfeits seniority, exactly as a sighting does.
+  # Otherwise somebody befriended years ago could rename onto a newer friend's
+  # handle and outrank them on time they never served under that name.
+  def test_a_friend_renaming_onto_a_held_handle_does_not_take_it
+    resolved = seen.fetch("newcomer_renames_onto_a_held_handle")
+
+    assert_nil resolved.fetch(A).fetch("suffix"), "the holder keeps it"
+    assert_equal "b" * 8, resolved.fetch(B).fetch("suffix")
+  end
+
+  # The same in the other direction: being the older friend does not help, only
+  # having held the name does.
+  def test_an_older_friend_renaming_does_not_bring_seniority_with_them
+    resolved = seen.fetch("old_friend_renames_onto_a_newer_one")
+
+    assert_nil resolved.fetch(B).fetch("suffix"), "the one already using it keeps it"
+    assert_equal "a" * 8, resolved.fetch(A).fetch("suffix")
+  end
+
+  # RULE: the friend LIST is ordered by when each was added, and a rename does
+  # not move anybody. Two clocks; only the name claim resets.
+  def test_a_rename_does_not_reorder_the_friend_list
+    assert_equal [A, B], seen.fetch("rename_keeps_list_position")
+  end
+
+  def test_a_friend_is_remembered_once
+    assert_equal 1, seen.fetch("remembering_a_friend").length
+    assert_equal 7, seen.fetch("remembering_twice_is_once").first.fetch("at"),
+                 "re-adding must not reset a claim"
+  end
+
+  def test_a_friend_can_be_forgotten
+    assert_empty seen.fetch("forgetting_a_friend")
+  end
+
+  # A vault written before friends carried handles holds bare keys. They read
+  # as friended at the beginning of time, which is what they were.
+  def test_an_older_vault_still_loads
+    entry = seen.fetch("old_vaults_normalize").first
+
+    assert_equal A, entry.fetch("pubkey")
+    assert_equal 0, entry.fetch("at")
   end
 
   def test_between_sightings_the_earlier_one_keeps_the_name
