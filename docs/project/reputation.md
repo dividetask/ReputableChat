@@ -271,7 +271,20 @@ default, the hardcoded fallback. A key that is absent or blank in a user's
 config tracks the default, so editing `config/reputation.yml` moves every user
 who never pinned that setting and nobody who did.
 
-Because each reader applies their own config, published configs carry **actions**
-(`friend`, `reported`, `net_votes`) rather than computed scores. A published
-score would go stale the moment the curve was retuned and would need every user
-in the network to re-sign. Action counts stay valid forever.
+An attestation carries **scores**, not the actions behind them. `friend`,
+`reported` and `net_votes` stay in the author's vault; what gets published is
+what they came to.
+
+The other way round was tried first, and the argument for it was real: action
+counts never go stale, while a published score goes stale the moment its author
+retunes their curve. What decided it was that publishing actions asks every
+reader to apply *their own* curve to *somebody else's* counts, which computes a
+number neither of them holds. Whose curve should a stranger's net_votes go
+through? Under actions there is no answer to that; under scores the author runs
+their own curve once and publishes the result, and the curve becomes an
+authoring parameter rather than a reading one.
+
+What a score cannot do is claim to mean the same to everybody, which is why
+`derived` carries a **parameter fingerprint** — a reader whose parameters differ
+can see that the cache is not theirs to use, rather than silently adopting a
+stranger's settings. See **Derived cache** in [glossary.md](glossary.md).

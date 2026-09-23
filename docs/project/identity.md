@@ -113,10 +113,10 @@ and nothing else. And it can **refuse an oversized blob**, which is the only
 limit left once shape checking is impossible: it cannot count your friends, so
 it counts your bytes.
 
-What it gives up is real. The old private config let the server check that
-`settings` was a bounded tree of scalars; an encrypted one cannot be checked at
-all, so the client has to be as careful about what it decrypts as it would be
-about anything else arriving over the wire.
+What it gives up is real. The signed-but-readable record this replaced let the
+server check that `settings` was a bounded tree of scalars; an encrypted one
+cannot be checked at all, so the client has to be as careful about what it
+decrypts as it would be about anything else arriving over the wire.
 
 The read route takes **no pubkey** — it uses the session's — so serving somebody
 else's vault is not expressible through the API rather than being a check that

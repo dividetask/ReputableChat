@@ -80,6 +80,16 @@ inventing a word for something that already has one.
   through HKDF. Changing that domain strands every existing vault; changing how
   the identity key is derived strands every existing account, which is why the
   vault key is layered on top rather than alongside.
+- **The vault itself, in two languages.** `public/js/vault.js` and
+  `cryptography/vault.rb` both seal and open vaults -- the browser for everyone,
+  Ruby for the genesis account driven from a terminal. A drift between them
+  fails in the worst way available: each half opens its own vaults perfectly and
+  cannot read the other's, so a friend list appears to vanish and come back
+  depending on which one wrote last. `spec/vault_parity_spec.rb` seals in each
+  and opens in the other, which is the only arrangement that can catch it.
+- **Published score text.** `reputation/decimals.rb` and `toDecimal` in
+  `public/js/reputation.js` must spell the same number the same way, not merely
+  parse each other's. `spec/decimal_parity_spec.rb` guards it.
 - **The seed derivation domain.** Changing `seed.kdf.domain` in
   `config/reputation.yml` changes every derived key, which strands every
   existing account. It is versioned (`:v1`) so a future change can be handled
@@ -96,6 +106,10 @@ inventing a word for something that already has one.
   are worse than comments, because they look live.
 - Tests name the **rule** they protect, not the method they call. A failing test
   should say what behaviour broke.
+- Reputation records carry **scores**, not the actions behind them. `friend`,
+  `reported` and `net_votes` live in the author's vault; the curve runs once,
+  where it is authored. Anything published carries the parameter fingerprint it
+  was computed under.
 - The server reads as little of a signed blob as it can, and serves blobs back
   byte-identical.
 - Render user text with `textContent`, never `innerHTML`.

@@ -119,7 +119,7 @@ for everyone who has the genesis at one hop.
 
 Two things about how it is done matter more than the fact of it.
 
-**It is an ordinary rating in the user's own config** — not a rule in the
+**It is an ordinary rating in the user's own vault** — not a rule in the
 client, not a rule on the server, and not a special case anywhere. It sits in
 the friend list beside everybody else and it can be removed like anybody else.
 A trust that cannot be seen or withdrawn is not a default, it is a policy
@@ -298,7 +298,7 @@ only a reader running the author's own parameters can even attempt it.
 
 ## Attestations
 
-The old public config carried `{friend, reported, net_votes}` per person and
+The record this replaced carried `{friend, reported, net_votes}` per person and
 let every reader run the curve themselves. An attestation carries **scores**:
 
 ```json

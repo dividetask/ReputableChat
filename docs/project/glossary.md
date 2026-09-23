@@ -75,12 +75,10 @@ trusted-developer setting can arrive without re-signing anything.
 ## Off the chain
 
 **Vault** — the owner's encrypted private document: settings, the voted list,
-and the friend and report lists. Encrypted under a key derived from the seed
-under `seed.kdf.vault_domain`, then signed. No `ack`, because nobody else ever
-sees it. [identity.md](identity.md)
-
-**Private config** (`reputablechat:private-config:v1`) — the vault's
-predecessor, signed but not encrypted. Being replaced.
+the friend order, the seen set, and the private ratings every published score is
+computed from. Encrypted under a key derived from the seed under
+`seed.kdf.vault_domain`, then signed over the ciphertext. No `ack`, because
+nobody else ever sees it. [identity.md](identity.md)
 
 **Seen set** — the accounts you have seen a message from that are neither
 friends nor blocked, held in the vault. It records seniority, which is what
@@ -98,8 +96,6 @@ using now and resets when they change it.
 **Sealed** — the vault's ciphertext, as the server sees it. Named apart from
 "encrypted" because the server never handles a key, only a blob.
 
-**Config** (`reputablechat:config:v1`) — retired. Split into an identity
-declaration and an attestation.
 
 ## Reputation
 
@@ -155,7 +151,9 @@ Do not reintroduce these; they each have a current name above.
 |---|---|
 | user record | identity declaration |
 | vouch list | attestation |
-| config / public config | identity declaration + attestation |
+| config / public config (`config:v1`) | identity declaration + attestation |
+| private config (`private-config:v1`) | vault |
+| `ladder.max_configs` | `ladder.max_accounts` |
 | version (as a per-record counter) | revision |
 | `tim.json` | `<environment>.json` |
 
