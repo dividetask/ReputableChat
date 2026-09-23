@@ -82,6 +82,10 @@ sees it. [identity.md](identity.md)
 **Private config** (`reputablechat:private-config:v1`) — the vault's
 predecessor, signed but not encrypted. Being replaced.
 
+**First-seen set** — the accounts you have seen a message from that are
+neither friends nor blocked, held in the vault. What decides whose handle shows
+bare and whose carries a key suffix.
+
 **Sealed** — the vault's ciphertext, as the server sees it. Named apart from
 "encrypted" because the server never handles a key, only a blob.
 

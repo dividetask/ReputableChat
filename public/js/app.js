@@ -302,9 +302,9 @@ function renderNewFriends() {
     name.className = "name";
     name.textContent = newAccountName(pubkey); // textContent, never innerHTML
 
-    const fp = document.createElement("span");
-    fp.className = "fp";
-    fp.textContent = fingerprint(pubkey);
+    const key = document.createElement("span");
+    key.className = "pubkey";
+    key.textContent = pubkey;
 
     const remove = document.createElement("button");
     remove.type = "button";
@@ -312,7 +312,7 @@ function renderNewFriends() {
     remove.textContent = "remove";
     remove.addEventListener("click", () => removeNewFriend(pubkey));
 
-    row.append(avatarFor(pubkey, "", null), name, fp, remove);
+    row.append(avatarFor(pubkey), name, key, remove);
     box.append(row);
   }
 }
@@ -671,7 +671,23 @@ function blockedStub(message) {
 
 // Names are not unique, so an avatar derived from the key gives every person a
 // stable look even before they upload one. Same key, same colour, always.
-function avatarFor(pubkey, extra = "", icon = state.profiles?.get(pubkey)?.icon) {
+// Where an icon comes from, in order: a config fetched during the walk, then
+// the genesis declaration the client holds before it has fetched anything.
+//
+// The second is why the genesis account has a face on the account creation
+// screen, where no config has been fetched and none can be -- the account
+// doing the looking does not exist yet.
+function iconFor(pubkey) {
+  const known = state.profiles?.get(pubkey)?.icon;
+  if (known) return known;
+
+  if (state.genesis && pubkey === state.genesis.pubkey) {
+    return genesisProfile(state.genesis)?.icon || null;
+  }
+  return null;
+}
+
+function avatarFor(pubkey, extra = "", icon = iconFor(pubkey)) {
   // An <img> with an empty src resolves to the page URL and renders as a
   // broken image, so anyone without an icon gets the placeholder instead.
   if (icon) {
@@ -679,7 +695,7 @@ function avatarFor(pubkey, extra = "", icon = state.profiles?.get(pubkey)?.icon)
     img.className = `avatar ${extra}`.trim();
     img.src = `/images/${icon}`;
     img.alt = "";
-    img.addEventListener("click", () => showProfile(pubkey));
+    enlargeable(img, `/images/${icon}`);
     return img;
   }
 
@@ -690,8 +706,41 @@ function avatarFor(pubkey, extra = "", icon = state.profiles?.get(pubkey)?.icon)
   placeholder.className = `avatar placeholder ${extra}`.trim();
   placeholder.style.background = `hsl(${hash % 360} 42% 30%)`;
   placeholder.textContent = pubkey.slice(0, 2);
+  // A placeholder is two letters on a colour; there is nothing to enlarge, and
+  // blowing it up full screen would be a joke at the reader's expense.
   placeholder.addEventListener("click", () => showProfile(pubkey));
   return placeholder;
+}
+
+// Hover or click to see an avatar full size; leaving the small one, clicking
+// again, or Escape puts it away.
+//
+// The overlay does not take pointer events, so what dismisses it is leaving the
+// original image rather than reaching the backdrop -- an overlay that swallowed
+// the pointer would cover the thing whose hover is keeping it open, and flicker
+// between the two states forever.
+function enlargeable(element, source) {
+  element.classList.add("enlargeable");
+  element.addEventListener("mouseenter", () => showLarge(source));
+  element.addEventListener("mouseleave", () => hideLarge());
+  element.addEventListener("click", (event) => {
+    event.stopPropagation();
+    if ($("lightbox").classList.contains("hidden")) showLarge(source); else hideLarge();
+  });
+}
+
+function showLarge(source) {
+  const box = $("lightbox");
+  $("lightbox-image").src = source;
+  box.classList.remove("hidden");
+  box.setAttribute("aria-hidden", "false");
+}
+
+function hideLarge() {
+  const box = $("lightbox");
+  box.classList.add("hidden");
+  box.setAttribute("aria-hidden", "true");
+  $("lightbox-image").removeAttribute("src");
 }
 
 // Record hashes are hex, so they are already safe as an element id.
@@ -1127,10 +1176,16 @@ function fillRelations(box, predicate, verb, action) {
     const name = document.createElement("span");
     name.className = "name";
     name.textContent = displayName(pubkey);
+    // The avatar enlarges now, so the name is what opens a profile -- which is
+    // already how a message row behaves.
+    name.addEventListener("click", () => showProfile(pubkey));
 
-    const fp = document.createElement("span");
-    fp.className = "fp";
-    fp.textContent = fingerprint(pubkey);
+    // The whole key, not a fingerprint. This is the list where somebody
+    // checks that the person they vouched for is the person they meant, and a
+    // prefix is exactly what an impersonator would match.
+    const key = document.createElement("span");
+    key.className = "pubkey";
+    key.textContent = pubkey;
 
     const button = document.createElement("button");
     button.type = "button";
@@ -1140,7 +1195,7 @@ function fillRelations(box, predicate, verb, action) {
       (e) => status($("profile-status"), e.message, "error"),
     ));
 
-    row.append(avatarFor(pubkey), name, fp, button);
+    row.append(avatarFor(pubkey), name, key, button);
     box.append(row);
   }
 }
@@ -1313,6 +1368,9 @@ async function boot() {
     addNewFriend();
   });
   window.addEventListener("popstate", renderRoute);
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") hideLarge();
+  });
 
   $("copy-seed").addEventListener("click", async () => {
     try {

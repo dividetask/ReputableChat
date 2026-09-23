@@ -39,6 +39,39 @@ class UiRulesSpec < Minitest::Test
                     "friend and blocked lists must show the avatar, like everywhere else"
   end
 
+  # RULE: the genesis account has a face on the account creation screen, where
+  # no config has been fetched and none can be -- the account doing the looking
+  # does not exist yet. Its icon comes from the declaration already in hand.
+  def test_the_genesis_icon_survives_having_no_fetched_config
+    icon_for = within(app_js, from: "function iconFor(pubkey)", lines: 12)
+
+    assert_includes icon_for, "genesisProfile(state.genesis)",
+                    "the genesis icon must come from its declaration"
+    refute_includes app_js, 'avatarFor(pubkey, "", null)',
+                    "passing a null icon defeats the lookup the default performs"
+  end
+
+  # RULE: the overlay never takes pointer events. It opens on hover and closes
+  # when the pointer leaves the small image; an overlay that swallowed the
+  # pointer would cover the thing keeping it open and flicker between states.
+  def test_the_enlarged_avatar_does_not_swallow_the_pointer
+    css = File.read(File.expand_path("../public/css/app.css", __dir__), encoding: "UTF-8")
+    lightbox = css[/#lightbox \{[^}]*\}/]
+
+    refute_nil lightbox, "#lightbox has no rule"
+    assert_includes lightbox, "pointer-events: none"
+  end
+
+  # RULE: friend and blocked lists show the whole key. This is the list where
+  # somebody checks that who they vouched for is who they meant, and a prefix
+  # is exactly what an impersonator would match.
+  def test_relations_lists_show_the_whole_key
+    relations = within(app_js, from: "function fillRelations(", lines: 45)
+
+    assert_includes relations, "key.textContent = pubkey", "the full key must be shown"
+    refute_includes relations, "fingerprint(pubkey)", "a prefix is not enough here"
+  end
+
   # RULE: withdrawing a vouch asks first. Unfriending silently drops everything
   # that person vouches for, which is not a thing to do on a stray click.
   def test_unfriending_asks_first

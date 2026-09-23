@@ -176,3 +176,36 @@ button.danger { background: var(--danger); color: #fff; }
 .msg .actions .emote-row { display: flex; gap: 2px; align-items: center; }
 .msg .actions .emote-row.negative { border-top: 1px solid var(--line); padding-top: 2px; }
 .msg .actions .divider { width: 1px; height: 14px; background: var(--line); margin: 0 4px; }
+
+/* A public key shown in full, so it can be read and compared rather than
+   trusted. Long, so it wraps rather than pushing the button off the row. */
+.pubkey {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  opacity: 0.7;
+  word-break: break-all;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.enlargeable { cursor: zoom-in; }
+
+/* The enlarged avatar. Pointer events off, so leaving the small image is what
+   dismisses it -- the overlay must never sit between the pointer and the
+   thing it is showing. */
+#lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgb(0 0 0 / 82%);
+  pointer-events: none;
+}
+
+#lightbox-image {
+  max-width: 92vmin;
+  max-height: 92vmin;
+  border-radius: 12px;
+}

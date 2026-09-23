@@ -162,6 +162,12 @@
   </div>
 </dialog>
 
+<!-- The enlarged avatar. Not a <dialog>: it must not take focus or trap it,
+     because it opens on hover and closes when the pointer leaves. -->
+<div id="lightbox" class="hidden" aria-hidden="true">
+  <img id="lightbox-image" alt="">
+</div>
+
 <script src="/js/vendor-argon2.umd.min.js"></script>
 <script type="module" src="/js/app.js"></script>
 </body>

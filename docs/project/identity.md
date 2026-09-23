@@ -115,6 +115,32 @@ The read route takes **no pubkey** — it uses the session's — so serving some
 else's vault is not expressible through the API rather than being a check that
 has to stay correct.
 
+## Two devices editing one vault
+
+A vault is a single encrypted blob with a monotonic revision, so two signed-in
+devices both pushing will have one of them refused. The refusal is the useful
+part: it means *merge*, never *retry*. A client that reacts to a rejection by
+taking the server's copy silently drops everything it did since its last push;
+one that reacts by bumping the revision and overwriting silently drops what the
+other device did. Both are easy to write by accident, because a conflict looks
+like something to retry.
+
+The merge is per-list, and the two lists resolve in opposite directions:
+
+- **First-seen entries: earliest wins.** The whole point of a sighting is when
+  it happened, so the older record of having seen somebody is the true one.
+  Union by public key, keep the earlier sighting.
+- **Friends and blocks: latest wins.** Here the newest statement is the one the
+  person meant. Union the entries, and where both devices touched the same
+  person, take the later vault's version.
+
+There are no per-entry timestamps, so "later" means the vault that was written
+later, not the individual change. That is a deliberate limit rather than an
+oversight: friending and blocking the same person from two devices inside one
+sync window is not a thing people do by accident, and paying for it on every
+entry of every vault forever is a worse trade than living with an odd result in
+a case that barely happens.
+
 ## Login
 
 Challenge–response:
