@@ -58,7 +58,7 @@ Three properties make it safe to have:
 - **Nothing branches on it.** No code reads it, so nothing can be smuggled
   through it by writing something that reads like a directive. It is inert by
   construction rather than by policy.
-- **It is bounded** (2000 bytes) and **normalized**: an absent note and an
+- **It is bounded** (16,000 bytes, room for the rules) and **normalized**: an absent note and an
   empty one produce identical bytes, so two records a reader would call the
   same cannot carry different signatures.
 
@@ -236,11 +236,22 @@ The rules text is for people. Like every note it is never read by code; the
 software implements the rules, and the note is what anyone can hold the
 software to.
 
+### The founding notice is the source
+
+Each version's text lives in the repository as `docs/project/rules/v<n>.md`,
+and version 1 is the founding notice. The code that generates the genesis
+record reads its note straight from `docs/project/rules/v1.md` rather than
+from a copy, so the file and the chain cannot disagree. A new version is a new
+file; an existing one is never edited once published, because its bytes are
+signed into the chain.
+
+Version 1 is 7 KB, which is why a note may hold 16,000 bytes.
+
 ### Not built
 
-All of this section, and the list form of `ack` above. Today `ack` is a single
-hash and the genesis record's is null, its note is empty, and a note is capped
-at 2000 bytes — too small for the rules.
+All of this section except the note limit, and the list form of `ack` above.
+Today `ack` is a single hash, the genesis record's is null and its note is
+empty, and `script/generate_genesis.rb` does not read the rules file.
 
 ## What gets acknowledged
 
@@ -345,7 +356,8 @@ only a reader running the author's own parameters can even attempt it.
 ## Attestations
 
 The old public config carried `{friend, reported, net_votes}` per person and
-let every reader run the curve themselves. An attestation carries **scores**:
+let every reader run the curve themselves. An attestation carries **ratings**,
+already run through its author's curve, in a field named `scores`:
 
 ```json
 { "purpose": "reputablechat:attestation:v1",
@@ -358,7 +370,9 @@ let every reader run the curve themselves. An attestation carries **scores**:
                "scores": { "<pubkey>": "0.0123" } } }
 ```
 
-`reputation` is what the author thinks of that person. Most people never set it
+`reputation` is the author's **rating** of that person. The field name
+predates the distinction between the two words and is a signed name, so it
+changes only with the next shape. Most people never set it
 by hand — friending and emoting move it, and the curve that used to run in
 every reader now runs once in the author. Advanced users can set it directly.
 
@@ -376,19 +390,19 @@ hops, which is both correct and cheaper. A negative inverts, which is what
 other factor, so two negatives in a chain do multiply back to positive.
 
 The friend and report lists that used to be public are not here. They moved
-into the private vault. What the network sees is the score that resulted, never
+into the private vault. What the network sees is the rating that resulted, never
 the act that caused it.
 
 ### The derived cache
 
-`derived` is the author's own calculated scores, out to `attestation.published_hops`
-(3 by default). It is not a convenience: it is the **fourth term** of everyone
-else's score, because the walk stops at hop 2 and depth 3 is filled in from
+`derived` is the author's own calculated reputations, out to
+`attestation.published_hops` (3 by default). It is not a convenience: it is the
+**fourth term** of everyone else's reputation calculation, because the walk stops at hop 2 and depth 3 is filled in from
 these summaries rather than reached. See **Why the walk stops at two** in
 [reputation.md](reputation.md).
 
 It is still never an input to a reader's own opinion at depths 0 to 2, which
-are read from direct scores. It carries 0.0009 of the total, cannot make anyone
+are read from ratings. It carries 0.0009 of the total, cannot make anyone
 Trusted on its own, and exists mainly to lift a well-regarded stranger from
 Blocked to Tolerated.
 
@@ -399,8 +413,8 @@ curve, `show_unrated` on. A reader whose parameters hash differently has to
 recompute and the cache saves them nothing. A reader who took the numbers
 anyway would silently adopt a stranger's settings.
 
-This is the one place the project publishes a computed score, and
-[reputation.md](reputation.md) argues against exactly that — a published score
+This is the one place the project publishes a calculated reputation, and
+[reputation.md](reputation.md) argues against exactly that — a published one
 goes stale the moment the curve is retuned. The `params` hash is what contains
 the damage: stale numbers are *detectably* stale rather than quietly wrong.
 
@@ -429,14 +443,14 @@ run, so a reader takes the snapshot and replays the adjustments on top in a
 fixed order. Both are inside the signature, so the server cannot reorder them.
 
 An **emote record is already its own adjustment** — it names the author, the
-message and the emote, and the author's score for that person follows from
+message and the emote, and the author's rating of that person follows from
 it. Adjustments exist for the changes that have no other public record:
-friending, reporting, and a hand-set score or multiplier. Those acts stay
+friending, reporting, and a hand-set rating or multiplier. Those acts stay
 private; only their arithmetic result is published.
 
 A full attestation is republished after `attestation.resubmit_after_changes`
 changes or `attestation.resubmit_after_seconds`, whichever comes first, and
-supersedes every adjustment against the previous revision. Only score-changing
+supersedes every adjustment against the previous revision. Only rating-changing
 events count toward the tally. Sending a message is not one — it cannot move a
 number in the file, so counting it would republish for a reason that could not
 have changed anything.

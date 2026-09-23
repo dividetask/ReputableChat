@@ -40,7 +40,7 @@ limits:
   image_bytes: 262144
   message_bytes: 4000
   notice_bytes: 16000
-  note_bytes: 2000
+  note_bytes: 16000
   # Advice rather than a limit: nothing rejects a vault for holding more. It
   # tells a client how many first-seen entries to keep before pruning, since it
   # is the client that has to decide what to drop. Friends and blocked accounts

@@ -104,7 +104,7 @@ module ReputableChat
 
     # --- chain records ------------------------------------------------------
 
-    MAX_NOTE    = 2_000
+    MAX_NOTE    = 16_000
     MAX_HANDLE  = 64
     MAX_BIO     = 280
     MAX_SCORES  = 10_000

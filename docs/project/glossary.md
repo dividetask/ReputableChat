@@ -56,7 +56,9 @@ valid. Carried in the `note` of the genesis account's identity declaration, one
 revision per version, never edited. A record follows the newest version it
 acknowledges. [chain.md](chain.md)
 
-**Founding notice** — the notice that supersedes nothing. One per chain.
+**Founding notice** — version 1 of the rules, kept as
+`docs/project/rules/v1.md`, from which the genesis record's note is generated.
+As a notice record it is the one kind that supersedes nothing. One per chain.
 
 ## Fields that travel on many records
 
@@ -122,20 +124,26 @@ declaration and an attestation.
 
 ## Reputation
 
-**Reputation** — what one person thinks another is worth, as a decimal string
-in their attestation. Subjective by construction; there is no global score.
+**Rating** — what one person gives another: a decimal from −1 to 1 in their
+own attestation, moved by friending, emoting and reporting, or set by hand.
+Yours is the only rating you control.
+
+**Reputation** — what a viewer calculates for someone from their own rating of
+them and the ratings others have given them, weighted by the ladder.
+Subjective by construction: every viewer calculates their own, and there is no
+global one. The code calls it `effective`.
 
 **Trust multiplier** — what someone's *recommendations* are worth, as distinct
 from what they are worth. Compounds along a path; a zero prunes the branch
 while leaving that person visible. Clamped to −1..1.
 
-**Derived cache** — an attestation author's own calculated scores, published so
-they can serve as the fourth term of everybody else's. Carries a parameter
+**Derived cache** — an attestation author's own calculated reputations,
+published so they can serve as the fourth term of everybody else's. Carries a parameter
 fingerprint. [reputation.md](reputation.md)
 
-**Parameter fingerprint** — a hash of the parameters a score was computed
-under. Advisory and incomplete: a multi-hop estimate averages scores that each
-came from a different author's curve.
+**Parameter fingerprint** — a hash of the parameters a reputation was
+calculated under. Advisory and incomplete: a derived reputation averages
+ratings that each came from a different author's curve.
 
 **Hop** / **depth** — distance from the viewer. The walk stops at hop 2 and
 fills depth 3 from derived caches.
@@ -143,13 +151,13 @@ fills depth 3 from derived caches.
 **Ladder** — the per-hop weights, `(1 - k) * k^d`: 0.9, 0.09, 0.009, 0.0009.
 
 **Curve** — the vote curve turning a net emote count into a value. An
-*authoring* parameter now that attestations carry scores.
+*authoring* parameter now that attestations carry ratings.
 
 **Gate** — `gate.min_rating`, the rating a link must exceed for the walk to
 continue through it.
 
 **Buckets** — **Trusted** (≥ `trusted_at`), **Tolerated** (> 0), **Blocked**
-(≤ 0). Computed at login; the scores are then discarded.
+(≤ 0). Computed at login; the reputations are then discarded.
 
 ## Identity
 
@@ -182,6 +190,7 @@ Do not reintroduce these; they each have a current name above.
 | reaction | emote |
 | announcement | notice |
 | Tim (as the general term) | genesis account |
+| score | rating (given) or reputation (calculated) |
 
 And one word to avoid rather than replace: **troll** is not a category this
 system has an opinion about. Someone unbearable to one reader is worth reading

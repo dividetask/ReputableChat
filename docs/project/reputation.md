@@ -1,8 +1,8 @@
 # Reputation
 
-Reputation is **subjective**. There is no global score. Every number here is one
-viewer's view of the network, computed on that viewer's own machine from other
-people's published ratings. Two clients may differ in the last decimal place and
+Reputation is **subjective**. There is no global reputation. Every number here
+is one viewer's view of the network, calculated on that viewer's own machine
+from their own ratings and other people's published ones. Two clients may differ in the last decimal place and
 that is not a bug — it is what "your view of the network" means.
 
 Implementation: `lib/reputable_chat/reputation/` (Ruby, reference) and
@@ -11,7 +11,9 @@ Implementation: `lib/reputable_chat/reputation/` (Ruby, reference) and
 
 ## Direct ratings
 
-What one person publishes about another. Three actions:
+A **rating** is what one person gives another; a **reputation** is what a
+viewer calculates from their own rating and everybody else's. Three actions
+move a rating:
 
 | action | effect |
 |---|---|
@@ -64,13 +66,13 @@ weight(d) = (1 - k) * k^d          k = 0.1, hops 0..7
 |---|---|---|---|---|---|---|---|---|
 | weight | 0.9 | 0.09 | 0.009 | 0.0009 | 9e-5 | 9e-6 | 9e-7 | 9e-8 |
 
-These sum to 1, so an effective reputation is always inside −1..+1 with no
+These sum to 1, so a reputation is always inside −1..+1 with no
 clamping. Depth 0 takes `1-k` of the total, which means **the ceiling for anyone
 you have never personally rated is exactly `k`** — 0.1. That is intended:
 strangers are meant to sit in the Tolerated band, and the pressure that creates to
 friend people or like their messages is the point of the app.
 
-Effective reputation is the weighted sum over depths of the mean rating at that
+A reputation is the weighted sum over depths of the mean rating at that
 depth. The mean is taken over **the people who actually rated the target** at
 that depth, not over everyone at that depth with non-raters counted as zero.
 
@@ -94,22 +96,22 @@ more realistic 150 it is 3.4 million. There is no version of "fetch all of
 them" that works.
 
 So depth 3 is filled in rather than walked. Every attestation publishes its
-author's own calculated scores out to `attestation.published_hops`, and a
-viewer takes the mean of those estimates from the people at hop 2:
+author's own calculated reputations out to `attestation.published_hops`, and a
+viewer takes the mean of those derived reputations from the people at hop 2:
 
 ```
-effective = 0.9    * your own score
-          + 0.09   * mean score published by the people you rated
-          + 0.009  * mean score published by the people they rated
-          + 0.0009 * mean ESTIMATE published by the people they rated
+reputation = 0.9    * your own rating
+           + 0.09   * mean rating published by the people you rated
+           + 0.009  * mean rating published by the people they rated
+           + 0.0009 * mean REPUTATION published by the people they rated
 ```
 
-The first three terms read direct scores. The fourth reads a summary, and
+The first three terms read ratings. The fourth reads a summary, and
 trusts the people at hop 2 to have done their own arithmetic honestly — which
 is the same thing the third term already trusts them for.
 
-Those weights sum to 0.9999 rather than 1. Under-summing is harmless: an
-effective score is still inside −1..+1 with no clamping. The old hops 4 to 7
+Those weights sum to 0.9999 rather than 1. Under-summing is harmless: a
+reputation is still inside −1..+1 with no clamping. The old hops 4 to 7
 are simply gone, and their 0.0001 with them.
 
 ### What the fourth term is for
@@ -125,30 +127,30 @@ them into Tolerated without anyone nearby vouching for them. It exists to
 rescue the well-regarded stranger, and it is deliberately too weak to do
 anything else.
 
-It cuts the other way too, though only just. Someone scoring between 0 and
-0.0009 from the first three terms can be pushed back under the line by a
+It cuts the other way too, though only just. Someone whose first three terms
+come to between 0 and 0.0009 can be pushed back under the line by a
 negative fourth term. That is a real bucket change, from Tolerated to Blocked,
-on a hair's-breadth score.
+on a hair's-breadth reputation.
 
 ### What it costs, and what it does not buy
 
-The estimate is reached through its author's own configuration, so it carries a
+The derived reputation is reached through its author's own configuration, so it carries a
 fingerprint of the parameters it was computed under (see
 [chain.md](chain.md)). That fingerprint is **advisory and incomplete**: a
-multi-hop estimate averages scores that each came from a different author's
+derived reputation averages ratings that each came from a different author's
 curve, and no single hash can describe all of them. It says "this came from a
 different setup", never "this is safe to use".
 
-There is also mild double counting. A hop-2 person's estimate is 90% their own
-direct score for the target, which the third term already counted at 0.009. So
+There is also mild double counting. A hop-2 person's derived reputation for the
+target is 90% their own rating of it, which the third term already counted at 0.009. So
 the fourth term re-counts their direct opinion at 0.00081, and only the
 remainder is genuinely news from further out.
 
-And the cache is not free to publish. An attestation carrying estimates for
+And the cache is not free to publish. An attestation carrying derived reputations for
 everyone within three hops is thousands of entries, and a viewer fetches
 hundreds of attestations. That is the cost of not walking hop 3 directly, and
 it only stays reasonable while the published set does. It will need bounding —
-Merkle proofs over the estimate map, so a reader can fetch the few entries it
+Merkle proofs over the derived map, so a reader can fetch the few entries it
 wants and verify them against the signed root, are the known way to do it
 without asking the server to be trusted about what it left out.
 
@@ -161,7 +163,7 @@ Deterministic selection — nearest first, then by pubkey — at least makes two
 clients with the same view agree.
 
 Each person is counted once, at their **shortest** distance. Someone reachable
-by two paths does not get to vote twice. Nobody contributes to their own score.
+by two paths does not get to vote twice. Nobody contributes to their own reputation.
 
 Your rating of someone is a **gate, not a multiplier**. A contact you rated
 +0.001 carries exactly the same weight in judging strangers as one you friended
@@ -171,7 +173,7 @@ and maxed out.
 
 Computed once at login, then used for the session.
 
-| bucket | score |
+| bucket | reputation |
 |---|---|
 | Trusted | >= `trusted_at` (0.01) |
 | Tolerated | > 0 |
@@ -190,16 +192,16 @@ for anyone willing to wade through the muck and vouch for newcomers. It surfaces
 only the unrated, never the net-negative.
 
 That rule exists because of a real bug in an earlier design. When visibility was
-purely threshold-based, an unrated spammer scored 0 and was hidden — but the
-same spammer *reported* from two hops out scored −0.009, which is above any sane
+purely threshold-based, an unrated spammer sat at 0 and was hidden — but the
+same spammer *reported* from two hops out came to −0.009, which is above any sane
 hide threshold, so reporting them made them **more** visible. The further away
 the reporter, the stronger the effect. Sign-based visibility removes the whole
 class of problem.
 
 ## Sessions
 
-Scores are computed once at login, everyone is sorted into a bucket, and the
-numbers are discarded. For the rest of the session the buckets are what matter.
+Reputations are calculated once at login, everyone is sorted into a bucket,
+and the numbers are discarded. For the rest of the session the buckets are what matter.
 
 The session holds a **snapshot** of the graph, not a live view. Freezing only
 the walk is not enough: a rating published later by someone already inside it
@@ -217,14 +219,14 @@ distance are needed:
 | 2 hops away | 2 |
 | 3+ hops | no immediate effect |
 
-Because the score is gone by then, this is a flat count rather than a weighing.
+Because the reputation is gone by then, this is a flat count rather than a weighing.
 That makes it **stricter than the login-time maths**, so someone blocked this
 way may reappear at the next login once the report is averaged against
 everything else. That is expected, not a bug.
 
-`Session#explain` re-derives the score and itemises it — which hop, who rated,
+`Session#explain` re-derives the reputation and itemises it — which hop, who rated,
 what each contributed. It is defined in terms of the same `breakdown` that
-produces the score, so what the UI explains cannot drift from what it acts on.
+produces the reputation, so what the UI explains cannot drift from what it acts on.
 
 ## The coupling — read before retuning anything
 
@@ -237,7 +239,7 @@ curve(1)  <  k³  <  curve(2)
 ```
 
 which pins `A` to the window **(0.00025, 0.001)**. The arithmetic is unchanged
-now that depth 3 is the estimate term rather than a walked hop, but it means
+now that depth 3 is the derived term rather than a walked hop, but it means
 something different: one like of yours is outweighed by your two-hop
 neighbourhood collectively estimating someone at −1, and two likes outweigh it.
 It is a statement about a summary rather than about a single distant reporter. At `A = 0.0004` the margins
@@ -268,10 +270,13 @@ wasted work.
 
 Three layers resolve in order: a user's pinned value, the current server
 default, the hardcoded fallback. A key that is absent or blank in a user's
-config tracks the default, so editing `config/reputation.yml` moves every user
+settings tracks the default, so editing `config/reputation.yml` moves every user
 who never pinned that setting and nobody who did.
 
-Because each reader applies their own config, published configs carry **actions**
-(`friend`, `reported`, `net_votes`) rather than computed scores. A published
-score would go stale the moment the curve was retuned and would need every user
-in the network to re-sign. Action counts stay valid forever.
+The curve is the exception. An attestation carries ratings that its author's
+curve has already produced, so a retune changes the ratings you publish from
+then on and never anybody else's. That replaced an earlier design in which
+published records carried actions (`friend`, `reported`, `net_votes`) and every
+reader ran the curve; the friend and report lists are private now, so there are
+no public actions left to run it on. See **Attestations** in
+[chain.md](chain.md).
