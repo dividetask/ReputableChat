@@ -62,6 +62,17 @@ class UiRulesSpec < Minitest::Test
     assert_includes lightbox, "pointer-events: none"
   end
 
+  # RULE: clicking an avatar opens that person's profile. It is what an avatar
+  # has always done and what somebody reaches for when they want to know who
+  # this is; enlarging is the hover affordance, not the click one.
+  def test_clicking_an_avatar_opens_the_profile
+    enlargeable = within(app_js, from: "function enlargeable(", lines: 20)
+
+    assert_includes enlargeable, "showProfile(pubkey)", "a click must open the profile"
+    assert_includes enlargeable, "hideLarge()",
+                    "a tap arrives with the overlay up, so it must come down first"
+  end
+
   # RULE: friend and blocked lists show the whole key. This is the list where
   # somebody checks that who they vouched for is who they meant, and a prefix
   # is exactly what an impersonator would match.

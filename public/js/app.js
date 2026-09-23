@@ -758,7 +758,7 @@ function avatarFor(pubkey, extra = "", icon = iconFor(pubkey)) {
     img.className = `avatar ${extra}`.trim();
     img.src = `/images/${icon}`;
     img.alt = "";
-    enlargeable(img, `/images/${icon}`);
+    enlargeable(img, `/images/${icon}`, pubkey);
     return img;
   }
 
@@ -775,20 +775,25 @@ function avatarFor(pubkey, extra = "", icon = iconFor(pubkey)) {
   return placeholder;
 }
 
-// Hover or click to see an avatar full size; leaving the small one, clicking
-// again, or Escape puts it away.
+// Hover to see an avatar full size; leaving it, or Escape, puts it away.
+// Clicking opens the profile, which is what an avatar has always done and what
+// somebody reaches for when they want to know who this is.
 //
 // The overlay does not take pointer events, so what dismisses it is leaving the
 // original image rather than reaching the backdrop -- an overlay that swallowed
 // the pointer would cover the thing whose hover is keeping it open, and flicker
 // between the two states forever.
-function enlargeable(element, source) {
+function enlargeable(element, source, pubkey) {
   element.classList.add("enlargeable");
   element.addEventListener("mouseenter", () => showLarge(source));
   element.addEventListener("mouseleave", () => hideLarge());
   element.addEventListener("click", (event) => {
     event.stopPropagation();
-    if ($("lightbox").classList.contains("hidden")) showLarge(source); else hideLarge();
+    // The enlargement is a hover affordance, and a tap is not a hover: on a
+    // touch screen the click arrives with the overlay already up, so it has to
+    // come down before the panel underneath it changes.
+    hideLarge();
+    showProfile(pubkey);
   });
 }
 
@@ -1049,7 +1054,9 @@ function showProfile(pubkey) {
     $("my-avatar").replaceChildren(avatarFor(pubkey, "avatar-large", state.profile.icon));
     renderRelations();
   } else {
-    $("profile-icon").replaceChildren(avatarFor(pubkey, "avatar-large", profile.icon));
+    // iconFor rather than the fetched profile's icon, so an account with no
+    // config to fetch -- the genesis -- still has a face here.
+    $("profile-icon").replaceChildren(avatarFor(pubkey, "avatar-large"));
     $("profile-name").textContent = profile.username || "someone";
     $("profile-fp").textContent = fingerprint(pubkey);
     $("profile-message").textContent = profile.message || "";
