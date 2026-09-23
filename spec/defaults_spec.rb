@@ -86,20 +86,55 @@ class DefaultsSpec < Minitest::Test
                     "seed the genesis profile before fetched configs overwrite it"
   end
 
-  # RULE: seeded at creation and nowhere else. Re-adding it whenever it is
-  # missing would mean removing it never took, which is the same thing as not
-  # being able to remove it. Asserted against the source, because the failure
-  # is a second call site rather than a wrong return value.
-  def test_the_seed_happens_only_at_identity_creation
-    # Read as UTF-8 explicitly: app.js carries emoji, and the default
-    # external encoding here is not always.
-    app = File.read(File.expand_path("../public/js/app.js", __dir__), encoding: "UTF-8")
-    call_sites = app.scan(/initialRatings\(/).size
+  # RULE: seeded once, when account creation begins, and never re-applied.
+  # Re-adding it whenever it is missing would mean removing it never took,
+  # which is the same thing as not being able to remove it. Asserted against
+  # the source, because the failure is a second call site rather than a wrong
+  # return value.
+  def test_the_seed_happens_only_when_account_creation_begins
+    assert_equal 1, app_js.scan(/initialRatings\(/).size,
+                 "initialRatings must be called once -- a second call site would " \
+                 "re-add a friendship the user removed"
+    assert_match(/function resetNewFriends\(\)[\s\S]{0,300}initialRatings\(/, app_js,
+                 "the one call site must be the account creation screen's reset")
+  end
 
-    assert_equal 1, call_sites,
-                 "initialRatings must be called once, in the registration path -- " \
-                 "a second call site would re-add a friendship the user removed"
-    assert_match(/async function registerWith[\s\S]{0,400}initialRatings\(/, app,
-                 "the one call site must be the registration path")
+  # RULE: what gets published is the list the person left on the screen, not a
+  # freshly seeded one. Seeding at publish time would quietly put the genesis
+  # account back after they took it off.
+  def test_registration_publishes_the_list_the_screen_was_left_with
+    register = app_js[/async function registerWith[\s\S]{0,900}?\n\}/]
+    refute_nil register, "registerWith not found"
+
+    assert_includes register, "state.newFriends", "registration must publish the chosen list"
+    refute_includes register, "initialRatings(",
+                    "registration must not re-seed, or removing the genesis would not take"
+  end
+
+  # RULE: the screen is re-seeded only on the two ways into account creation.
+  # Re-seeding on every render would restore the genesis on the next repaint.
+  def test_the_screen_is_reseeded_only_when_entering_account_creation
+    assert_equal 2, app_js.scan(/resetNewFriends\(\);/).size,
+                 "reset belongs to the two entries into account creation and nowhere else"
+    refute_match(/function renderRoute\(\)[\s\S]{0,400}resetNewFriends/, app_js,
+                 "rendering the route must not re-seed the list")
+  end
+
+  # RULE: a key pasted on the new account screen must look like a key. The
+  # field takes raw base64url, so it is the only thing standing between a
+  # typo and a friendship with nobody.
+  def test_a_pasted_friend_key_is_validated
+    add = app_js[/function addNewFriend\(\)[\s\S]{0,900}?\n\}/]
+    refute_nil add, "addNewFriend not found"
+
+    assert_includes add, "PUBKEY.test(pubkey)", "a pasted key must be checked"
+    assert_includes add, "state.me?.pubkey", "their own key must be refused"
+    assert_includes add, "state.newFriends[pubkey]", "duplicates must be refused"
+  end
+
+  # app.js carries emoji, and the default external encoding here is not always
+  # UTF-8.
+  def app_js
+    @app_js ||= File.read(File.expand_path("../public/js/app.js", __dir__), encoding: "UTF-8")
   end
 end

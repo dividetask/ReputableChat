@@ -25,6 +25,18 @@
       <p class="hint">Names are not unique. People are identified by the
          fingerprint next to their name, never by the name itself.</p>
 
+      <h3 class="section">Friends</h3>
+      <p class="hint">Who you trust decides what you can see. An account nobody
+         has vouched for is invisible, so starting with nobody means starting
+         with a blank screen.</p>
+      <div id="new-friends"></div>
+      <div class="row">
+        <input id="new-friend-key" type="text" autocomplete="off"
+               autocapitalize="off" spellcheck="false" placeholder="paste a public key">
+        <button id="new-friend-add" type="button" class="secondary">Add</button>
+      </div>
+      <p id="new-friend-status" class="status"></p>
+
       <!-- Only ever shown for a seed this page generated. A seed the user
            brought is never echoed back to the screen. -->
       <div id="new-seed-block">

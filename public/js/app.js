@@ -22,7 +22,7 @@ const state = {
   ratings: {}, graph: new Graph(), reputation: null, session: null,
   seq: 0, voted: new Set(), viewing: null, settings: {}, privateRevision: 0,
   reactions: new Map(), recentlyBlocked: new Map(), replyingTo: null,
-  genesis: null, tip: null,
+  genesis: null, tip: null, newFriends: {},
   renderEpoch: 0, renderedKey: null, pendingRegistration: false,
 };
 
@@ -252,9 +252,104 @@ async function signIn(derived, { restoring = false } = {}) {
   $("new-seed-block").classList.add("hidden");
   $("unregistered-note").classList.remove("hidden");
   $("new-name").value = "";
+  resetNewFriends();
   goTo(NEW_ACCOUNT_PATH);
   $("new-name").focus();
   refreshSeedField();
+}
+
+// --- choosing friends before the account exists -------------------------
+//
+// A friend list is a list of public keys and nothing else, so none of this
+// needs the server: a key that belongs to nobody yet, or to nobody ever, is
+// still a perfectly good thing to write down. That is what makes it possible
+// to choose here, before the account being created has said anything.
+
+// Before login there are no fetched profiles, so the only name available is the
+// genesis account's, out of the declaration already in hand.
+function newAccountName(pubkey) {
+  if (state.genesis && pubkey === state.genesis.pubkey) {
+    return genesisProfile(state.genesis)?.username || "the genesis account";
+  }
+  return "unknown";
+}
+
+function resetNewFriends() {
+  state.newFriends = initialRatings({
+    genesisPubkey: state.genesis?.pubkey,
+    ownPubkey: state.me?.pubkey,
+  });
+  renderNewFriends();
+}
+
+function renderNewFriends() {
+  const box = $("new-friends");
+  box.replaceChildren();
+
+  const keys = Object.keys(state.newFriends);
+  if (!keys.length) {
+    const empty = document.createElement("p");
+    empty.className = "empty";
+    empty.textContent = "nobody — you will not be able to see anyone";
+    return box.append(empty);
+  }
+
+  for (const pubkey of keys) {
+    const row = document.createElement("div");
+    row.className = "row";
+
+    const name = document.createElement("span");
+    name.className = "name";
+    name.textContent = newAccountName(pubkey); // textContent, never innerHTML
+
+    const fp = document.createElement("span");
+    fp.className = "fp";
+    fp.textContent = fingerprint(pubkey);
+
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "secondary";
+    remove.textContent = "remove";
+    remove.addEventListener("click", () => removeNewFriend(pubkey));
+
+    row.append(avatarFor(pubkey, "", null), name, fp, remove);
+    box.append(row);
+  }
+}
+
+// Removing the genesis account here is the one choice on this screen with a
+// consequence somebody might not have in mind, so it is the one that asks.
+// Removing a key pasted in ten seconds ago is not worth a dialog.
+async function removeNewFriend(pubkey) {
+  if (state.genesis && pubkey === state.genesis.pubkey) {
+    const sure = await confirmAction(
+      `Start without ${newAccountName(pubkey)}? Nothing it vouches for will reach ` +
+      "you, and accounts nobody else has vouched for will be invisible. You can " +
+      "add it back later.",
+      "Yes, remove",
+    );
+    if (!sure) return;
+  }
+
+  delete state.newFriends[pubkey];
+  renderNewFriends();
+}
+
+function addNewFriend() {
+  const field = $("new-friend-key");
+  const pubkey = field.value.trim();
+  const say = (message, kind) => status($("new-friend-status"), message, kind);
+
+  if (!PUBKEY.test(pubkey)) return say("That is not a public key.", "error");
+  if (pubkey === state.me?.pubkey) return say("That is your own key.", "error");
+  if (state.newFriends[pubkey]) return say("Already on the list.", "error");
+
+  // The same shape the seeded friendship uses, so nothing downstream can tell
+  // which entries were chosen here and which were the default.
+  state.newFriends[pubkey] = { friend: true, reported: false, net_votes: 0, cleared: false };
+  field.value = "";
+  say("Added.", "ok");
+  renderNewFriends();
 }
 
 // A brand new seed, shown so it can be copied across.
@@ -265,6 +360,7 @@ async function startNewAccount() {
   state.pendingRegistration = false;
   $("new-seed-block").classList.remove("hidden");
   $("unregistered-note").classList.add("hidden");
+  resetNewFriends();
   goTo(NEW_ACCOUNT_PATH);
   refreshSeedField();
   $("new-name").focus();
@@ -274,13 +370,11 @@ async function registerWith(username) {
   await post("/api/register", {});
   state.profile = { username, message: "", icon: null };
 
-  // Seeded here and only here, in the first declaration this identity ever
-  // publishes. Anywhere else would re-add it after it was removed, which is
-  // the same as not being able to remove it.
-  state.ratings = initialRatings({
-    genesisPubkey: state.genesis?.pubkey,
-    ownPubkey: state.me.pubkey,
-  });
+  // Whatever was on the new account screen, which started from the seeded
+  // default and is theirs to have edited. Their own key can only have got in
+  // here by being pasted before they had one, so it goes now.
+  state.ratings = { ...state.newFriends };
+  delete state.ratings[state.me.pubkey];
 
   await publishConfig();
   await enterChat();
@@ -1210,6 +1304,14 @@ async function boot() {
   $("new-name").addEventListener("input", refreshSeedField);
 
   $("generate").addEventListener("click", () => startNewAccount());
+  $("new-friend-add").addEventListener("click", () => addNewFriend());
+  $("new-friend-key").addEventListener("keydown", (event) => {
+    // Enter in this field must not submit the login form and create the
+    // account with a key half typed.
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    addNewFriend();
+  });
   window.addEventListener("popstate", renderRoute);
 
   $("copy-seed").addEventListener("click", async () => {
