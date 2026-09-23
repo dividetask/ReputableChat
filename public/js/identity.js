@@ -161,12 +161,12 @@ export function loginPayload({ pubkey, nonce, origin, ts }) {
   return { purpose: PURPOSE.LOGIN, pubkey, nonce, origin, ts };
 }
 
-export function messagePayload({ author, room, seq, prev, body, ack, ts, replyTo = null, note = null }) {
-  return { purpose: PURPOSE.MESSAGE, author, room, seq, prev, reply_to: replyTo, ack, note, ts, body };
+export function messagePayload({ pubkey, room, body, ack, ts, replyTo = null, note = null }) {
+  return { purpose: PURPOSE.MESSAGE, pubkey, room, reply_to: replyTo, ack, note, ts, body };
 }
 
-export function emotePayload({ author, room, message, emote, ack, ts, note = null }) {
-  return { purpose: PURPOSE.EMOTE, author, room, message, emote, ack, note, ts };
+export function emotePayload({ pubkey, room, message, emote, ack, ts, note = null }) {
+  return { purpose: PURPOSE.EMOTE, pubkey, room, message, emote, ack, note, ts };
 }
 
 // `revision` sits outside the ciphertext so the server can reject a rollback
@@ -212,16 +212,16 @@ export function adjustmentPayload({
 // matches its signature, and the point of a notice is that what was said is
 // still there to be checked.
 export function noticePayload({
-  publisher, revision, kind, title, body, ack, ts, supersedes = null, note = null,
+  pubkey, revision, kind, title, body, ack, ts, supersedes = null, note = null,
 }) {
   return {
-    purpose: PURPOSE.NOTICE, publisher, revision, kind, title, body,
+    purpose: PURPOSE.NOTICE, pubkey, revision, kind, title, body,
     supersedes, ack, note, ts,
   };
 }
 
-export function releasePayload({ publisher, revision, label, files, notes, ack, ts, note = null }) {
-  return { purpose: PURPOSE.RELEASE, publisher, revision, label, files, notes, ack, note, ts };
+export function releasePayload({ pubkey, revision, label, files, notes, ack, ts, note = null }) {
+  return { purpose: PURPOSE.RELEASE, pubkey, revision, label, files, notes, ack, note, ts };
 }
 
 // Verifies a blob the server handed back against a public key.

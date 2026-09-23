@@ -40,7 +40,6 @@ require "reputable_chat/cryptography/payload"
 require "reputable_chat/cryptography/record"
 require "reputable_chat/cryptography/vault"
 require "reputable_chat/reputation/engine"
-require "reputable_chat/reputation/fingerprint"
 require "reputable_chat/store/memory"
 
 module Tim
@@ -179,26 +178,22 @@ module Tim
     room = options[:room]
     messages = client.get_json("/api/room/#{room}/messages").fetch("messages")
 
-    seq = messages.select { |m| m["author"] == client.pubkey }.map { |m| m["seq"].to_i }.max.to_i + 1
     ack = choose_ack(client, messages)
     ts = Time.now.to_i
 
-    # `prev` stays nil, matching the browser. Chaining an author's own messages
-    # is not implemented anywhere yet, and a chain that is right within one
-    # room and silently skips in another is worse than an absent one.
-    payload = Payload.message(author: client.pubkey, room: room, seq: seq, prev: nil,
-                              body: body, ack: ack, issued_at: ts, note: options[:note])
+    payload = Payload.message(pubkey: client.pubkey, room: room, body: body,
+                              ack: ack, issued_at: ts, note: options[:note])
     canonical = Crypto::Canonical.dump(payload)
     signature = client.sign(payload)
 
     client.post_json("/api/room/#{room}/message",
-                     { "seq" => seq, "prev" => nil, "ack" => ack, "body" => body,
-                       "note" => options[:note], "ts" => ts, "signature" => signature })
+                     { "ack" => ack, "body" => body, "note" => options[:note],
+                       "ts" => ts, "signature" => signature })
 
     # The same hash the server derived, from the same two strings.
     hash = Crypto::Record.digest(payload: canonical, signature: signature)
     puts
-    puts "  Posted to ##{room} as ##{seq}."
+    puts "  Posted to ##{room}."
     puts "  Record  #{hash}"
     puts "  Ack     #{ack}#{ack == ReputableChat::Genesis.current.hash ? '  (genesis)' : ''}"
     puts "  Note    #{options[:note]}" if options[:note]
@@ -364,14 +359,11 @@ module Tim
   end
 
   # An empty cache, deliberately. `derived` is the author's own calculated
-  # scores for everyone their walk reached, and this CLI does not walk -- it
-  # never fetches anybody else's attestation. Publishing hops 0 and no scores
-  # says exactly that, where publishing a hop-0 answer as though it were a walk
-  # would offer readers a cache that is wrong rather than absent.
-  def derived
-    { "hops" => 0, "scores" => {},
-      "params" => ReputableChat::Reputation::Fingerprint.of(ReputableChat::Config.load) }
-  end
+  # reputations for everyone their walk reached, and this CLI does not walk --
+  # it never fetches anybody else's attestation. Publishing none says exactly
+  # that, where publishing a hop-0 answer as though it were a walk would offer
+  # readers a cache that is wrong rather than absent.
+  def derived = { "scores" => {} }
 
   # The same text the browser writes for the same number. Shared rather than
   # reimplemented here, because two producers of a signed field that agree on
@@ -393,9 +385,9 @@ module Tim
 
     hit = messages.reverse.find do |message|
       next false unless message["hash"]
-      next true if message["author"] == client.pubkey
+      next true if message["pubkey"] == client.pubkey
 
-      engine.effective(viewer: client.pubkey, target: message["author"]) > bar
+      engine.effective(viewer: client.pubkey, target: message["pubkey"]) > bar
     end
 
     hit ? hit["hash"] : ReputableChat::Genesis.current.hash

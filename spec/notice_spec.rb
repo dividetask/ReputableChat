@@ -51,7 +51,7 @@ class NoticeSpec < Minitest::Test
   def notice_body(revision: 1, kind: "policy", title: "A title", body: "A body.",
                   supersedes: nil)
     ts = Time.now.to_i
-    payload = Payload.notice(publisher: @pubkey, revision: revision, kind: kind,
+    payload = Payload.notice(pubkey: @pubkey, revision: revision, kind: kind,
                              title: title, body: body, ack: ack, issued_at: ts,
                              supersedes: supersedes)
     { "revision" => revision, "kind" => kind, "title" => title, "body" => body,

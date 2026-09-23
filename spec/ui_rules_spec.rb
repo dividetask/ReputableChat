@@ -122,7 +122,7 @@ class UiRulesSpec < Minitest::Test
 
     assert_includes undo, "confirm = true",
                     "the default must be to ask, so a later call site asks by default"
-    assert_includes app_js, "undoReport(message.author, { confirm: false })",
+    assert_includes app_js, "undoReport(message.pubkey, { confirm: false })",
                     "the undo beside a just-blocked message must stay instant"
   end
 end

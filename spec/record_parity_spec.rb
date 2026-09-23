@@ -2,7 +2,6 @@
 
 require_relative "spec_helper"
 require "reputable_chat/cryptography/record"
-require "reputable_chat/reputation/fingerprint"
 require "open3"
 require "json"
 
@@ -11,12 +10,10 @@ require "json"
 # server cannot follow and no reference resolves -- with nothing failing loudly
 # to say why. Same failure mode as canonical_parity_spec, one layer up.
 class RecordParitySpec < Minitest::Test
-  Record      = ReputableChat::Cryptography::Record
-  Fingerprint = ReputableChat::Reputation::Fingerprint
+  Record  = ReputableChat::Cryptography::Record
 
-  RECORDS      = File.expand_path("fixtures/record_vectors.json", __dir__)
-  FINGERPRINTS = File.expand_path("fixtures/fingerprint_vectors.json", __dir__)
-  SCRIPT       = File.expand_path("record_parity.mjs", __dir__)
+  RECORDS = File.expand_path("fixtures/record_vectors.json", __dir__)
+  SCRIPT  = File.expand_path("record_parity.mjs", __dir__)
 
   def test_ruby_and_javascript_hash_records_identically
     skip "node is not installed" unless node?
@@ -33,10 +30,9 @@ class RecordParitySpec < Minitest::Test
   end
 
   def expected
-    records = JSON.parse(File.read(RECORDS)).map do |vector|
+    JSON.parse(File.read(RECORDS)).map do |vector|
       Record.digest(payload: vector["payload"], signature: vector["signature"])
     end
-    records + JSON.parse(File.read(FINGERPRINTS)).map { |map| Fingerprint.digest(map) }
   end
 
   def node? = system("node", "--version", out: File::NULL, err: File::NULL)

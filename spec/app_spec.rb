@@ -192,11 +192,10 @@ class AppSpec < Minitest::Test
     log_in
     ts = Time.now.to_i
     target = a_record_hash("target")
-    payload = Payload.message(author: @pubkey, room: "general", seq: 1, prev: nil,
-                              body: "agreed", ack: ack, issued_at: ts, reply_to: target)
+    payload = Payload.message(pubkey: @pubkey, room: "general", body: "agreed", ack: ack, issued_at: ts, reply_to: target)
 
     post_json "/api/room/general/message",
-              { "seq" => 1, "prev" => nil, "ack" => ack, "body" => "agreed", "ts" => ts,
+              { "ack" => ack, "body" => "agreed", "ts" => ts,
                 "reply_to" => target, "signature" => sign(payload) }
     assert_equal 200, last_response.status
 
@@ -208,11 +207,10 @@ class AppSpec < Minitest::Test
   def test_rejects_a_reply_whose_target_was_altered
     log_in
     ts = Time.now.to_i
-    payload = Payload.message(author: @pubkey, room: "general", seq: 1, prev: nil,
-                              body: "agreed", ack: ack, issued_at: ts, reply_to: a_record_hash("target"))
+    payload = Payload.message(pubkey: @pubkey, room: "general", body: "agreed", ack: ack, issued_at: ts, reply_to: a_record_hash("target"))
 
     post_json "/api/room/general/message",
-              { "seq" => 1, "prev" => nil, "ack" => ack, "body" => "agreed", "ts" => ts,
+              { "ack" => ack, "body" => "agreed", "ts" => ts,
                 "reply_to" => a_record_hash("other"), "signature" => sign(payload) }
 
     assert_equal 400, last_response.status
@@ -221,11 +219,10 @@ class AppSpec < Minitest::Test
   def test_rejects_a_malformed_reply_target
     log_in
     ts = Time.now.to_i
-    payload = Payload.message(author: @pubkey, room: "general", seq: 1, prev: nil,
-                              body: "hi", ack: ack, issued_at: ts, reply_to: "nope")
+    payload = Payload.message(pubkey: @pubkey, room: "general", body: "hi", ack: ack, issued_at: ts, reply_to: "nope")
 
     post_json "/api/room/general/message",
-              { "seq" => 1, "prev" => nil, "ack" => ack, "body" => "hi", "ts" => ts,
+              { "ack" => ack, "body" => "hi", "ts" => ts,
                 "reply_to" => "nope", "signature" => sign(payload) }
 
     assert_equal 400, last_response.status
@@ -234,27 +231,25 @@ class AppSpec < Minitest::Test
   def test_stores_a_signed_message
     log_in
     ts = Time.now.to_i
-    payload = Payload.message(author: @pubkey, room: "general", seq: 1, prev: nil,
-                              body: "hello", ack: ack, issued_at: ts)
+    payload = Payload.message(pubkey: @pubkey, room: "general", body: "hello", ack: ack, issued_at: ts)
 
     post_json "/api/room/general/message",
-              { "seq" => 1, "prev" => nil, "ack" => ack, "body" => "hello", "ts" => ts, "signature" => sign(payload) }
+              { "ack" => ack, "body" => "hello", "ts" => ts, "signature" => sign(payload) }
     assert_equal 200, last_response.status
 
     get "/api/room/general/messages"
     assert_equal 1, json["messages"].size
-    assert_equal @pubkey, json["messages"].first["author"]
+    assert_equal @pubkey, json["messages"].first["pubkey"]
   end
 
   # A message signed for one room must not be replantable in another.
   def test_a_message_cannot_be_moved_between_rooms
     log_in
     ts = Time.now.to_i
-    elsewhere = Payload.message(author: @pubkey, room: "other", seq: 1, prev: nil,
-                                body: "hello", ack: ack, issued_at: ts)
+    elsewhere = Payload.message(pubkey: @pubkey, room: "other", body: "hello", ack: ack, issued_at: ts)
 
     post_json "/api/room/general/message",
-              { "seq" => 1, "prev" => nil, "ack" => ack, "body" => "hello", "ts" => ts, "signature" => sign(elsewhere) }
+              { "ack" => ack, "body" => "hello", "ts" => ts, "signature" => sign(elsewhere) }
 
     assert_equal 400, last_response.status
   end
@@ -264,11 +259,10 @@ class AppSpec < Minitest::Test
   def test_rejects_a_message_with_no_ack
     log_in
     ts = Time.now.to_i
-    payload = Payload.message(author: @pubkey, room: "general", seq: 1, prev: nil,
-                              body: "hello", ack: ack, issued_at: ts)
+    payload = Payload.message(pubkey: @pubkey, room: "general", body: "hello", ack: ack, issued_at: ts)
 
     post_json "/api/room/general/message",
-              { "seq" => 1, "prev" => nil, "body" => "hello", "ts" => ts,
+              { "body" => "hello", "ts" => ts,
                 "signature" => sign(payload) }
 
     assert_equal 400, last_response.status
@@ -277,11 +271,10 @@ class AppSpec < Minitest::Test
   def test_rejects_a_malformed_ack
     log_in
     ts = Time.now.to_i
-    payload = Payload.message(author: @pubkey, room: "general", seq: 1, prev: nil,
-                              body: "hello", ack: "nope", issued_at: ts)
+    payload = Payload.message(pubkey: @pubkey, room: "general", body: "hello", ack: "nope", issued_at: ts)
 
     post_json "/api/room/general/message",
-              { "seq" => 1, "prev" => nil, "ack" => "nope", "body" => "hello",
+              { "ack" => "nope", "body" => "hello",
                 "ts" => ts, "signature" => sign(payload) }
 
     assert_equal 400, last_response.status
@@ -292,11 +285,10 @@ class AppSpec < Minitest::Test
   def test_rejects_a_message_whose_ack_was_altered
     log_in
     ts = Time.now.to_i
-    payload = Payload.message(author: @pubkey, room: "general", seq: 1, prev: nil,
-                              body: "hello", ack: ack, issued_at: ts)
+    payload = Payload.message(pubkey: @pubkey, room: "general", body: "hello", ack: ack, issued_at: ts)
 
     post_json "/api/room/general/message",
-              { "seq" => 1, "prev" => nil, "ack" => a_record_hash("elsewhere"),
+              { "ack" => a_record_hash("elsewhere"),
                 "body" => "hello", "ts" => ts, "signature" => sign(payload) }
 
     assert_equal 400, last_response.status
@@ -307,11 +299,10 @@ class AppSpec < Minitest::Test
   def test_the_served_hash_is_the_hash_of_the_served_record
     log_in
     ts = Time.now.to_i
-    payload = Payload.message(author: @pubkey, room: "general", seq: 1, prev: nil,
-                              body: "hello", ack: ack, issued_at: ts)
+    payload = Payload.message(pubkey: @pubkey, room: "general", body: "hello", ack: ack, issued_at: ts)
 
     post_json "/api/room/general/message",
-              { "seq" => 1, "prev" => nil, "ack" => ack, "body" => "hello",
+              { "ack" => ack, "body" => "hello",
                 "ts" => ts, "signature" => sign(payload) }
     assert_equal 200, last_response.status
 
@@ -335,12 +326,14 @@ class AppSpec < Minitest::Test
     assert_nil JSON.parse(json["payload"])["ack"]
   end
 
-  def test_sequence_numbers_cannot_be_reused
+  # RULE: the identical record cannot be stored twice. There is no sequence
+  # number any more, so the record hash being unique is what catches a repeat --
+  # the same payload and the same signature, sent again.
+  def test_the_same_record_cannot_be_stored_twice
     log_in
     ts = Time.now.to_i
-    payload = Payload.message(author: @pubkey, room: "general", seq: 1, prev: nil,
-                              body: "hello", ack: ack, issued_at: ts)
-    body = { "seq" => 1, "prev" => nil, "ack" => ack, "body" => "hello", "ts" => ts, "signature" => sign(payload) }
+    payload = Payload.message(pubkey: @pubkey, room: "general", body: "hello", ack: ack, issued_at: ts)
+    body = { "ack" => ack, "body" => "hello", "ts" => ts, "signature" => sign(payload) }
 
     post_json "/api/room/general/message", body
     assert_equal 200, last_response.status
@@ -358,7 +351,7 @@ class AppSpec < Minitest::Test
 
   def emote_body(message:, emote: FIRST_EMOTE, room: "general", key: nil)
     ts = Time.now.to_i
-    payload = Payload.emote(author: @pubkey, room: room, message: message,
+    payload = Payload.emote(pubkey: @pubkey, room: room, message: message,
                             emote: emote, ack: ack, issued_at: ts)
     signature = key ? Sig.encode(key.sign(Canon.bytes(payload))) : sign(payload)
     { "message" => message, "emote" => emote, "ack" => ack, "ts" => ts, "signature" => signature }
@@ -377,7 +370,7 @@ class AppSpec < Minitest::Test
     assert_equal 1, stored.size
     assert_equal a_message_signature, stored.first["message"]
     assert_equal FIRST_EMOTE, stored.first["emote"]
-    assert_equal @pubkey, stored.first["author"], "the author is needed to show whether you reacted"
+    assert_equal @pubkey, stored.first["pubkey"], "the author is needed to show whether you reacted"
   end
 
   # One emote per person per message, enforced server-side rather than

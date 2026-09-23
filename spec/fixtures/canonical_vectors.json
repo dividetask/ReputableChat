@@ -20,10 +20,7 @@
   },
   {
     "purpose": "reputablechat:message:v1",
-    "author": "k",
-    "room": "general",
-    "seq": 4,
-    "prev": null,
+    "pubkey": "k",
     "ts": 9,
     "body": "hi é中🚀 \"quoted\" \\slash\\ and\ttab"
   },
@@ -96,7 +93,6 @@
     "purpose": "reputablechat:adjustment:v1",
     "pubkey": "k",
     "base_revision": 4,
-    "seq": 7,
     "target": "t",
     "reputation": "0.5032",
     "trust": "1",
@@ -105,7 +101,7 @@
   },
   {
     "purpose": "reputablechat:release:v1",
-    "publisher": "k",
+    "pubkey": "k",
     "revision": 12,
     "label": "0.4.0",
     "files": {
@@ -118,10 +114,7 @@
   },
   {
     "purpose": "reputablechat:message:v1",
-    "author": "k",
-    "room": "general",
-    "seq": 4,
-    "prev": null,
+    "pubkey": "k",
     "reply_to": null,
     "ack": "0000000000000000000000000000000000000000000000000000000000000000",
     "ts": 9,
@@ -129,8 +122,7 @@
   },
   {
     "purpose": "reputablechat:emote:v1",
-    "author": "k",
-    "room": "general",
+    "pubkey": "k",
     "message": "1111111111111111111111111111111111111111111111111111111111111111",
     "emote": "👍",
     "ack": "2222222222222222222222222222222222222222222222222222222222222222",
@@ -138,10 +130,7 @@
   },
   {
     "purpose": "reputablechat:message:v1",
-    "author": "k",
-    "room": "general",
-    "seq": 5,
-    "prev": null,
+    "pubkey": "k",
     "reply_to": null,
     "ack": "3333333333333333333333333333333333333333333333333333333333333333",
     "note": "two lines\nand a\ttab, plus é中🚀 and \"quotes\"",
@@ -150,7 +139,7 @@
   },
   {
     "purpose": "reputablechat:notice:v1",
-    "publisher": "k",
+    "pubkey": "k",
     "revision": 1,
     "kind": "founding",
     "title": "What this is",

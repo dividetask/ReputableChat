@@ -143,7 +143,7 @@ module ReputableChat
       rows.each do |row|
         payload = parse(row[:payload])
         reply = row[:reply_to] ? " ↱ reply to ##{by_hash[row[:reply_to]] || '?'}" : ""
-        @out.puts format("  #%-4d %-20s %s%s", row[:id], named(row[:author]), at(row[:received_at]), reply)
+        @out.puts format("  #%-4d %-20s %s%s", row[:id], named(row[:pubkey]), at(row[:received_at]), reply)
         @out.puts "        #{clip(payload['body'])}"
         @out.puts "        ack #{ack_label(row[:ack], by_hash)}"
         # The note exists for a person reading the chain, so the tool for
@@ -165,7 +165,7 @@ module ReputableChat
       rows.group_by { |row| row[:message] }.each do |target, group|
         @out.puts "  on ##{by_hash[target] || '?'}"
         group.group_by { |row| row[:emote] }.each do |emote, people|
-          @out.puts "      #{emote} #{people.size}  #{people.map { |p| named(p[:author]) }.join(', ')}"
+          @out.puts "      #{emote} #{people.size}  #{people.map { |p| named(p[:pubkey]) }.join(', ')}"
         end
       end
     end

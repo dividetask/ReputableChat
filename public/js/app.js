@@ -5,7 +5,6 @@
 import * as seed from "./seed.js";
 import * as identity from "./identity.js";
 import { Reputation, Graph, toNumber, toFixed, toDecimal } from "./reputation.js";
-import * as fingerprintOf from "./fingerprint.js";
 import { Session } from "./session.js";
 import { initialRatings, declarationProfile } from "./defaults.js";
 import * as vault from "./vault.js";
@@ -24,7 +23,7 @@ const state = {
   config: null, emotes: null, me: null, profile: null, revision: 0,
   ratings: {}, graph: new Graph(), reputation: null, session: null,
   identityRevision: 0, attestationRevision: 0, attestationPending: 0, attestationAt: 0,
-  seq: 0, voted: new Set(), viewing: null, settings: {}, vaultRevision: 0,
+  voted: new Set(), viewing: null, settings: {}, vaultRevision: 0,
   vaultDirty: false,
   reactions: new Map(), recentlyBlocked: new Map(), replyingTo: null,
   genesis: null, host: null, tip: null, newFriends: {}, limits: null,
@@ -62,7 +61,7 @@ function chooseTip(messages) {
   const bar = toFixed(state.config.chain.min_reputation_to_acknowledge);
 
   for (let i = messages.length - 1; i >= 0; i--) {
-    const { author, hash } = messages[i];
+    const { pubkey: author, hash } = messages[i];
     if (!hash) continue;
     if (author === state.me.pubkey) return hash;
     if (state.session.scoreOf(author) > bar) return hash;
@@ -586,23 +585,22 @@ const configValue = (path) => path.split(".").reduce(
 function derivedScores() {
   const hops = Number(state.config.attestation?.published_hops ?? 3);
   const scores = {};
-  if (!state.session) return { hops, scores };
+  if (!state.session) return scores;
 
   for (const [pubkey, depth] of state.session.depths || []) {
     if (depth > hops || pubkey === state.me.pubkey) continue;
     scores[pubkey] = toDecimal(state.session.scoreOf(pubkey));
   }
-  return { hops, scores };
+  return scores;
 }
 
 async function publishAttestation() {
-  const { hops, scores: derived } = derivedScores();
   state.attestationRevision += 1;
   const ts = now();
   const body = {
     revision: state.attestationRevision,
     scores: myScores(),
-    derived: { hops, params: await fingerprintOf.of(configValue), scores: derived },
+    derived: { scores: derivedScores() },
     ack: currentAck(),
     ts,
   };
@@ -775,8 +773,7 @@ async function refreshMessages() {
     return status($("chat-status"), error.message, "error");
   }
 
-  await fetchConfigs([...new Set([...messages.map((m) => m.author), ...emotes.map((e) => e.author)])]);
-  state.seq = Math.max(0, ...messages.filter((m) => m.author === state.me.pubkey).map((m) => m.seq));
+  await fetchConfigs([...new Set([...messages.map((m) => m.pubkey), ...emotes.map((e) => e.pubkey)])]);
   state.tip = chooseTip(messages);
   recordSightings(messages);
   recomputeNames();
@@ -798,7 +795,7 @@ function renderKey(messages, emotes) {
 
   return [
     messages.map((m) => m.hash).join(","),
-    emotes.map((e) => `${e.message}${e.emote}${e.author}`).join(","),
+    emotes.map((e) => `${e.message}${e.emote}${e.pubkey}`).join(","),
     stubs.join(","),
     state.renderEpoch,
   ].join("|");
@@ -822,13 +819,13 @@ function render(messages) {
   const byHash = new Map(messages.map((m) => [m.hash, m]));
 
   for (const message of messages) {
-    const mine = message.author === state.me.pubkey;
-    const bucket = mine ? "trusted" : state.session.bucketOf(message.author);
+    const mine = message.pubkey === state.me.pubkey;
+    const bucket = mine ? "trusted" : state.session.bucketOf(message.pubkey);
 
     if (bucket === "blocked") {
       // Someone you blocked moments ago leaves a stub you can undo. Everyone
       // else blocked simply is not here.
-      if (withinUndoWindow(message.author)) list.append(blockedStub(message));
+      if (withinUndoWindow(message.pubkey)) list.append(blockedStub(message));
       continue;
     }
 
@@ -851,15 +848,15 @@ function render(messages) {
     // displayName already carries a key suffix when the handle is contested,
     // so a separate fingerprint beside it would be the same eight characters
     // twice on the names that need them and clutter on the ones that do not.
-    who.textContent = displayName(message.author);
-    who.addEventListener("click", () => showProfile(message.author));
+    who.textContent = displayName(message.pubkey);
+    who.addEventListener("click", () => showProfile(message.pubkey));
 
     const body = document.createElement("div");
     body.textContent = payload.body; // textContent, never innerHTML
 
     if (payload.reply_to) main.append(replyQuote(payload.reply_to, byHash));
     main.append(who, body, reactionBar(message, mine));
-    row.append(avatarFor(message.author), main);
+    row.append(avatarFor(message.pubkey), main);
     list.append(row);
   }
 
@@ -873,7 +870,7 @@ function render(messages) {
 function tallyReactions(emotes) {
   const tally = new Map();
 
-  for (const { message, emote, author } of emotes) {
+  for (const { message, emote, pubkey: author } of emotes) {
     if (author !== state.me.pubkey && state.session.bucketOf(author) === "blocked") continue;
 
     if (!tally.has(message)) tally.set(message, new Map());
@@ -919,7 +916,7 @@ function blockedStub(message) {
   const undo = document.createElement("button");
   undo.type = "button";
   undo.textContent = "undo report";
-  undo.addEventListener("click", () => undoReport(message.author, { confirm: false }).catch(
+  undo.addEventListener("click", () => undoReport(message.pubkey, { confirm: false }).catch(
     (e) => status($("chat-status"), e.message, "error"),
   ));
   actions.append(undo);
@@ -1049,13 +1046,13 @@ function replyQuote(targetHash, byHash) {
   arrow.textContent = "\u21B1";
 
   const name = document.createElement("span");
-  name.textContent = displayName(target.author);
+  name.textContent = displayName(target.pubkey);
 
   const snippet = document.createElement("span");
   snippet.className = "snippet";
   snippet.textContent = body;
 
-  quote.append(arrow, avatarFor(target.author), name, snippet);
+  quote.append(arrow, avatarFor(target.pubkey), name, snippet);
   quote.addEventListener("click", () => scrollToMessage(targetHash));
   return quote;
 }
@@ -1073,7 +1070,7 @@ function scrollToMessage(hash) {
 function startReply(message) {
   state.replyingTo = message;
   $("replying").classList.remove("hidden");
-  $("replying-to").textContent = `Replying to ${displayName(message.author)}`;
+  $("replying-to").textContent = `Replying to ${displayName(message.pubkey)}`;
   $("body").focus();
 }
 
@@ -1137,7 +1134,7 @@ function recordSightings(messages) {
   let seen = state.seen;
 
   for (const message of messages) {
-    const author = message.author;
+    const author = message.pubkey;
     if (!author || author === state.me?.pubkey) continue;
 
     const rating = state.ratings[author];
@@ -1215,7 +1212,7 @@ function reactionBar(message, mine) {
   const report = document.createElement("button");
   report.type = "button";
   report.textContent = "report";
-  report.addEventListener("click", () => reportUser(message.author));
+  report.addEventListener("click", () => reportUser(message.pubkey));
   lower.append(report);
 
   actions.append(upper, lower);
@@ -1257,7 +1254,7 @@ async function react(message, emote) {
   const ts = Math.floor(Date.now() / 1000);
   const ack = currentAck();
   const payload = identity.emotePayload({
-    author: state.me.pubkey, room: ROOM, message: message.hash, emote, ack, ts,
+    pubkey: state.me.pubkey, room: ROOM, message: message.hash, emote, ack, ts,
   });
 
   try {
@@ -1281,26 +1278,24 @@ async function compose(event) {
   if (!body) return;
 
   const ts = Math.floor(Date.now() / 1000);
-  const seq = state.seq + 1;
   const replyingTo = state.replyingTo;
   const replyTo = replyingTo ? replyingTo.hash : null;
   const ack = currentAck();
   const payload = identity.messagePayload({
-    author: state.me.pubkey, room: ROOM, seq, prev: null, body, ack, ts, replyTo,
+    pubkey: state.me.pubkey, room: ROOM, body, ack, ts, replyTo,
   });
 
   try {
     await post(`/api/room/${ROOM}/message`, {
-      seq, prev: null, body, ack, ts, reply_to: replyTo,
+      body, ack, ts, reply_to: replyTo,
       signature: await identity.sign(state.me, payload),
     });
     $("body").value = "";
-    state.seq = seq;
     cancelReply();
 
     // Replying counts like reacting: one vote per message either way, so
     // replying to something you already reacted to does not vote twice.
-    if (replyingTo && replyingTo.author !== state.me.pubkey) await countAsVote(replyingTo, 1);
+    if (replyingTo && replyingTo.pubkey !== state.me.pubkey) await countAsVote(replyingTo, 1);
 
     refreshMessages();
   } catch (error) {
@@ -1313,8 +1308,8 @@ async function compose(event) {
 async function countAsVote(message, polarity) {
   if (state.voted.has(message.hash)) return;
 
-  const current = state.ratings[message.author] || { friend: false, reported: false, net_votes: 0 };
-  state.ratings[message.author] = { ...current, net_votes: (current.net_votes || 0) + polarity };
+  const current = state.ratings[message.pubkey] || { friend: false, reported: false, net_votes: 0 };
+  state.ratings[message.pubkey] = { ...current, net_votes: (current.net_votes || 0) + polarity };
   state.voted.add(message.hash);
   touch();
 

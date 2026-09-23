@@ -200,15 +200,6 @@ class ChainRecordsSpec < Minitest::Test
     assert_equal 200, last_response.status
   end
 
-  # RULE: published estimates carry the parameters they were computed under.
-  # Without that a reader cannot tell whether the numbers mean anything to
-  # them, and taking them anyway means adopting a stranger's settings.
-  def test_refuses_derived_scores_with_no_parameter_fingerprint
-    put_json "/api/attestation", attestation_body(derived: { "hops" => 3, "scores" => {} })
-
-    assert_equal 400, last_response.status
-  end
-
   def test_refuses_a_rolled_back_attestation
     put_json "/api/attestation", attestation_body(revision: 3)
     put_json "/api/attestation", attestation_body(revision: 2)

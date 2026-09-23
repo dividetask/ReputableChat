@@ -60,10 +60,9 @@ inventing a word for something that already has one.
   either file.
 - **Signed payload shapes.** `cryptography/payload.rb` and the `*Payload` helpers in
   `public/js/identity.js` must stay in lockstep for the same reason.
-- **Record hashes.** `cryptography/record.rb` and `public/js/record.js` must agree,
-  and so must `reputation/fingerprint.rb` and `public/js/fingerprint.js`. If they
-  drift, every `ack` points at a record the other side cannot find and no
-  reference resolves. `spec/record_parity_spec.rb` guards both.
+- **Record hashes.** `cryptography/record.rb` and `public/js/record.js` must
+  agree. If they drift, every `ack` points at a record the other side cannot
+  find and no reference resolves. `spec/record_parity_spec.rb` guards it.
 - **The genesis record.** `config/genesis/<environment>.json` is the bottom of
   the chain. Regenerating one orphans every record that acknowledged the old
   one, which is the whole chain. `script/generate_genesis.rb` refuses to

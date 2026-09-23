@@ -151,7 +151,7 @@ module ReputableChat
 
         r.on "notice" do
           r.post { post_notice(r) }
-          r.get(String) { |publisher| fetch_notices(r, publisher) }
+          r.get(String) { |pubkey| fetch_notices(r, pubkey) }
         end
 
         r.on "adjustment" do
@@ -260,7 +260,7 @@ module ReputableChat
       { "stored" => true, "revision" => revision }
     end
 
-    # `ack` is the record this message's author had last seen. The server does
+    # `ack` is the record this message's signer had last seen. The server does
     # not check that it was well chosen -- it cannot, since it never computes a
     # reputation and the rule is the author's own. It checks only that it is
     # the right shape, and stores what it is given.
@@ -305,6 +305,15 @@ module ReputableChat
         pubkey: pubkey, revision: revision, scores: scores, derived: derived,
         ack: ack, issued_at: ts, note: optional_note(r)
       )
+
+      # Bounded here rather than by an entry count. This is the one record whose
+      # size its author chooses, and the canonical bytes are what has to be
+      # stored and served back, so they are the thing to measure.
+      canonical = Cryptography::Canonical.dump(payload)
+      if canonical.bytesize > limit(:attestation_bytes)
+        bad_request(r, "attestation is larger than #{limit(:attestation_bytes)} bytes")
+      end
+
       store_record(r, :store_attestation, pubkey, revision, payload, sig)
     end
 
@@ -323,9 +332,9 @@ module ReputableChat
 
     # An official statement. The server checks the shape, the signature and the
     # revision, and has no opinion about the contents -- it does not know what a
-    # policy is, only that this publisher has not used this number before.
+    # policy is, only that this account has not used this number before.
     def post_notice(r)
-      publisher  = current_pubkey(r)
+      pubkey     = current_pubkey(r)
       revision   = Params.integer(r.params["revision"], min: 1) or bad_request(r, "bad revision")
       kind       = Params.notice_kind(r.params["kind"], allowed: NOTICE_KINDS) or bad_request(r, "unknown kind")
       title      = Params.title(r.params["title"])       or bad_request(r, "bad title")
@@ -340,15 +349,15 @@ module ReputableChat
       bad_request(r, "a founding notice supersedes nothing") if kind == "founding" && supersedes
 
       payload = Cryptography::Payload.notice(
-        publisher: publisher, revision: revision, kind: kind, title: title, body: body,
+        pubkey: pubkey, revision: revision, kind: kind, title: title, body: body,
         ack: ack, issued_at: ts, supersedes: supersedes, note: optional_note(r)
       )
-      verify!(r, publisher, sig, payload)
+      verify!(r, pubkey, sig, payload)
 
       canonical = Cryptography::Canonical.dump(payload)
       hash = Cryptography::Record.digest(payload: canonical, signature: sig)
       result = store.store_notice(
-        hash: hash, publisher: publisher, revision: revision, kind: kind, title: title,
+        hash: hash, pubkey: pubkey, revision: revision, kind: kind, title: title,
         supersedes: supersedes, ack: ack, payload: canonical, signature: sig
       )
       r.halt(409, { "error" => "that revision is already used" }) if result == :duplicate
@@ -356,10 +365,10 @@ module ReputableChat
       { "stored" => true, "revision" => revision, "hash" => hash }
     end
 
-    def fetch_notices(r, publisher_param)
-      publisher = Params.pubkey(publisher_param) or bad_request(r, "bad publisher")
+    def fetch_notices(r, pubkey_param)
+      pubkey = Params.pubkey(pubkey_param) or bad_request(r, "bad pubkey")
 
-      { "notices" => store.notices(publisher).map { |row| present_notice(row) } }
+      { "notices" => store.notices(pubkey).map { |row| present_notice(row) } }
     end
 
     # One change to an attestation between republishes. `base_revision` names
@@ -420,34 +429,34 @@ module ReputableChat
     end
 
     def post_message(r, room)
-      author = current_pubkey(r)
-      seq    = Params.integer(r.params["seq"], min: 1) or bad_request(r, "bad seq")
+      pubkey = current_pubkey(r)
       body   = Params.string(r.params["body"], max: limit(:message_bytes)) or bad_request(r, "bad body")
       sig    = Params.signature(r.params["signature"]) or bad_request(r, "bad signature")
       ts     = Params.integer(r.params["ts"]) or bad_request(r, "bad timestamp")
       ack    = Params.record_hash(r.params["ack"]) or bad_request(r, "bad ack")
-      prev   = optional_hash(r, "prev")
       reply  = optional_hash(r, "reply_to")
 
       payload = Cryptography::Payload.message(
-        author: author, room: room, seq: seq, prev: prev, body: body,
+        pubkey: pubkey, room: room, body: body,
         ack: ack, issued_at: ts, reply_to: reply, note: optional_note(r)
       )
-      verify!(r, author, sig, payload)
+      verify!(r, pubkey, sig, payload)
 
       canonical = Cryptography::Canonical.dump(payload)
+      hash = Cryptography::Record.digest(payload: canonical, signature: sig)
       result = store.store_message(
-        hash: Cryptography::Record.digest(payload: canonical, signature: sig),
-        author: author, room: room, seq: seq, prev: prev, ack: ack,
+        hash: hash, pubkey: pubkey, room: room, ack: ack,
         reply_to: reply, payload: canonical, signature: sig
       )
-      r.halt(409, { "error" => "that sequence number is already used" }) if result == :duplicate
+      # The record hash is what catches a repeat now that there is no sequence
+      # number: the identical record, signature and all, has been sent twice.
+      r.halt(409, { "error" => "that record has already been stored" }) if result == :duplicate
 
-      { "stored" => true, "seq" => seq }
+      { "stored" => true, "hash" => hash }
     end
 
     def post_emote(r, room)
-      author  = current_pubkey(r)
+      pubkey  = current_pubkey(r)
       message = Params.record_hash(r.params["message"]) or bad_request(r, "bad message")
       choice  = Params.emote(r.params["emote"], allowed: ALLOWED_EMOTES) or bad_request(r, "unknown emote")
       sig     = Params.signature(r.params["signature"]) or bad_request(r, "bad signature")
@@ -455,15 +464,15 @@ module ReputableChat
       ack     = Params.record_hash(r.params["ack"]) or bad_request(r, "bad ack")
 
       payload = Cryptography::Payload.emote(
-        author: author, room: room, message: message, emote: choice,
+        pubkey: pubkey, room: room, message: message, emote: choice,
         ack: ack, issued_at: ts, note: optional_note(r)
       )
-      verify!(r, author, sig, payload)
+      verify!(r, pubkey, sig, payload)
 
       canonical = Cryptography::Canonical.dump(payload)
       result = store.store_emote(
         hash: Cryptography::Record.digest(payload: canonical, signature: sig),
-        author: author, room: room, message: message, emote: choice,
+        pubkey: pubkey, room: room, message: message, emote: choice,
         ack: ack, payload: canonical, signature: sig
       )
       r.halt(409, { "error" => "you have already reacted to that message" }) if result == :duplicate
@@ -518,7 +527,7 @@ module ReputableChat
     end
 
     def present_notice(row)
-      { "publisher" => row[:publisher], "revision" => row[:revision], "kind" => row[:kind],
+      { "pubkey" => row[:pubkey], "revision" => row[:revision], "kind" => row[:kind],
         "title" => row[:title], "supersedes" => row[:supersedes], "hash" => row[:hash],
         "payload" => row[:payload], "signature" => row[:signature] }
     end
@@ -532,8 +541,8 @@ module ReputableChat
     end
 
     def present_message(row)
-      { "hash" => row[:hash], "author" => row[:author], "seq" => row[:seq],
-        "prev" => row[:prev], "reply_to" => row[:reply_to], "ack" => row[:ack],
+      { "hash" => row[:hash], "pubkey" => row[:pubkey],
+        "reply_to" => row[:reply_to], "ack" => row[:ack],
         "payload" => row[:payload], "signature" => row[:signature],
         "received_at" => row[:received_at] }
     end

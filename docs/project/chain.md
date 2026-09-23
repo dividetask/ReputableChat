@@ -21,7 +21,7 @@ A record is a signed payload. Five kinds so far:
 |---|---|
 | `reputablechat:identity:v1` | an **identity declaration**: who someone is, in their own words |
 | `reputablechat:attestation:v1` | what someone thinks of everyone else |
-| `reputablechat:message:v1` | a message in a room |
+| `reputablechat:message:v1` | text one account sends |
 | `reputablechat:emote:v1` | one person's response to one message |
 | `reputablechat:release:v1` | a published version of the client |
 
@@ -435,7 +435,7 @@ A release record pins a version of the client:
 
 ```json
 { "purpose":   "reputablechat:release:v1",
-  "publisher": "<genesis account's pubkey>",
+  "pubkey":    "<genesis account's pubkey>",
   "revision":  12,
   "label":     "0.4.0",
   "files":     { "index.html": "<64 hex>", "js/app.js": "<64 hex>" },
@@ -459,16 +459,16 @@ is the whole point; the version history is a pleasant side effect.
 Releases are cut when one is published, not per commit. The chain is not the
 repository.
 
-**The genesis account is the only publisher for now.** The record carries `publisher` so that a
+**The genesis account is the only publisher for now.** The record carries `pubkey` so that a
 per-user trusted-developer setting can arrive later without re-signing
 anything, but nothing today consults it.
 
 ### Not built: fetching a record by hash
 
-There is no route that resolves a record hash to its record. Messages are
-served per room, and `ack` names records that may be in another room, another
-kind, or from somebody the viewer never fetched. Walking the chain at all needs
-`GET` by hash, and it has to serve any record to anyone, for the reason above.
+There is no route that resolves a record hash to its record. Each kind is served
+by its own route, and `ack` names records that may be of another kind, or from
+somebody the viewer never fetched. Walking the chain at all needs `GET` by hash,
+and it has to serve any record to anyone, for the reason above.
 
 ### Not built: actually loading one
 

@@ -149,11 +149,11 @@ every old signature stops verifying against the new shape.
 | purpose | fields |
 |---|---|
 | `reputablechat:login:v1` | purpose, pubkey, nonce, origin, ts |
-| `reputablechat:message:v1` | purpose, author, room, reply_to, ack, note, ts, body |
-| `reputablechat:emote:v1` | purpose, author, room, message, emote, ack, note, ts |
+| `reputablechat:message:v1` | purpose, pubkey, reply_to, ack, note, ts, body |
+| `reputablechat:emote:v1` | purpose, pubkey, message, emote, ack, note, ts |
 | `reputablechat:identity:v1` | purpose, pubkey, revision, handle, bio, icon, master_pubkey, previous_pubkey, ack, note, ts |
 | `reputablechat:attestation:v1` | purpose, pubkey, revision, scores, derived, ack, note, ts |
-| `reputablechat:release:v1` | purpose, publisher, revision, label, files, notes, ack, note, ts |
+| `reputablechat:release:v1` | purpose, pubkey, revision, label, files, notes, ack, note, ts |
 | `reputablechat:vault:v1` | purpose, pubkey, revision, ciphertext, iv, ts |
 
 `config:v1` and `private-config:v1` were the two shapes these replaced. They are
@@ -168,8 +168,7 @@ recent records its author had seen. That is what makes these a chain rather than
 a pile — see [chain.md](chain.md). The vault has none because nobody else ever
 sees it, so there is nothing to anchor it to and nobody to prove anything to.
 
-`room` in the message payload stops a message being replanted in a different
-channel, and `ack` chains a record to everybody else's. `ts` is the client's
+`ack` chains a record to everybody else's. `ts` is the client's
 clock and is attacker-controlled; the server records its own receipt time
 separately and unsigned.
 
@@ -179,7 +178,7 @@ mutations — a mutated record no longer matches its signature.
 ## Emotes
 
 An emote is its own signed record naming the message it reacts to (by that
-message's signature) and the room, so it cannot be transplanted. One per person
+message's record hash), so it cannot be transplanted. One per person
 per message, enforced by a unique constraint rather than trusted from the
 client, and the emote must be one the server publishes in `config/emotes.yml` —
 an arbitrary string would otherwise be stored and rendered back to everyone.

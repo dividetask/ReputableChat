@@ -91,8 +91,6 @@ module ReputableChat
     MAX_NOTE    = 16_000
     MAX_HANDLE  = 64
     MAX_BIO     = 280
-    MAX_SCORES  = 10_000
-    MAX_DERIVED = 50_000
     MAX_LABEL   = 64
     MAX_NOTES   = 1_000
     MAX_FILES   = 500
@@ -154,9 +152,11 @@ module ReputableChat
     # amplify a branch past the weight the ladder assigned it, and the ladder's
     # weights summing to (just under) 1 is what keeps an effective score inside
     # -1..1 without clamping.
-    def scores(value, max_entries: MAX_SCORES)
+    # No entry cap. How many people somebody has an opinion about is not the
+    # server's business and never bounded anything it cared about; what bounds
+    # an attestation is `attestation_bytes`, checked on the request.
+    def scores(value)
       return nil unless value.is_a?(Hash)
-      return nil if value.size > max_entries
 
       value.each do |target, entry|
         return nil unless pubkey(target)
@@ -168,17 +168,16 @@ module ReputableChat
       value
     end
 
-    # The author's own calculated scores, and the fingerprint of the parameters
-    # they were computed under. The fingerprint is not optional: without it a
-    # reader cannot tell whether the numbers mean anything to them, and taking
-    # them anyway would mean silently adopting a stranger's settings.
+    # The author's own calculated reputations, and nothing about how they were
+    # calculated. A reader reaching for this cache has run out of its own reach
+    # and either takes a number or leaves it, so the parameters behind it were
+    # nothing it could act on -- and publishing them would tell everyone the
+    # settings a particular reader scores under.
     def derived(value)
       return nil unless value.is_a?(Hash)
-      return nil unless integer(value["hops"], min: 0, max: 7)
-      return nil unless record_hash(value["params"])
 
       scores = value["scores"]
-      return nil unless scores.is_a?(Hash) && scores.size <= MAX_DERIVED
+      return nil unless scores.is_a?(Hash)
 
       scores.each do |target, score|
         return nil unless pubkey(target)

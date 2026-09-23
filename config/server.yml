@@ -39,6 +39,11 @@ limits:
   vault_bytes: 1048576
   image_bytes: 262144
   message_bytes: 4000
+  # An attestation holds an entry per person its author has an opinion about, so
+  # it is the one record whose size the author decides. Bounded in bytes rather
+  # than in entries: the bytes are what the server has to hold and serve, and a
+  # server can raise this without anybody re-signing anything.
+  attestation_bytes: 4194304
   notice_bytes: 16000
   note_bytes: 16000
   # Advice rather than a limit: nothing rejects a vault for holding more. It

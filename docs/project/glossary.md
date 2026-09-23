@@ -22,7 +22,7 @@ about yourself: handle, bio, icon, and the key-rotation placeholders.
 everyone else: a reputation and a trust multiplier per person, plus the derived
 cache. The counterpart to an identity declaration.
 
-**Message** (`reputablechat:message:v1`) — text one person sends to a room.
+**Message** (`reputablechat:message:v1`) — text one person sends.
 The only word for it: not a comment, a post or a transaction.
 
 **Emote** (`reputablechat:emote:v1`) — one person's response to one message.
@@ -87,9 +87,9 @@ the server records its own receipt time separately and unsigned.
 everything else so a signature for one kind of record cannot be presented as
 another.
 
-**`publisher`** — who signed a release. The same field as `pubkey` and
-`author`, under a third name. Carried so a per-user trusted-developer setting
-can arrive without re-signing anything.
+**`pubkey`** — the account that signed the record, on every kind. It was
+`author` on a message and `publisher` on a release; the role words were the
+trouble, since one account does both.
 
 ## Off the chain
 
@@ -184,7 +184,8 @@ Do not reintroduce these; they each have a current name above.
 | announcement, notice (`notice:v1`) | message |
 | adjustment (`adjustment:v1`) | nothing on the chain; a change waits in the vault for the next attestation |
 | founding notice | the rules, in the genesis record's note |
-| `supersedes`, `seq`, `prev`, `derived.hops`, `derived.params` | (removed; no replacement) |
+| `author`, `publisher` (as a field name) | `pubkey` |
+| `supersedes`, `seq`, `prev`, `room`, `derived.hops`, `derived.params` | (removed; no replacement) |
 | Tim (as the general term) | genesis account |
 | server's Tim, server account | host account |
 | score | rating (given) or reputation (calculated) |
