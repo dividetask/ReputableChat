@@ -39,9 +39,8 @@ export function initialRatings({ genesisPubkey, ownPubkey }) {
 // one account nobody can see the name of, which is how it ended up rendering as
 // "someone" in the friend list.
 //
-// Returns the profile shape the client currently uses. That mapping disappears
-// when the client moves onto identity declarations and stops having two names
-// for the same field.
+// Returns the same shape a fetched identity declaration yields, so nothing
+// downstream has to know where a profile came from.
 export function genesisProfile(genesis) {
   if (!genesis?.payload) return null;
 
@@ -54,8 +53,8 @@ export function genesisProfile(genesis) {
   if (!declaration.handle) return null;
 
   return {
-    username: declaration.handle,
-    message: declaration.bio || "",
+    handle: declaration.handle,
+    bio: declaration.bio || "",
     icon: declaration.icon || null,
   };
 }

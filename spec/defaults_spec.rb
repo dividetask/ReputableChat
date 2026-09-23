@@ -61,8 +61,8 @@ class DefaultsSpec < Minitest::Test
   def test_the_genesis_handle_is_read_from_its_declaration
     profile = defaults.fetch("genesis_profile")
 
-    assert_equal "Tim", profile.fetch("username")
-    assert_equal "Legally distinct.", profile.fetch("message")
+    assert_equal "Tim", profile.fetch("handle")
+    assert_equal "Legally distinct.", profile.fetch("bio")
   end
 
   # A declaration that cannot be read yields nothing rather than a broken
@@ -103,7 +103,7 @@ class DefaultsSpec < Minitest::Test
   # freshly seeded one. Seeding at publish time would quietly put the genesis
   # account back after they took it off.
   def test_registration_publishes_the_list_the_screen_was_left_with
-    register = app_js[/async function registerWith[\s\S]{0,900}?\n\}/]
+    register = app_js[/async function registerWith[\s\S]{0,1800}?\n\}/]
     refute_nil register, "registerWith not found"
 
     assert_includes register, "state.newFriends", "registration must publish the chosen list"

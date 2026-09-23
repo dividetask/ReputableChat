@@ -86,6 +86,32 @@ class BrowserSpec < Minitest::Test
                  "the genesis account was added first and belongs at the top"
   end
 
+  # RULE: a rating made during the session counts during that session.
+  #
+  # Friending somebody does not publish -- the attestation cadence decides that
+  # -- so between publishes the author's own vault is the only place the rating
+  # exists. The graph has to read it from there or a friend stays invisible
+  # until the next republish.
+  def test_a_friendship_made_during_the_session_counts_immediately
+    assert_equal "Added. They are now trusted.", seen.fetch("added_mid_session"),
+                 "a rating made since the last publish must reach this session's scores"
+  end
+
+  # RULE: someone this account friended comes out trusted, in the browser, end
+  # to end.
+  #
+  # This is the only test that runs the whole reputation pipeline and looks at
+  # the result: the vault's private ratings, the curve, the author's own entry
+  # in the graph, the ladder, the bucket. Every other interface test reads
+  # app.js as text, and a friend who came out `blocked` would render in the
+  # friend list exactly as well as one who came out trusted.
+  def test_a_friend_comes_out_trusted
+    assert_equal "Tim", seen.fetch("friend_profile_name"),
+                 "clicking a friend's name must open that friend's profile"
+    assert_equal "Currently trusted this session.", seen.fetch("friend_bucket"),
+                 "a friended account must land in the trusted bucket, not merely appear in the list"
+  end
+
   private
 
   def chromium_builds

@@ -4,7 +4,8 @@
 
 import * as seed from "./seed.js";
 import * as identity from "./identity.js";
-import { Reputation, Graph, toNumber, toFixed } from "./reputation.js";
+import { Reputation, Graph, toNumber, toFixed, toDecimal } from "./reputation.js";
+import * as fingerprintOf from "./fingerprint.js";
 import { Session } from "./session.js";
 import { initialRatings, genesisProfile } from "./defaults.js";
 import * as vault from "./vault.js";
@@ -22,6 +23,7 @@ const $ = (id) => document.getElementById(id);
 const state = {
   config: null, emotes: null, me: null, profile: null, revision: 0,
   ratings: {}, graph: new Graph(), reputation: null, session: null,
+  identityRevision: 0, attestationRevision: 0, attestationPending: 0, attestationAt: 0,
   seq: 0, voted: new Set(), viewing: null, settings: {}, vaultRevision: 0,
   vaultDirty: false,
   reactions: new Map(), recentlyBlocked: new Map(), replyingTo: null,
@@ -121,6 +123,14 @@ function vaultContents() {
     // Each entry also records the handle that friend is using and when they
     // took it, because a name claim is only as old as the name.
     friends: state.friendList,
+    // Friending, reporting and voting are private now. What the network sees
+    // is the score they come to, published in an attestation.
+    ratings: state.ratings,
+    attestation: {
+      revision: state.attestationRevision,
+      pending: state.attestationPending,
+      at: state.attestationAt,
+    },
   };
 }
 
@@ -129,6 +139,10 @@ function applyVault(contents) {
   state.voted = new Set(contents.voted || []);
   state.seen = contents.seen || [];
   state.friendList = names.normalizeFriends(contents.friends || contents.friend_order || []);
+  state.ratings = contents.ratings || {};
+  state.attestationRevision = contents.attestation?.revision || state.attestationRevision;
+  state.attestationPending = contents.attestation?.pending || 0;
+  state.attestationAt = contents.attestation?.at || 0;
 }
 
 async function loadVault() {
@@ -158,10 +172,22 @@ async function loadVault() {
   applyVault(contents);
 }
 
-// What a change calls. It does not touch the network: a vote should not wait
-// on a request, and a run of them should not make a run of them.
+// Long enough that a run of votes becomes one write, short enough that
+// closing the tab afterwards does not lose them.
+const VAULT_DEBOUNCE_MS = 3_000;
+let vaultPush = null;
+
+// What a change calls. Nothing waits on the network -- a vote must not block on
+// a request -- but the write is scheduled rather than left to the hourly timer.
+//
+// That timer was the whole durability story until friends and reports moved in
+// here. When ratings were published on every change the server always had them;
+// now the vault is the only copy, and an hour is far too long to hold somebody's
+// friend list in one tab.
 function vaultChanged() {
   state.vaultDirty = true;
+  clearTimeout(vaultPush);
+  vaultPush = setTimeout(() => pushVault().catch(() => {}), VAULT_DEBOUNCE_MS);
 }
 
 async function writeVault(revision, contents) {
@@ -209,6 +235,15 @@ async function pushVault({ force = false } = {}) {
 function rebuildSession() {
   const previous = state.session ? [...state.session.reports] : [];
 
+  // The viewer's own entry is their vault's actions, not a published score:
+  // `ratingValue` runs the curve for them, and is the one place in the system
+  // that sees an unpublished rating. Everyone else's entry is the score they
+  // published, because the curve already ran wherever it was published.
+  //
+  // Re-added on every rebuild rather than left to the one `loadNetwork` wrote.
+  // That one happens to keep working because it stored the live state.ratings
+  // object and mutations show through, which is true today and is not a thing
+  // to depend on.
   state.graph.add(state.me.pubkey, state.ratings);
   state.session = new Session(
     state.reputation, state.me.pubkey, state.graph, state.config.session.report_blocks,
@@ -337,7 +372,7 @@ async function signIn(derived, { restoring = false } = {}) {
 // genesis account's, out of the declaration already in hand.
 function newAccountName(pubkey) {
   if (state.genesis && pubkey === state.genesis.pubkey) {
-    return genesisProfile(state.genesis)?.username || "the genesis account";
+    return genesisProfile(state.genesis)?.handle || "the genesis account";
   }
   return "unknown";
 }
@@ -451,7 +486,16 @@ async function registerWith(username) {
   }));
   vaultChanged();
 
-  await publishConfig();
+  state.profile = { handle: username, bio: "", icon: null };
+  await publishIdentity();
+  // Published straight away rather than waiting on the cadence: an account
+  // with no attestation contributes nothing to anybody, and the friendships
+  // just chosen are the whole reason this screen exists.
+  await publishAttestation();
+  // Waited on rather than scheduled. This is the one moment where the vault is
+  // the only record of the choices just made, and a tab closed before the
+  // first write would take the whole account's friend list with it.
+  await pushVault({ force: true });
   await enterChat();
 }
 
@@ -468,23 +512,15 @@ async function logOff() {
 
 // --- config ------------------------------------------------------------
 
-// Every change to friends, reports or emote tallies is re-signed and
-// re-uploaded. The revision must climb or the server rejects it as a rollback.
-async function publishConfig() {
-  state.revision += 1;
-  const ts = Math.floor(Date.now() / 1000);
-  const payload = identity.configPayload({
-    pubkey: state.me.pubkey, revision: state.revision,
-    profile: state.profile, ratings: state.ratings, ts,
-  });
+// --- identity declarations and attestations -----------------------------
+//
+// Two documents where there used to be one. An identity declaration says who
+// you are; an attestation says what you think of everybody else. They are
+// separate so that changing your mind about somebody does not mean re-signing
+// who you are -- and so that the actions behind an opinion can stay private
+// while the opinion itself travels.
 
-  await send("PUT", "/api/config", {
-    revision: state.revision, profile: state.profile, ratings: state.ratings,
-    ts, signature: await identity.sign(state.me, payload),
-  });
-}
-
-function parseConfig(blob) {
+function parseRecord(blob) {
   if (!blob) return null;
   try {
     return JSON.parse(blob.payload);
@@ -493,13 +529,123 @@ function parseConfig(blob) {
   }
 }
 
-async function loadOwnConfig() {
-  const { config } = await api(`/api/config/${state.me.pubkey}`);
-  const payload = parseConfig(config);
+async function publishIdentity() {
+  state.identityRevision += 1;
+  const ts = now();
+  const body = {
+    revision: state.identityRevision,
+    handle: state.profile.handle,
+    bio: state.profile.bio || "",
+    icon: state.profile.icon || null,
+    ack: currentAck(),
+    ts,
+  };
+  const payload = identity.identityPayload({ pubkey: state.me.pubkey, ...body });
 
-  state.revision = payload ? payload.revision : 0;
-  state.ratings = payload?.ratings || {};
-  state.profile = payload?.profile || { username: "anonymous", message: "", icon: null };
+  await send("PUT", "/api/identity", { ...body, signature: await identity.sign(state.me, payload) });
+}
+
+// What the vault's private actions come to, as a number. The curve runs here,
+// once, rather than in every reader -- which is the whole difference between
+// an attestation and the config it replaces.
+function myScores() {
+  const scores = {};
+
+  for (const [pubkey, rating] of Object.entries(state.ratings)) {
+    const value = state.reputation.ratingValue(rating);
+    if (value === null) continue;
+
+    scores[pubkey] = {
+      reputation: toDecimal(value),
+      trust: toDecimal(state.reputation.multiplierOf(rating)),
+    };
+  }
+  return scores;
+}
+
+const configValue = (path) => path.split(".").reduce(
+  (node, key) => (node == null ? undefined : node[key]),
+  deepMerge(state.config, state.settings),
+);
+
+// The cache other people use as the fourth term of their own score. Carries the
+// fingerprint of the parameters it was computed under, because reputation is
+// subjective and configuration is per-user: without it a reader cannot tell
+// whether these numbers mean anything to them.
+function derivedScores() {
+  const hops = Number(state.config.attestation?.published_hops ?? 3);
+  const scores = {};
+  if (!state.session) return { hops, scores };
+
+  for (const [pubkey, depth] of state.session.depths || []) {
+    if (depth > hops || pubkey === state.me.pubkey) continue;
+    scores[pubkey] = toDecimal(state.session.scoreOf(pubkey));
+  }
+  return { hops, scores };
+}
+
+async function publishAttestation() {
+  const { hops, scores: derived } = derivedScores();
+  state.attestationRevision += 1;
+  const ts = now();
+  const body = {
+    revision: state.attestationRevision,
+    scores: myScores(),
+    derived: { hops, params: await fingerprintOf.of(configValue), scores: derived },
+    ack: currentAck(),
+    ts,
+  };
+  const payload = identity.attestationPayload({ pubkey: state.me.pubkey, ...body });
+
+  await send("PUT", "/api/attestation", { ...body, signature: await identity.sign(state.me, payload) });
+  state.attestationPending = 0;
+  state.attestationAt = ts;
+  vaultChanged();
+}
+
+// A change to what somebody is worth. Counted rather than published, because
+// re-signing an entry for everyone ever rated on every emote is absurd -- see
+// the cadence in config/reputation.yml.
+function scoreChanged() {
+  state.attestationPending += 1;
+  vaultChanged();
+}
+
+// Nothing goes out without something to say. Both limits are floors on when
+// pending changes are published, not schedules.
+function attestationIsDue() {
+  if (!state.attestationPending) return false;
+
+  const settings = state.config.attestation || {};
+  const changes = Number(settings.resubmit_after_changes ?? 10);
+  const seconds = Number(settings.resubmit_after_seconds ?? 604800);
+
+  return state.attestationPending >= changes
+    || (state.attestationAt > 0 && now() - state.attestationAt >= seconds)
+    || state.attestationRevision === 0;
+}
+
+async function publishIfDue() {
+  if (!attestationIsDue()) return;
+
+  await publishAttestation().catch((error) => {
+    status($("chat-status"), `Could not publish your ratings: ${error.message}`, "error");
+  });
+}
+
+async function loadOwnIdentity() {
+  const { identity: blob } = await api(`/api/identity/${state.me.pubkey}`);
+  const declaration = parseRecord(blob);
+
+  state.identityRevision = declaration?.revision || 0;
+  state.profile = {
+    handle: declaration?.handle || "anonymous",
+    bio: declaration?.bio || "",
+    icon: declaration?.icon || null,
+  };
+
+  const { attestation } = await api(`/api/attestation/${state.me.pubkey}`);
+  state.attestationRevision = parseRecord(attestation)?.revision || 0;
 }
 
 // Walks outward from the viewer, fetching a whole hop per request. Bounded by
@@ -545,14 +691,30 @@ async function fetchConfigs(pubkeys) {
   // MVP: signatures are taken on trust (session.verify_signatures). The
   // verification path is written and tested server-side; until it runs here, a
   // malicious server can fabricate any rating it likes.
-  const { configs } = await post("/api/config/batch", { pubkeys: fresh });
+  //
+  // Two fetches because they are two records: who somebody is, and what they
+  // think. Plenty of accounts have one and not the other -- the genesis has
+  // never rated anybody, and a brand new account has not published an
+  // attestation yet.
+  const [{ attestations }, { identities }] = await Promise.all([
+    post("/api/attestation/batch", { pubkeys: fresh }),
+    post("/api/identity/batch", { pubkeys: fresh }),
+  ]);
 
-  for (const blob of configs) {
-    const payload = parseConfig(blob);
+  for (const blob of attestations) {
+    const payload = parseRecord(blob);
     if (!payload || payload.pubkey !== blob.pubkey) continue;
 
-    state.graph.add(blob.pubkey, payload.ratings || {});
-    state.profiles.set(blob.pubkey, payload.profile || null);
+    state.graph.add(blob.pubkey, payload.scores || {});
+  }
+
+  for (const blob of identities) {
+    const payload = parseRecord(blob);
+    if (!payload || payload.pubkey !== blob.pubkey) continue;
+
+    state.profiles.set(blob.pubkey, {
+      handle: payload.handle, bio: payload.bio, icon: payload.icon,
+    });
   }
 
   for (const key of fresh) if (!state.graph.has(key)) state.graph.add(key, {});
@@ -575,11 +737,11 @@ async function enterChat() {
 
   await loadVault();
   state.reputation = buildReputation();
-  await loadOwnConfig();
+  await loadOwnIdentity();
   await loadNetwork();
   rebuildSession();
 
-  $("me").textContent = `${state.profile.username} · ${fingerprint(state.me.pubkey)}`;
+  $("me").textContent = `${state.profile.handle} · ${fingerprint(state.me.pubkey)}`;
   refreshMessages();
   setInterval(refreshMessages, 4000);
   // Local first, pushed on a timer. The interval is the server's advice, and
@@ -915,7 +1077,7 @@ function cancelReply() {
 function recomputeNames() {
   const handles = {};
   for (const [pubkey, profile] of state.profiles || []) {
-    if (profile?.username) handles[pubkey] = profile.username;
+    if (profile?.handle) handles[pubkey] = profile.handle;
   }
 
   state.names = names.resolveNames({
@@ -927,7 +1089,7 @@ function recomputeNames() {
 
 function displayName(pubkey) {
   const resolved = state.names?.[pubkey];
-  if (!resolved) return state.profiles?.get(pubkey)?.username || "someone";
+  if (!resolved) return state.profiles?.get(pubkey)?.handle || "someone";
 
   return resolved.suffix ? `${resolved.handle} ${resolved.suffix}` : resolved.handle;
 }
@@ -946,7 +1108,7 @@ function friendsInOrder() {
 
 function rememberFriend(pubkey) {
   state.friendList = names.rememberFriend(
-    state.friendList, pubkey, state.profiles?.get(pubkey)?.username || null, now(),
+    state.friendList, pubkey, state.profiles?.get(pubkey)?.handle || null, now(),
   );
 }
 
@@ -973,7 +1135,7 @@ function recordSightings(messages) {
       continue;
     }
 
-    const handle = state.profiles?.get(author)?.username;
+    const handle = state.profiles?.get(author)?.handle;
     if (handle) seen = names.recordSighting(seen, author, handle, Math.floor(Date.now() / 1000));
   }
 
@@ -985,7 +1147,7 @@ function recordSightings(messages) {
   const friendsBefore = state.friendList;
   let friends = state.friendList;
   for (const entry of friendsBefore) {
-    const handle = state.profiles?.get(entry.pubkey)?.username;
+    const handle = state.profiles?.get(entry.pubkey)?.handle;
     if (handle) friends = names.refreshFriendHandle(friends, entry.pubkey, handle, now());
   }
 
@@ -1145,7 +1307,8 @@ async function countAsVote(message, polarity) {
   state.voted.add(message.hash);
   touch();
 
-  await publishConfig();
+  scoreChanged();
+  await publishIfDue();
   vaultChanged();
 }
 
@@ -1158,7 +1321,7 @@ function showPanel(id) {
 function showProfile(pubkey) {
   state.viewing = pubkey;
   const own = pubkey === state.me.pubkey;
-  const profile = state.profiles?.get(pubkey) || { username: "someone", message: "", icon: null };
+  const profile = state.profiles?.get(pubkey) || { handle: "someone", bio: "", icon: null };
 
   $("profile-title").textContent = own ? "Your profile" : "Profile";
   $("profile-edit").classList.toggle("hidden", !own);
@@ -1167,8 +1330,8 @@ function showProfile(pubkey) {
   status($("profile-status"), "");
 
   if (own) {
-    $("my-username").value = state.profile.username;
-    $("my-message").value = state.profile.message || "";
+    $("my-username").value = state.profile.handle;
+    $("my-message").value = state.profile.bio || "";
     $("my-key").value = pubkey;
     $("show-unrated").checked = Boolean(state.settings.display?.show_unrated);
     $("add-key").value = "";
@@ -1178,9 +1341,9 @@ function showProfile(pubkey) {
     // iconFor rather than the fetched profile's icon, so an account with no
     // config to fetch -- the genesis -- still has a face here.
     $("profile-icon").replaceChildren(avatarFor(pubkey, "avatar-large"));
-    $("profile-name").textContent = profile.username || "someone";
+    $("profile-name").textContent = profile.handle || "someone";
     $("profile-fp").textContent = fingerprint(pubkey);
-    $("profile-message").textContent = profile.message || "";
+    $("profile-message").textContent = profile.bio || "";
     $("profile-bucket").textContent = `Currently ${state.session.bucketOf(pubkey)} this session.`;
   }
 
@@ -1192,7 +1355,8 @@ async function friendUser() {
   const current = state.ratings[pubkey] || { friend: false, reported: false, net_votes: 0 };
   state.ratings[pubkey] = { ...current, friend: true, reported: false };
 
-  await publishConfig();
+  scoreChanged();
+  await publishIfDue();
   status($("profile-status"), "Friended. This takes full effect at your next login.", "ok");
 }
 
@@ -1225,7 +1389,8 @@ async function reportUser(pubkey) {
   const current = state.ratings[target] || { friend: false, reported: false, net_votes: 0 };
   state.ratings[target] = { ...current, friend: false, reported: true };
 
-  await publishConfig();
+  scoreChanged();
+  await publishIfDue();
   // Your own report blocks at once — waiting a whole session defeats the point.
   state.session.report(target, state.me.pubkey);
   state.recentlyBlocked.set(target, Date.now());
@@ -1253,7 +1418,8 @@ async function undoReport(pubkey, { confirm = true } = {}) {
   const current = state.ratings[pubkey];
   if (current) state.ratings[pubkey] = { ...current, reported: false };
 
-  await publishConfig();
+  scoreChanged();
+  await publishIfDue();
   state.session.unreport(pubkey, state.me.pubkey);
   state.recentlyBlocked.delete(pubkey);
   touch();
@@ -1276,7 +1442,8 @@ async function unfriend(pubkey) {
   forgetFriend(pubkey);
   vaultChanged();
 
-  await publishConfig();
+  scoreChanged();
+  await publishIfDue();
   renderRelations();
   // Only reports move people mid-session; everything else waits for the next
   // login, so their bucket is deliberately left alone here.
@@ -1347,7 +1514,8 @@ async function clearRating(pubkey) {
   const current = state.ratings[pubkey] || { friend: false, reported: false, net_votes: 0 };
   state.ratings[pubkey] = { ...current, cleared: true };
 
-  await publishConfig();
+  scoreChanged();
+  await publishIfDue();
   renderRatings();
   status($("profile-status"), "Rating removed.", "ok");
 }
@@ -1424,7 +1592,8 @@ async function addByKey() {
   state.seen = names.forget(state.seen, pubkey);
   vaultChanged();
 
-  await publishConfig();
+  scoreChanged();
+  await publishIfDue();
   await fetchConfigs([pubkey]);
   rebuildSession();
   touch();
@@ -1507,7 +1676,7 @@ async function saveProfile() {
   if (!username) return status($("profile-status"), "a display name is required", "error");
 
   state.profile = {
-    username, message: $("my-message").value.trim(), icon: state.profile.icon,
+    handle: username, bio: $("my-message").value.trim(), icon: state.profile.icon,
   };
 
   const file = $("my-icon").files[0];
@@ -1520,9 +1689,9 @@ async function saveProfile() {
     }
   }
 
-  await publishConfig();
+  await publishIdentity();
   state.profiles.set(state.me.pubkey, state.profile);
-  $("me").textContent = `${state.profile.username} · ${fingerprint(state.me.pubkey)}`;
+  $("me").textContent = `${state.profile.handle} · ${fingerprint(state.me.pubkey)}`;
   $("my-avatar").replaceChildren(avatarFor(state.me.pubkey, "avatar-large", state.profile.icon));
   $("my-icon").value = "";
   touch();

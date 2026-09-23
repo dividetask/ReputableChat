@@ -21,6 +21,18 @@ export function toNumber(fixed) {
   return Number(fixed) / Number(SCALE);
 }
 
+// The form a score travels in. Never a float and never exponent notation: what
+// is published is signed, and canonical serialization refuses a float outright
+// because it has no single textual form across languages.
+export function toDecimal(fixed) {
+  const negative = fixed < 0n;
+  const magnitude = negative ? -fixed : fixed;
+  const whole = magnitude / SCALE;
+  const fraction = (magnitude % SCALE).toString().padStart(SCALE_DIGITS, "0").replace(/0+$/, "");
+
+  return `${negative ? "-" : ""}${whole}${fraction ? `.${fraction}` : ""}`;
+}
+
 const mul = (a, b) => (a * b) / SCALE;
 const clamp = (v) => (v > SCALE ? SCALE : v < -SCALE ? -SCALE : v);
 
