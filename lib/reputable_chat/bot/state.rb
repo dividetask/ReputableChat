@@ -104,11 +104,18 @@ module ReputableChat
 
       def retired = @retired.dup
 
+      # 0600 before anything is written into it, the same as the voucher pool
+      # and the genesis seed: this file holds a seed phrase, and whoever holds
+      # one is that account. The rename is atomic, so a kill mid-write cannot
+      # leave a bot with no way back into its own history.
       def save
         FileUtils.mkdir_p(File.dirname(@path))
         tmp = "#{@path}.tmp"
-        File.write(tmp, JSON.pretty_generate(to_h))
-        File.rename(tmp, @path) # atomic, so a kill mid-write cannot lose the seed
+        File.open(tmp, File::WRONLY | File::CREAT | File::TRUNC, 0o600) do |file|
+          file.write(JSON.pretty_generate(to_h))
+        end
+        File.rename(tmp, @path)
+        File.chmod(0o600, @path)
       end
 
       def to_h

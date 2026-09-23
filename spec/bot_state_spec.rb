@@ -107,6 +107,20 @@ class BotStateSpec < Minitest::Test
     end
   end
 
+  # The file holds a seed phrase, and whoever holds one is that account. The
+  # voucher pool and the genesis seed are both 0600; there is no reason for a
+  # bot's to be the exception.
+  def test_a_bots_seed_is_not_readable_by_everyone_on_the_machine
+    with_state do |state, dir|
+      state.recycle!(seed: "a b c", pubkey: "KEY")
+      state.save
+
+      mode = File.stat(File.join(dir, "bot.json")).mode
+
+      assert_equal 0, mode & 0o077, format("state file is mode %<mode>o", mode: mode & 0o777)
+    end
+  end
+
   def test_a_seed_is_never_left_half_written
     with_state do |state, dir|
       state.recycle!(seed: "a b c", pubkey: "KEY")

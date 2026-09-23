@@ -10,18 +10,9 @@ does a scammer get silenced? How much damage does one credulous account do by
 vouching for the wrong people? Does a troll's reports move anybody, and does an
 expert's standing survive a swarm of them?
 
-```bash
-bin/vouch --count 3                          # once, before the first swarm
-bin/bot personas/regular.yml --name ana
-bin/bot personas/regular.yml --explain       # what this persona implies
-```
-
-One persona file can back any number of bots. `--name` is what separates their
-accounts and their state, so a dozen spammers need one file:
-
-```bash
-for i in $(seq 1 12); do bin/bot personas/spammer.yml --name spam-$i & done
-```
+**How to run them, write one, and what every field does:
+[personas/README.md](../../personas/README.md).** This page is why they are
+built this way.
 
 ## Getting seen
 
@@ -257,18 +248,7 @@ remembering before pointing five hundred bots at one server.
 
 ## Flags
 
-| flag | what it does |
-|---|---|
-| `--name NAME` | which instance this is; separates account and state |
-| `--server URL` | where to reach the server |
-| `--origin URL` | what to sign, if the server is reached by a different address than it publishes |
-| `--state DIR` | where state files live (default `data/bots`) |
-| `--speed N` | compress the waiting N times |
-| `--visits N`, `--once` | stop after N visits, starting immediately |
-| `--seed N` | fix the RNG for a reproducible run |
-| `--explain` | print the schedule and briefing this persona implies, and exit |
-
-`--origin` matters when bots run elsewhere: the origin travels inside the
-signed login payload and must match the server's configured `origin` exactly,
-not the address the bot happened to dial, or every login is rejected as a bad
-signature.
+In [personas/README.md](../../personas/README.md), along with everything else
+about running them. One of them is worth a note here: `--origin` is what the
+bot *signs*, which has to be the origin the server publishes rather than the
+address the bot dialled, because it travels inside the signed login payload.

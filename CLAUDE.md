@@ -40,7 +40,7 @@ bundle exec ruby script/tim.rb friend <pubkey>
 
 bin/vouch --count 3                          # accounts that introduce new bots
 bin/bot personas/regular.yml --explain       # what a bot persona implies
-bin/bot personas/regular.yml --name ana      # run one
+bin/bot personas/regular.yml --name ana      # run one (usage: personas/README.md)
 ```
 
 See [docs/project/reputation.md](docs/project/reputation.md),

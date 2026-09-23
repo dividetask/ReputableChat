@@ -85,6 +85,8 @@ bin/vouch --count 3                                              # once
 for i in $(seq 1 12); do bin/bot personas/spammer.yml --name spam-$i & done
 ```
 
+Running them: [personas/README.md](personas/README.md).
+
 Full design — and the numbers, which live in config rather than in prose:
 [glossary](docs/project/glossary.md) ·
 [reputation](docs/project/reputation.md) ·
