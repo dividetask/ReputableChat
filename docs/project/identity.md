@@ -94,6 +94,13 @@ server can neither read it nor alter it undetected.
 Versioned for the same reason `seed.kdf.domain` is: changing it strands every
 existing vault.
 
+It is one Argon2id pass, not two. The vault key is taken off the same output
+the identity key comes from, separated by domain through HKDF. A second
+memory-hard pass would double the wait at every login and buy nothing a
+domain-separated HKDF does not already give — and re-deriving the identity key
+differently is off the table entirely, since that strands every account that
+exists.
+
 ## What the server can still do with a vault it cannot read
 
 Three things, and only three.

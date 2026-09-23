@@ -1,19 +1,27 @@
 # ReputableChat
 
-Decentralized chat where the reputation system *is* the moderation. Every user
-is a keypair. People vouch for each other by friending and reacting positively
-to comments, and report bad actors. Those judgements propagate through the
-social graph, weighted by distance, and decide what each person sees — so "who
-is worth reading" is answered per viewer rather than globally.
+Decentralized chat where the reputation system *is* the moderation.
 
-Every signed record names the last record its author had seen, and only records
-from people that author rates are worth naming — so the history is a chain the
-reputable part of the network builds for itself, and being unvouched for means
-being left out of it.
+Every user is a keypair. People vouch for each other by friending and reacting
+positively, and report the rest. Those judgements propagate through the social
+graph, weighted by distance, so **"who is worth reading" is answered per viewer
+rather than globally**. There is no global score, no moderator, and no list of
+banned people — two readers can disagree about somebody and both be right.
 
-**Status: early.** Reputation, identity and cryptography are built and tested. The
-chain's record shapes and hashing are in; the records that use them are landing
-a stage at a time. The chat UI is a working skeleton.
+Every signed record names the last record its author had seen, which makes the
+history a chain: a record cannot be quietly removed, back-dated, or shown to one
+person and not another. Records are anchored into it only when somebody who
+clears a reader's own bar acknowledges them, so being unvouched for means being
+left out — which is also what a sybil cannot buy its way past.
+
+The server is deliberately close to useless. It verifies signatures, stores
+blobs, and serves them back unchanged. It never sees a seed, never holds a
+private key, and never computes a reputation, because reputation is subjective
+and belongs on the machine of the person whose opinion it is.
+
+**Status: early.** Reputation, identity, cryptography and the chain's record
+shapes are built and tested. The client is being moved onto those records a
+stage at a time. The chat UI is a working skeleton.
 
 ## Running it
 
@@ -23,89 +31,48 @@ bundle exec rake spec      # test suite
 bundle exec puma           # http://localhost:9292
 ```
 
-`bundle exec rake curve` prints the curve, ladder weights and safety window.
+`bundle exec rake curve` prints the current curve, ladder and safety window.
 
-### Deploying
+## Deploying
 
-Server settings live in `config/server.yml`:
+Server settings live in `config/server.yml`, which documents itself: paths,
+the public origin, and the size limits an operator gets to choose. Every key
+can be overridden by the matching environment variable for deployments that
+inject configuration rather than edit files.
 
-```yaml
-origin: "https://chat.example"
-database_url: "sqlite://data/reputablechat.db"
-image_root: "data/images"
-```
+Two things that bite:
 
-`origin` is the public URL the server is reached at. It travels inside the
-signed login payload, so if it does not match the origin the browser signs,
-every login is rejected as a bad signature.
+- **`origin` must match the URL browsers actually reach you at.** It travels
+  inside the signed login payload, so a mismatch rejects every login as a bad
+  signature.
+- **`SESSION_SECRET` is environment-only**, because `config/server.yml` is in
+  the repository. Without it a random secret is generated at boot, which is
+  fine locally and signs everyone out on every restart.
 
-Each key can be overridden by the matching environment variable (`ORIGIN`,
-`DATABASE_URL`, `IMAGE_ROOT`) for deployments that inject configuration rather
-than edit files.
+The genesis account has to exist before the server will start. `bundle exec
+rake genesis` makes one; every client needs the same hash before it has fetched
+anything, so it is committed rather than downloaded.
 
-### Limits
+## How it fits together
 
-`config/server.yml` also carries a `limits:` section — the vault's ciphertext,
-an image, a message body, a notice body, a note — served at `/api/limits`.
-These are an operator's decision rather than a property of the protocol: a
-server with more disk can afford a larger vault. Serving them is the point,
-because the alternative is a client finding the ceiling by being refused after
-somebody has already done the work.
+**Reputation** is a weighted opinion, not a score. Your own judgement dominates;
+the rest of the network contributes by distance, and the walk stops early and
+fills the last of it in from what your contacts have already worked out.
+Everyone lands in one of three buckets — Trusted, Tolerated, Blocked — and an
+account nobody has vouched for sits at exactly zero, which is to say invisible.
+That is the sybil defense, and the reason a new account starts out trusting the
+genesis: somebody has to be visible first.
 
-A limit that is absent, unparseable or not positive falls back to its default
-rather than to zero. A zero would refuse every save, and a typo should not be
-able to do that quietly.
+**Identity** is a seed phrase and nothing else. It derives the keypair, the
+public half is the account, and there is no recovery — losing it loses
+everything. Private keys are non-extractable and never leave the browser.
 
-`seen_entries` is advice rather than a limit: nothing rejects a vault for
-exceeding it. The server cannot see inside a vault, so it cannot prune one —
-only the client can decide what to drop, and friends and blocked accounts are
-never it.
+**The chain** is not a blockchain in the mining sense. It has no proof of work,
+orders nothing, and settles nothing. It exists so that history is tamper
+evident and so that inclusion in it has to be earned from somebody.
 
-`SESSION_SECRET` is environment-only, since `config/server.yml` is in the
-repository. Without it a random secret is generated at boot — fine locally, but
-it signs everyone out on every restart.
-
-## How reputation works
-
-Your own rating of someone is worth 0.9 of their score. The rest of the network
-is worth 0.1, split by distance: the people you rated contribute 0.09 between
-them, the people *they* rated 0.009, out to seven hops.
-
-Everyone is sorted into a bucket at login, and the scores are then discarded:
-
-| bucket | score | shown as |
-|---|---|---|
-| Trusted | ≥ 0.01 | normal |
-| Tolerated | > 0 | greyed, marked untrusted |
-| Blocked | ≤ 0 | not shown |
-
-Hop 2 tops out at 0.009, so **Trusted means you rated them or someone you rated
-did**. The unrated sit at exactly 0, so **new accounts start invisible** — that
-is the sybil defense. Set `show_unrated` to see them anyway.
-
-## The chain
-
-No proof of work and no mining. The chain exists so a record cannot be quietly
-removed, back-dated, or shown to one person and not another: dropping a message
-means dropping everything that acknowledged it, and everything that
-acknowledged those.
-
-A record is acknowledged only if its author clears the acknowledger's own
-reputation bar, which is subjective and which no server can check. New and
-low-reputation accounts therefore go unacknowledged and unanchored — that is
-the point of it, not a gap in it.
-
-A new account starts out friending the genesis account, because an unrated
-account is invisible to everyone and a newcomer who trusts nobody would see
-nobody. It is an ordinary friendship in your own config, listed beside everyone
-else's, and you can remove it — a trust you cannot withdraw would not be a
-default.
-
-Tim's identity declaration is the genesis. Generate it once with `bundle exec rake
-genesis` and commit it; every client needs the same hash before it has fetched
-anything, so it cannot be downloaded.
-
-Full design: [glossary](docs/project/glossary.md) ·
+Full design — and the numbers, which live in config rather than in prose:
+[glossary](docs/project/glossary.md) ·
 [reputation](docs/project/reputation.md) ·
 [identity](docs/project/identity.md) ·
 [chain](docs/project/chain.md) ·
@@ -113,9 +80,14 @@ Full design: [glossary](docs/project/glossary.md) ·
 
 ## Security
 
-- Seeds are 8+ BIP39 words stretched through Argon2id.
+- Seeds are BIP39 words stretched through Argon2id, sized in
+  `config/reputation.yml` against a documented attack.
 - Private keys are non-extractable WebCrypto keys in IndexedDB. The seed is
   never stored or transmitted.
-- Signatures are bound to purpose, origin and room, so they cannot be replayed.
-- **MVP: the client does not verify config signatures** (`verify_signatures:
-  false`). Until that is on, a malicious server can fabricate ratings.
+- The private vault is encrypted under a separate key derived from the same
+  seed, so the server holds it without being able to read it.
+- Signatures are bound to purpose, origin and room, so they cannot be replayed
+  against another server or replanted in another channel.
+- **MVP: the client does not verify other people's config signatures**
+  (`session.verify_signatures`). Until that is on, a malicious server can
+  fabricate ratings.

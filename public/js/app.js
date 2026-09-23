@@ -7,6 +7,7 @@ import * as identity from "./identity.js";
 import { Reputation, Graph, toNumber, toFixed } from "./reputation.js";
 import { Session } from "./session.js";
 import { initialRatings, genesisProfile } from "./defaults.js";
+import * as vault from "./vault.js";
 
 const ROOM = "general";
 const LOGIN_PATH = "/";
@@ -20,9 +21,10 @@ const $ = (id) => document.getElementById(id);
 const state = {
   config: null, emotes: null, me: null, profile: null, revision: 0,
   ratings: {}, graph: new Graph(), reputation: null, session: null,
-  seq: 0, voted: new Set(), viewing: null, settings: {}, privateRevision: 0,
+  seq: 0, voted: new Set(), viewing: null, settings: {}, vaultRevision: 0,
+  vaultDirty: false,
   reactions: new Map(), recentlyBlocked: new Map(), replyingTo: null,
-  genesis: null, tip: null, newFriends: {},
+  genesis: null, tip: null, newFriends: {}, limits: null,
   renderEpoch: 0, renderedKey: null, pendingRegistration: false,
 };
 
@@ -100,41 +102,94 @@ function buildReputation() {
   return new Reputation(deepMerge(state.config, state.settings));
 }
 
-async function loadPrivateConfig() {
-  const { config } = await api("/api/private-config");
+// --- the vault ---------------------------------------------------------
+//
+// Local first. Changes land in memory immediately and reach the server on a
+// timer, when the page is hidden, and at log off. What that costs is bounded
+// and worth naming: a tab that dies between pushes loses whatever happened
+// since the last one.
+
+function vaultContents() {
+  return { settings: state.settings, voted: [...state.voted] };
+}
+
+function applyVault(contents) {
+  state.settings = contents.settings || {};
+  state.voted = new Set(contents.voted || []);
+}
+
+async function loadVault() {
+  const { vault: blob } = await api("/api/vault");
 
   state.settings = {};
   state.voted = new Set();
-  state.privateRevision = 0;
-  if (!config) return;
+  state.vaultRevision = 0;
+  state.vaultDirty = false;
+  if (!blob) return;
 
-  // Verified even though the MVP takes other people's configs on trust --
+  // Verified even though the MVP takes other people's records on trust --
   // detecting tampering is the entire reason this one is signed.
-  if (!(await identity.verifyBlob(state.me.pubkey, config))) {
+  if (!(await identity.verifyBlob(state.me.pubkey, blob))) {
     return status($("chat-status"),
                   "Your saved settings did not verify and were ignored.", "error");
   }
 
-  const payload = JSON.parse(config.payload);
-  state.privateRevision = payload.revision || 0;
-  state.settings = payload.settings || {};
-  state.voted = new Set(payload.voted || []);
+  const payload = JSON.parse(blob.payload);
+  state.vaultRevision = payload.revision || 0;
+
+  const contents = await vault.unseal(state.me.vaultKey, payload);
+  if (!contents) {
+    return status($("chat-status"),
+                  "Your saved settings could not be decrypted and were ignored.", "error");
+  }
+  applyVault(contents);
 }
 
-async function publishPrivateConfig() {
-  state.privateRevision += 1;
+// What a change calls. It does not touch the network: a vote should not wait
+// on a request, and a run of them should not make a run of them.
+function vaultChanged() {
+  state.vaultDirty = true;
+}
+
+async function writeVault(revision, contents) {
   const ts = Math.floor(Date.now() / 1000);
-  const voted = [...state.voted];
-  const payload = identity.privateConfigPayload({
-    pubkey: state.me.pubkey, revision: state.privateRevision,
-    settings: state.settings, voted, ts,
+  const sealed = await vault.seal(state.me.vaultKey, contents);
+  const payload = identity.vaultPayload({
+    pubkey: state.me.pubkey, revision, ...sealed, ts,
   });
 
-  await send("PUT", "/api/private-config", {
-    revision: state.privateRevision, settings: state.settings, voted, ts,
-    signature: await identity.sign(state.me, payload),
+  await send("PUT", "/api/vault", {
+    revision, ...sealed, ts, signature: await identity.sign(state.me, payload),
   });
+  state.vaultRevision = revision;
 }
+
+// A rejection means the other device got there first, so this one merges
+// rather than retrying -- see vault.merge for which direction each list
+// resolves in.
+async function pushVault({ force = false } = {}) {
+  if (!state.me?.vaultKey) return;
+  if (!state.vaultDirty && !force) return;
+
+  state.vaultDirty = false;
+  try {
+    await writeVault(state.vaultRevision + 1, vaultContents());
+  } catch {
+    try {
+      const { vault: blob } = await api("/api/vault");
+      const payload = blob ? JSON.parse(blob.payload) : null;
+      const theirs = payload ? await vault.unseal(state.me.vaultKey, payload) : null;
+
+      applyVault(vault.merge(vaultContents(), theirs));
+      await writeVault(Math.max(state.vaultRevision, payload?.revision || 0) + 1, vaultContents());
+    } catch (error) {
+      // Kept dirty, so the next push tries again rather than dropping it.
+      state.vaultDirty = true;
+      status($("chat-status"), `Could not save your settings: ${error.message}`, "error");
+    }
+  }
+}
+
 
 // Re-sorts everyone from the graph already in hand. In-session reports are
 // replayed so a toggle does not quietly un-block someone.
@@ -383,6 +438,10 @@ async function registerWith(username) {
 
 
 async function logOff() {
+  // Best effort, and the last of several: the timer and the hidden-page push
+  // are what actually keep a vault current, because a tab can close without
+  // ever reaching this line.
+  await pushVault().catch(() => {});
   await identity.forget();
   location.reload();
 }
@@ -494,7 +553,7 @@ async function enterChat() {
   $("login").classList.add("hidden");
   $("chat").classList.remove("hidden");
 
-  await loadPrivateConfig();
+  await loadVault();
   state.reputation = buildReputation();
   await loadOwnConfig();
   await loadNetwork();
@@ -503,6 +562,10 @@ async function enterChat() {
   $("me").textContent = `${state.profile.username} · ${fingerprint(state.me.pubkey)}`;
   refreshMessages();
   setInterval(refreshMessages, 4000);
+  // Local first, pushed on a timer. The interval is the server's advice, and
+  // it bounds how much a dying tab can lose rather than how often anything is
+  // allowed to happen.
+  setInterval(() => pushVault().catch(() => {}), (state.limits?.vault_sync_seconds || 3600) * 1000);
 }
 
 async function refreshMessages() {
@@ -957,7 +1020,7 @@ async function countAsVote(message, polarity) {
   touch();
 
   await publishConfig();
-  await publishPrivateConfig();
+  vaultChanged();
 }
 
 // --- profiles ----------------------------------------------------------
@@ -1236,7 +1299,7 @@ async function toggleUnrated() {
   state.settings = deepMerge(state.settings, {
     display: { show_unrated: $("show-unrated").checked },
   });
-  await publishPrivateConfig();
+  vaultChanged();
 
   state.reputation = buildReputation();
   rebuildSession();
@@ -1328,8 +1391,8 @@ async function saveProfile() {
 // --- boot ---------------------------------------------------------------
 
 async function boot() {
-  [state.config, state.emotes, state.genesis] = await Promise.all([
-    api("/api/defaults"), api("/api/emotes"), api("/api/genesis"),
+  [state.config, state.emotes, state.genesis, state.limits] = await Promise.all([
+    api("/api/defaults"), api("/api/emotes"), api("/api/genesis"), api("/api/limits"),
   ]);
   state.reputation = buildReputation();
   await seed.loadWordlist();
@@ -1368,6 +1431,12 @@ async function boot() {
     addNewFriend();
   });
   window.addEventListener("popstate", renderRoute);
+
+  // Hidden rather than unloading: a phone backgrounding a tab may never fire
+  // an unload event at all, and this one it does fire.
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") pushVault().catch(() => {});
+  });
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") hideLarge();
   });

@@ -74,6 +74,11 @@ inventing a word for something that already has one.
   copying the record into place rather than misnaming it.
   Both hold the seed phrase rather than the derived key, so there is one secret
   to look after rather than two that must not disagree.
+- **The vault key.** `public/js/vault.js` derives it from the Argon2id output
+  the identity key already comes from, separated by `seed.kdf.vault_domain`
+  through HKDF. Changing that domain strands every existing vault; changing how
+  the identity key is derived strands every existing account, which is why the
+  vault key is layered on top rather than alongside.
 - **The seed derivation domain.** Changing `seed.kdf.domain` in
   `config/reputation.yml` changes every derived key, which strands every
   existing account. It is versioned (`:v1`) so a future change can be handled

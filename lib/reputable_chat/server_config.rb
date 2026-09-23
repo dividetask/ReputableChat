@@ -33,7 +33,8 @@ module ReputableChat
       "message_bytes" => 4_000,
       "notice_bytes" => 16_000,
       "note_bytes" => 2_000,
-      "seen_entries" => 5_000
+      "seen_entries" => 5_000,
+      "vault_sync_seconds" => 3_600
     }.freeze
 
     module_function

@@ -8,6 +8,7 @@
 
 import * as canonical from "./canonical.js";
 import * as seed from "./seed.js";
+import * as vault from "./vault.js";
 
 const DB_NAME = "reputablechat";
 const STORE = "identity";
@@ -78,9 +79,14 @@ export async function deriveFromSeed(phrase, kdf) {
 
   const rawSeed = await stretch(phrase, kdf);
   const identity = await importKeypair(rawSeed);
+  // The vault key comes off the same expensive derivation, separated by domain
+  // rather than by a second Argon2id pass -- which would double the wait at
+  // login for nothing HKDF does not already give. Derived before the seed is
+  // wiped, because after that there is nothing left to derive from.
+  const vaultKey = await vault.deriveKey(rawSeed, kdf.vault_domain);
   rawSeed.fill(0);
 
-  return identity;
+  return { ...identity, vaultKey };
 }
 
 // --- persistence -------------------------------------------------------
@@ -145,6 +151,7 @@ export const PURPOSE = {
   ADJUSTMENT: "reputablechat:adjustment:v1",
   RELEASE: "reputablechat:release:v1",
   NOTICE: "reputablechat:notice:v1",
+  VAULT: "reputablechat:vault:v1",
 };
 
 // These must match lib/reputable_chat/cryptography/payload.rb exactly.
@@ -166,6 +173,12 @@ export function configPayload({ pubkey, revision, profile, ratings, ts }) {
 
 export function emotePayload({ author, room, message, emote, ack, ts, note = null }) {
   return { purpose: PURPOSE.EMOTE, author, room, message, emote, ack, note, ts };
+}
+
+// `revision` sits outside the ciphertext so the server can reject a rollback
+// on a document it can otherwise make nothing of.
+export function vaultPayload({ pubkey, revision, ciphertext, iv, ts }) {
+  return { purpose: PURPOSE.VAULT, pubkey, revision, ciphertext, iv, ts };
 }
 
 export function privateConfigPayload({ pubkey, revision, settings, voted, ts }) {

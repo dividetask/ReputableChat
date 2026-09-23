@@ -29,6 +29,10 @@ image_root: "data/images"
 #
 # Each can be overridden by the matching environment variable, named for the
 # key in upper case: VAULT_BYTES, IMAGE_BYTES, and so on.
+#
+# A value that is missing, unparseable or not positive falls back to the built
+# in default rather than to zero. A zero here would refuse every save, and a
+# typo in this file must not be able to do that quietly.
 limits:
   # The vault's ciphertext. The server cannot see inside it, so this is the
   # only limit it has -- it cannot count your friends, so it counts your bytes.
@@ -42,3 +46,7 @@ limits:
   # is the client that has to decide what to drop. Friends and blocked accounts
   # are never what gets dropped.
   seen_entries: 5000
+  # Also advice: how often a client should push its vault while signed in. It
+  # is local first, so this bounds how much is lost when a tab dies rather than
+  # how often anything is allowed to happen.
+  vault_sync_seconds: 3600
