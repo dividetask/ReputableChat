@@ -17,7 +17,7 @@ export const SCORING_KEYS = [
   "precision.scale",
   "constants.k",
   "ladder.max_hops",
-  "ladder.max_configs",
+  "ladder.max_accounts",
   "gate.min_rating",
   "actions.friend.value",
   "actions.report.value",

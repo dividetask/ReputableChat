@@ -355,7 +355,7 @@ only a reader running the author's own parameters can even attempt it.
 
 ## Attestations
 
-The old public config carried `{friend, reported, net_votes}` per person and
+The record this replaced carried `{friend, reported, net_votes}` per person and
 let every reader run the curve themselves. An attestation carries **ratings**,
 already run through its author's curve, in a field named `scores`:
 

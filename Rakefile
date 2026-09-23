@@ -8,7 +8,7 @@ Rake::TestTask.new(:spec) do |t|
   t.warning = false
 end
 
-desc "Readable dump of the database (rake dump, or dump[messages] / dump[users,configs])"
+desc "Readable dump of the database (rake dump, or dump[messages] / dump[users,attestations])"
 task :dump, [:sections] do |_task, args|
   $LOAD_PATH.unshift "lib"
   require "reputable_chat/dump"
@@ -20,9 +20,14 @@ task :dump, [:sections] do |_task, args|
   puts
 
   store = ReputableChat::Store::Database.new(url)
-  sections = args[:sections] ? args[:sections].split(/[\s,]+/) : nil
+  # Rake splits on the commas inside the brackets itself, so dump[users,vaults]
+  # arrives as one named argument and one extra rather than as a single string.
+  # Reading only the named one silently dumped the first section and dropped the
+  # rest, which looks exactly like a section being empty.
+  named = [args[:sections], *args.extras].compact
+  sections = named.flat_map { |value| value.split(/[\s,]+/) }.reject(&:empty?)
 
-  ReputableChat::Dump.new(store).render(*[sections].compact)
+  ReputableChat::Dump.new(store).render(*(sections.empty? ? [] : [sections]))
 end
 
 desc "Print the reputation curve and ladder for the current config"
@@ -36,7 +41,7 @@ task :curve do
   engine = ReputableChat::Reputation::Engine.new(config: config, store: ReputableChat::Store::Memory.new)
 
   puts "k = #{engine.ladder.k.to_s('F')}   max_hops = #{engine.ladder.max_hops}"
-  puts "stranger ceiling = #{engine.ladder.stranger_ceiling.to_s('F')}   max_configs = #{engine.ladder.max_configs}"
+  puts "stranger ceiling = #{engine.ladder.stranger_ceiling.to_s('F')}   max_accounts = #{engine.ladder.max_accounts}"
   puts "cap reached at #{engine.curve.saturation_point} net votes"
   puts
   puts "hops   weight"

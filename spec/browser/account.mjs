@@ -70,6 +70,36 @@ try {
   results.friend_list_shows_an_image = await friends.first().locator("img.avatar").count() > 0;
   results.friend_list_shows_a_whole_key =
     (await friends.first().locator(".pubkey").textContent()).trim().length;
+
+  // --- a friendship made during the session -----------------------------
+  //
+  // Adding a friend from the profile page reports the bucket they landed in, and
+  // that sentence is the only place a rating made SINCE the last publish can be
+  // seen working. The graph holds each account's published attestation, and the
+  // batch fetch skips anyone already in it -- so the author's own entry there is
+  // their last published one, and a fresh rating reaches the session only
+  // through the local entry rebuildSession writes.
+  const stranger = "y".repeat(43);
+  await page.fill("#add-key", stranger);
+  await page.click("#add-friend");
+  await page.waitForFunction(
+    () => document.querySelector("#profile-status").textContent.trim().length > 0,
+    null, { timeout: 30_000 },
+  );
+  results.added_mid_session = (await page.locator("#profile-status").textContent()).trim();
+
+  // --- the whole reputation pipeline, as rendered ------------------------
+  //
+  // Clicking a friend's name opens their profile, which states the bucket they
+  // landed in. That sentence is the far end of everything: the vault's private
+  // ratings, the scores derived from them, the author's own entry in the graph,
+  // the ladder and the curve. Nothing shorter catches a break in the middle --
+  // a friend who is somehow still `blocked` renders exactly as well as one who
+  // is trusted, and the source-level tests cannot tell the difference.
+  await friends.first().locator(".name").click();
+  await page.waitForSelector("#profile-view:not(.hidden)", { timeout: 10_000 });
+  results.friend_profile_name = (await page.locator("#profile-name").textContent()).trim();
+  results.friend_bucket = (await page.locator("#profile-bucket").textContent()).trim();
 } catch (error) {
   results.error = `${error}`;
 } finally {

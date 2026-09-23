@@ -123,36 +123,7 @@ class AppSpec < Minitest::Test
     assert_equal 401, last_response.status
   end
 
-  # --- profile and images ------------------------------------------------
-
-  def test_profile_travels_inside_the_signed_config
-    log_in
-    post_json "/api/register", {}
-    target = Sig.encode(Ed25519::SigningKey.generate.verify_key.to_bytes)
-
-    put "/api/config", JSON.generate(config_body(revision: 1, ratings: ratings_for(target))),
-        "CONTENT_TYPE" => "application/json"
-    assert_equal 200, last_response.status
-
-    get "/api/config/#{@pubkey}"
-    payload = JSON.parse(JSON.parse(last_response.body)["config"]["payload"])
-
-    assert_equal "alice", payload.dig("profile", "username")
-    assert Sig.verify(pubkey_b64: @pubkey, signature_b64: JSON.parse(last_response.body)["config"]["signature"],
-                      payload: payload),
-           "the profile must be covered by the signature"
-  end
-
-  def test_rejects_a_profile_that_was_not_signed
-    log_in
-    target = Sig.encode(Ed25519::SigningKey.generate.verify_key.to_bytes)
-    body = config_body(revision: 1, ratings: ratings_for(target))
-    body["profile"] = body["profile"].merge("username" => "mallory")
-
-    put "/api/config", JSON.generate(body), "CONTENT_TYPE" => "application/json"
-
-    assert_equal 400, last_response.status, "changing the profile must break the signature"
-  end
+  # --- images ------------------------------------------------------------
 
   PNG = "\x89PNG\r\n\x1A\n".b + ("x" * 64).b
 
@@ -201,79 +172,16 @@ class AppSpec < Minitest::Test
     assert_equal 404, last_response.status
   end
 
-  # --- config storage ---------------------------------------------------
+  # --- batch fetching -----------------------------------------------------
 
-  PROFILE = { "username" => "alice", "message" => "hello", "icon" => nil }.freeze
-
-  def config_body(revision:, ratings:, key: nil, profile: PROFILE)
-    ts = Time.now.to_i
-    payload = Payload.config(pubkey: @pubkey, revision: revision, profile: profile,
-                             ratings: ratings, issued_at: ts)
-    signature = key ? Sig.encode(key.sign(Canon.bytes(payload))) : sign(payload)
-    { "revision" => revision, "profile" => profile, "ratings" => ratings,
-      "ts" => ts, "signature" => signature }
-  end
-
-  def ratings_for(target, friend: true, reported: false, net_votes: 0)
-    { target => { "friend" => friend, "reported" => reported, "net_votes" => net_votes } }
-  end
-
-  def test_stores_and_serves_a_signed_config
-    log_in
-    target = Sig.encode(Ed25519::SigningKey.generate.verify_key.to_bytes)
-
-    put "/api/config", JSON.generate(config_body(revision: 1, ratings: ratings_for(target))),
-        "CONTENT_TYPE" => "application/json"
-    assert_equal 200, last_response.status
-
-    get "/api/config/#{@pubkey}"
-    stored = json["config"]
-
-    assert_equal 1, stored["revision"]
-    assert Sig.verify(pubkey_b64: @pubkey, signature_b64: stored["signature"],
-                      payload: JSON.parse(stored["payload"])),
-           "the served blob must still verify against the author's key"
-  end
-
-  def test_refuses_an_unsigned_config
-    log_in
-    target = Sig.encode(Ed25519::SigningKey.generate.verify_key.to_bytes)
-    body = config_body(revision: 1, ratings: ratings_for(target), key: Ed25519::SigningKey.generate)
-
-    put "/api/config", JSON.generate(body), "CONTENT_TYPE" => "application/json"
-
-    assert_equal 400, last_response.status
-  end
-
-  # Without the revision check the server could serve an old config to hide a
-  # report, and its signature would still verify perfectly.
-  def test_refuses_a_rollback
-    log_in
-    target = Sig.encode(Ed25519::SigningKey.generate.verify_key.to_bytes)
-
-    put "/api/config", JSON.generate(config_body(revision: 5, ratings: ratings_for(target))),
-        "CONTENT_TYPE" => "application/json"
-    assert_equal 200, last_response.status
-
-    put "/api/config", JSON.generate(config_body(revision: 4, ratings: ratings_for(target))),
-        "CONTENT_TYPE" => "application/json"
-    assert_equal 409, last_response.status
-  end
-
-  def test_rejects_malformed_ratings
-    log_in
-
-    put "/api/config", JSON.generate(config_body(revision: 1, ratings: { "not-a-key" => {} })),
-        "CONTENT_TYPE" => "application/json"
-
-    assert_equal 400, last_response.status
-  end
-
+  # RULE: a batch is bounded. The traversal fetches a whole hop per request, so
+  # the request size is chosen by the client -- an unbounded one would let
+  # anybody ask for the entire table in a single call.
   def test_batch_fetch_is_bounded
     log_in
     too_many = Array.new(300) { Sig.encode(Ed25519::SigningKey.generate.verify_key.to_bytes) }
 
-    post_json "/api/config/batch", { "pubkeys" => too_many }
+    post_json "/api/attestation/batch", { "pubkeys" => too_many }
 
     assert_equal 400, last_response.status
   end
@@ -472,9 +380,9 @@ class AppSpec < Minitest::Test
     assert_equal @pubkey, stored.first["author"], "the author is needed to show whether you reacted"
   end
 
-  # One reaction per person per message, enforced server-side rather than
+  # One emote per person per message, enforced server-side rather than
   # trusted from the client.
-  def test_one_reaction_per_person_per_message
+  def test_one_emote_per_person_per_message
     log_in
     body = emote_body(message: a_message_signature)
 
@@ -482,7 +390,7 @@ class AppSpec < Minitest::Test
     assert_equal 200, last_response.status
 
     post_json "/api/room/general/emote", emote_body(message: a_message_signature, emote: SECOND_EMOTE)
-    assert_equal 409, last_response.status, "a different emote is still a second reaction"
+    assert_equal 409, last_response.status, "a different emote is still a second one"
   end
 
   # An arbitrary string must never be storable, or it renders back to everyone.
@@ -526,7 +434,7 @@ class AppSpec < Minitest::Test
   end
 
   def test_sets_a_strict_content_security_policy
-    get "/api/config/#{@pubkey}"
+    get "/api/identity/#{@pubkey}"
     csp = last_response.headers["Content-Security-Policy"]
 
     assert_includes csp, "default-src 'self'"

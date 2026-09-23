@@ -6,8 +6,8 @@ module ReputableChat
     # was made for, so a harvested signature cannot be replayed against another
     # server or replanted in another channel.
     #
-    # Every shape but `login` and `private_config` carries `ack`: the hash of
-    # the last record its author had seen. That is what makes the set of
+    # Every shape but `login` and `vault` carries `ack`: the hash of the last
+    # record its author had seen. That is what makes the set of
     # signatures a chain rather than a pile. See docs/project/chain.md.
     #
     # They also carry `note`: free text the software never reads, for a person
@@ -23,8 +23,6 @@ module ReputableChat
     module Payload
       LOGIN          = "reputablechat:login:v1"
       MESSAGE        = "reputablechat:message:v1"
-      CONFIG         = "reputablechat:config:v1"
-      PRIVATE_CONFIG = "reputablechat:private-config:v1"
       EMOTE          = "reputablechat:emote:v1"
       IDENTITY       = "reputablechat:identity:v1"
       ATTESTATION    = "reputablechat:attestation:v1"
@@ -195,12 +193,12 @@ module ReputableChat
         }
       end
 
-      # One person's reaction to one message. `message` is that message's
+      # One person's emote on one message. `message` is that message's
       # record hash. `room` is carried for the same reason a message carries
-      # it: so a reaction cannot be transplanted elsewhere.
+      # it: so an emote cannot be transplanted elsewhere.
       #
       # An emote record is also its own attestation adjustment -- it names the
-      # author, the target message and the reaction, which is everything needed
+      # author, the target message and the emote, which is everything needed
       # to move the author's score for that message's author.
       def emote(author:, room:, message:, emote:, ack:, issued_at:, note: nil)
         {
@@ -238,38 +236,6 @@ module ReputableChat
           "ciphertext" => ciphertext,
           "iv"         => iv,
           "ts"         => issued_at.to_i
-        }
-      end
-
-      # The owner's own settings and state. The only shape with no `ack`,
-      # because nobody else ever sees it, so there is nothing to anchor it to
-      # and nobody to prove anything to.
-      #
-      # Signed, not encrypted -- this is private from other users, not from the
-      # server operator, who can read it. Superseded by the encrypted vault;
-      # see docs/project/identity.md.
-      def private_config(pubkey:, revision:, settings:, voted:, issued_at:)
-        {
-          "purpose"  => PRIVATE_CONFIG,
-          "pubkey"   => pubkey,
-          "revision"  => revision.to_i,
-          "settings" => settings,
-          "voted"    => voted,
-          "ts"       => issued_at.to_i
-        }
-      end
-
-      # Superseded by `user` (identity and presentation) and `attestation`
-      # (ratings). Kept until the routes that serve it are replaced, so that
-      # the running client does not break mid-migration.
-      def config(pubkey:, revision:, profile:, ratings:, issued_at:)
-        {
-          "purpose" => CONFIG,
-          "pubkey"  => pubkey,
-          "revision" => revision.to_i,
-          "profile" => profile,
-          "ratings" => ratings,
-          "ts"      => issued_at.to_i
         }
       end
     end

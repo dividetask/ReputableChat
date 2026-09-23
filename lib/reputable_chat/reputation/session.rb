@@ -106,7 +106,7 @@ module ReputableChat
       # Copies the ratings the walk reached, so the session reads a fixed
       # graph. Freezing only the walk is not enough -- a new rating published
       # by someone already in it would still leak through. Bounded by
-      # ladder.max_configs, since that is what bounded the walk.
+      # ladder.max_accounts, since that is what bounded the walk.
       def snapshot(source)
         frozen = Store::Memory.new
         @depths.each_key do |rater|

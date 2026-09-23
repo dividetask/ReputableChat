@@ -84,7 +84,7 @@ person one step closer in; a single non-positive link and the whole branch
 beyond it goes unread.
 
 The walk stops at **hop 2**, and the fourth term comes from other people's
-arithmetic rather than from walking further. `max_configs` still bounds it, and
+arithmetic rather than from walking further. `max_accounts` still bounds it, and
 still has to: a positive-only graph branches, so even two hops is 900 people at
 30 ratings each and 22,500 at 150.
 
@@ -156,7 +156,7 @@ without asking the server to be trusted about what it left out.
 
 ### Sampling
 
-`max_configs` truncates the walk. On a large graph that means the mean at
+`max_accounts` truncates the walk. On a large graph that means the mean at
 depth 2 is taken over whichever people breadth-first order happened to reach
 first, which is arbitrary and differs between clients for no principled reason.
 Deterministic selection — nearest first, then by pubkey — at least makes two
@@ -273,10 +273,21 @@ default, the hardcoded fallback. A key that is absent or blank in a user's
 settings tracks the default, so editing `config/reputation.yml` moves every user
 who never pinned that setting and nobody who did.
 
-The curve is the exception. An attestation carries ratings that its author's
-curve has already produced, so a retune changes the ratings you publish from
-then on and never anybody else's. That replaced an earlier design in which
-published records carried actions (`friend`, `reported`, `net_votes`) and every
-reader ran the curve; the friend and report lists are private now, so there are
-no public actions left to run it on. See **Attestations** in
-[chain.md](chain.md).
+An attestation carries **ratings**, not the actions behind them. `friend`,
+`reported` and `net_votes` stay in the author's vault; what gets published is
+the rating they came to.
+
+The other way round was tried first, and the argument for it was real: action
+counts never go stale, while a published rating goes stale the moment its
+author retunes their curve. What decided it was that publishing actions asks
+every reader to apply *their own* curve to *somebody else's* counts, which
+computes a number neither of them holds. Whose curve should a stranger's
+net_votes go through? Under actions there is no answer to that; under ratings
+the author runs their own curve once and publishes the result, and the curve
+becomes an authoring parameter rather than a reading one.
+
+What a published reputation cannot do is claim to mean the same to everybody,
+which is why `derived` carries a **parameter fingerprint** — a reader whose
+parameters differ can see that the cache is not theirs to use, rather than
+silently adopting a stranger's settings. See **Derived cache** in
+[glossary.md](glossary.md).

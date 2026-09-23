@@ -331,8 +331,8 @@ class ChainSpec < Minitest::Test
 
   # RULE: the private vault has no ack. Nobody else ever sees it, so there is
   # nothing to anchor it to and nobody to prove anything to.
-  def test_the_private_config_has_no_ack
-    payload = Payload.private_config(pubkey: "k", revision: 1, settings: {}, voted: [], issued_at: 1)
+  def test_the_vault_has_no_ack
+    payload = Payload.vault(pubkey: "k", revision: 1, ciphertext: "c", iv: "i", issued_at: 1)
 
     refute payload.key?("ack")
   end

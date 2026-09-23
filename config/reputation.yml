@@ -14,8 +14,10 @@ constants:
 
 ladder:
   max_hops: 7
-  # Traversal also stops here, whichever limit is reached first.
-  max_configs: 5000
+  # The most accounts one walk will reach. Traversal stops at whichever of the
+  # two limits comes first: a positive-only graph still branches, so a hop count
+  # alone does not bound how much gets fetched.
+  max_accounts: 5000
 
 gate:
   # Only configs of people rated above this are read.
