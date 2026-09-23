@@ -144,6 +144,7 @@ export const PURPOSE = {
   ATTESTATION: "reputablechat:attestation:v1",
   ADJUSTMENT: "reputablechat:adjustment:v1",
   RELEASE: "reputablechat:release:v1",
+  NOTICE: "reputablechat:notice:v1",
 };
 
 // These must match lib/reputable_chat/cryptography/payload.rb exactly.
@@ -200,6 +201,19 @@ export function adjustmentPayload({
   return {
     purpose: PURPOSE.ADJUSTMENT, pubkey, base_revision: baseRevision, seq,
     target, reputation, trust, ack, note, ts,
+  };
+}
+
+// `supersedes` is the notice this one replaces, or null. A correction is a new
+// record pointing at the old one, never an edit -- a mutated record no longer
+// matches its signature, and the point of a notice is that what was said is
+// still there to be checked.
+export function noticePayload({
+  publisher, revision, kind, title, body, ack, ts, supersedes = null, note = null,
+}) {
+  return {
+    purpose: PURPOSE.NOTICE, publisher, revision, kind, title, body,
+    supersedes, ack, note, ts,
   };
 }
 

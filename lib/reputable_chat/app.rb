@@ -64,6 +64,8 @@ module ReputableChat
     # FrozenError on the first real request while passing every unfrozen test.
     DEFAULTS = YAML.safe_load_file(File.join(opts[:root], "config", "reputation.yml")).freeze
     EMOTES   = YAML.safe_load_file(File.join(opts[:root], "config", "emotes.yml")).freeze
+    NOTICES  = YAML.safe_load_file(File.join(opts[:root], "config", "notices.yml")).freeze
+    NOTICE_KINDS = NOTICES.fetch("kinds").freeze
     ALLOWED_EMOTES = EMOTES.values_at("positive", "negative", "neutral").compact.flatten.freeze
 
     class << self
@@ -96,6 +98,10 @@ module ReputableChat
         # default change reach every user who never pinned that setting.
         r.get("defaults") { DEFAULTS }
         r.get("emotes")   { EMOTES }
+        # The kinds a client has to be able to render, served for the same
+        # reason the emotes are: baking them into the JS means a new kind
+        # cannot reach anyone already running an old copy.
+        r.get("notice-kinds") { NOTICES }
         # The bottom of the chain. Served so a client can check the hash it
         # was built with against the one this server is running, rather than
         # discovering a mismatch as signatures that will not verify.
@@ -121,6 +127,11 @@ module ReputableChat
           r.post("batch") { batch(r, :attestations) }
           r.put { put_attestation(r) }
           r.get(String) { |pubkey| fetch(:attestation, pubkey) }
+        end
+
+        r.on "notice" do
+          r.post { post_notice(r) }
+          r.get(String) { |publisher| fetch_notices(r, publisher) }
         end
 
         r.on "adjustment" do
@@ -329,6 +340,47 @@ module ReputableChat
       { "stored" => true, "revision" => revision, "hash" => hash }
     end
 
+    # An official statement. The server checks the shape, the signature and the
+    # revision, and has no opinion about the contents -- it does not know what a
+    # policy is, only that this publisher has not used this number before.
+    def post_notice(r)
+      publisher  = current_pubkey(r)
+      revision   = Params.integer(r.params["revision"], min: 1) or bad_request(r, "bad revision")
+      kind       = Params.notice_kind(r.params["kind"], allowed: NOTICE_KINDS) or bad_request(r, "unknown kind")
+      title      = Params.title(r.params["title"])       or bad_request(r, "bad title")
+      body       = Params.notice_body(r.params["body"])  or bad_request(r, "bad body")
+      ack        = Params.record_hash(r.params["ack"])   or bad_request(r, "bad ack")
+      sig        = Params.signature(r.params["signature"]) or bad_request(r, "bad signature")
+      ts         = Params.integer(r.params["ts"])        or bad_request(r, "bad timestamp")
+      supersedes = optional_hash(r, "supersedes")
+
+      # The founding notice is the one that replaces nothing. Anything else
+      # claiming to be one would give a chain two bottoms.
+      bad_request(r, "a founding notice supersedes nothing") if kind == "founding" && supersedes
+
+      payload = Cryptography::Payload.notice(
+        publisher: publisher, revision: revision, kind: kind, title: title, body: body,
+        ack: ack, issued_at: ts, supersedes: supersedes, note: optional_note(r)
+      )
+      verify!(r, publisher, sig, payload)
+
+      canonical = Cryptography::Canonical.dump(payload)
+      hash = Cryptography::Record.digest(payload: canonical, signature: sig)
+      result = store.store_notice(
+        hash: hash, publisher: publisher, revision: revision, kind: kind, title: title,
+        supersedes: supersedes, ack: ack, payload: canonical, signature: sig
+      )
+      r.halt(409, { "error" => "that revision is already used" }) if result == :duplicate
+
+      { "stored" => true, "revision" => revision, "hash" => hash }
+    end
+
+    def fetch_notices(r, publisher_param)
+      publisher = Params.pubkey(publisher_param) or bad_request(r, "bad publisher")
+
+      { "notices" => store.notices(publisher).map { |row| present_notice(row) } }
+    end
+
     # One change to an attestation between republishes. `base_revision` names
     # the snapshot it amends and `seq` its place in that run, both inside the
     # signature, so the server can neither reorder a run nor replay one against
@@ -492,6 +544,12 @@ module ReputableChat
 
       { "pubkey" => row[:pubkey], "revision" => row[:revision], "hash" => row[:hash],
         "payload" => row[:payload], "signature" => row[:signature] }.compact
+    end
+
+    def present_notice(row)
+      { "publisher" => row[:publisher], "revision" => row[:revision], "kind" => row[:kind],
+        "title" => row[:title], "supersedes" => row[:supersedes], "hash" => row[:hash],
+        "payload" => row[:payload], "signature" => row[:signature] }
     end
 
     # An adjustment has no revision of its own -- it has the snapshot it amends

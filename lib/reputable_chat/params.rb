@@ -206,6 +206,23 @@ module ReputableChat
 
     def label(value) = string(value, max: MAX_LABEL)
 
+    MAX_TITLE  = 120
+    MAX_NOTICE = 16_000
+
+    def title(value) = string(value, max: MAX_TITLE)
+
+    # A notice body is the longest thing the chain carries on purpose. The
+    # founding notice is a document, so the bound is generous -- but bounded,
+    # because every record is stored, served and signed forever.
+    def notice_body(value) = string(value, max: MAX_NOTICE)
+
+    # One of the kinds the server publishes, never an arbitrary string.
+    def notice_kind(value, allowed:)
+      return nil unless value.is_a?(String)
+
+      allowed.include?(value) ? value : nil
+    end
+
     def notes(value)
       return "" if value.nil? || value.to_s.empty?
 

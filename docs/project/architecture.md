@@ -131,6 +131,7 @@ every old signature stops verifying against the new shape.
 | `reputablechat:attestation:v1` | purpose, pubkey, revision, scores, derived, ack, note, ts |
 | `reputablechat:adjustment:v1` | purpose, pubkey, base_revision, seq, target, reputation, trust, ack, note, ts |
 | `reputablechat:release:v1` | purpose, publisher, revision, label, files, notes, ack, note, ts |
+| `reputablechat:notice:v1` | purpose, publisher, revision, kind, title, body, supersedes, ack, note, ts |
 | `reputablechat:config:v1` | superseded by `user` + `attestation` |
 | `reputablechat:private-config:v1` | purpose, pubkey, revision, settings, voted, ts |
 

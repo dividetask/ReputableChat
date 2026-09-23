@@ -84,6 +84,25 @@ module ReputableChat
           end
         end
 
+        # Notices accumulate rather than replace: a correction is a new record
+        # pointing at the old one, and what was said stays on the chain to be
+        # checked. Unique on publisher and revision so a number cannot be
+        # reused to slip a second statement in behind the first.
+        @db.create_table?(:notices) do
+          primary_key :id
+          String   :hash, null: false, unique: true
+          String   :publisher, null: false, index: true
+          Integer  :revision, null: false
+          String   :kind, null: false, index: true
+          String   :title, null: false
+          String   :supersedes
+          String   :ack, null: false
+          String   :payload, text: true, null: false
+          String   :signature, null: false
+          Integer  :received_at, null: false
+          unique %i[publisher revision]
+        end
+
         # One change to an attestation between republishes. Unique on the run
         # it belongs to and its place in that run, so a replay of an earlier
         # adjustment against a later snapshot cannot take hold.
@@ -232,6 +251,33 @@ module ReputableChat
 
         existing ? @db[table].where(pubkey: pubkey).update(row) : @db[table].insert(row)
         :ok
+      end
+
+      # --- notices --------------------------------------------------------------
+
+      def store_notice(hash:, publisher:, revision:, kind:, title:, supersedes:, ack:,
+                       payload:, signature:)
+        @db[:notices].insert(
+          hash: hash, publisher: publisher, revision: revision, kind: kind, title: title,
+          supersedes: supersedes, ack: ack, payload: payload, signature: signature,
+          received_at: now
+        )
+        :ok
+      rescue Sequel::UniqueConstraintViolation
+        :duplicate
+      end
+
+      # Newest first: a reader wants what is current, and walks back through
+      # `supersedes` from there if they want to know what it replaced.
+      def notices(publisher, limit: 100)
+        @db[:notices].where(publisher: publisher)
+                     .order(Sequel.desc(:revision)).limit(limit).all
+      end
+
+      def notice(hash) = @db[:notices].where(hash: hash).first
+
+      def latest_notice_revision(publisher)
+        @db[:notices].where(publisher: publisher).max(:revision).to_i
       end
 
       # --- adjustments ---------------------------------------------------------

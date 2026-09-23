@@ -147,5 +147,17 @@
     "note": "two lines\nand a\ttab, plus é中🚀 and \"quotes\"",
     "ts": 21,
     "body": "a message with a note"
+  },
+  {
+    "purpose": "reputablechat:notice:v1",
+    "publisher": "k",
+    "revision": 1,
+    "kind": "founding",
+    "title": "What this is",
+    "body": "A founding statement.\nWith a second line, é中🚀 and \"quotes\".",
+    "supersedes": null,
+    "ack": "4444444444444444444444444444444444444444444444444444444444444444",
+    "note": null,
+    "ts": 23
   }
 ]

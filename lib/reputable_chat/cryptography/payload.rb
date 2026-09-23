@@ -30,6 +30,7 @@ module ReputableChat
       ATTESTATION    = "reputablechat:attestation:v1"
       ADJUSTMENT     = "reputablechat:adjustment:v1"
       RELEASE        = "reputablechat:release:v1"
+      NOTICE         = "reputablechat:notice:v1"
 
       module_function
 
@@ -134,6 +135,35 @@ module ReputableChat
           "ack"       => ack,
           "note"      => note,
           "ts"        => issued_at.to_i
+        }
+      end
+
+      # An official statement from a publisher: an outage, a policy, a release.
+      #
+      # `kind` comes from a closed list the server publishes, for the same
+      # reason an emote does -- an arbitrary string would be stored and then
+      # rendered back to everyone, and a client cannot present something it has
+      # never heard of.
+      #
+      # `supersedes` is the record hash of the notice this one replaces, or
+      # nil. A correction is a new record pointing at the old one, never an
+      # edit: a mutated record no longer matches its signature, and the point
+      # of a notice is that what was said is still there to be checked.
+      #
+      # The founding notice is the one that supersedes nothing.
+      def notice(publisher:, revision:, kind:, title:, body:, ack:, issued_at:,
+                 supersedes: nil, note: nil)
+        {
+          "purpose"    => NOTICE,
+          "publisher"  => publisher,
+          "revision"   => revision.to_i,
+          "kind"       => kind,
+          "title"      => title,
+          "body"       => body,
+          "supersedes" => supersedes,
+          "ack"        => ack,
+          "note"       => note,
+          "ts"         => issued_at.to_i
         }
       end
 

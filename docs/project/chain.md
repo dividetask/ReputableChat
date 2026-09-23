@@ -346,6 +346,44 @@ events count toward the tally. Posting a comment is not one — it cannot move a
 number in the file, so counting it would republish for a reason that could not
 have changed anything.
 
+## Notices
+
+An official statement signed by a publisher: an outage, a policy, a release,
+the founding statement itself.
+
+```json
+{ "purpose":    "reputablechat:notice:v1",
+  "publisher":  "...",
+  "revision":   4,
+  "kind":       "outage",
+  "title":      "Planned outage",
+  "body":       "02:00-03:00 UTC on Friday.",
+  "supersedes": "<64 hex>",
+  "ack":        "<64 hex>",
+  "note":       null,
+  "ts":         1710000000 }
+```
+
+`kind` comes from a closed list in `config/notices.yml`, served at
+`/api/notice-kinds`, for the same reason emotes are a closed list: an arbitrary
+string would be stored and rendered back to everyone, and a client cannot
+present something it has never heard of. Adding a kind is cheap; removing one
+is not, because notices already signed under it stay on the chain and still
+have to render.
+
+**A correction is a new record, never an edit.** `supersedes` names the notice
+being replaced. A mutated record would no longer match its signature, and the
+whole point of a notice is that what was said is still there to be checked — so
+notices accumulate rather than overwrite, and a reader walks back through
+`supersedes` to see what a statement replaced.
+
+`founding` is the kind that supersedes nothing, and the server refuses a
+founding notice that claims to. A chain has one bottom.
+
+The server checks the shape, the signature and the revision, and has no opinion
+about the contents. It does not know what a policy is — only that this
+publisher has not used this number before.
+
 ## Releases
 
 A release record pins a version of the client:
