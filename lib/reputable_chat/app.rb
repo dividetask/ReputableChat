@@ -117,10 +117,10 @@ module ReputableChat
 
         # The chain records. `config` below is what these replace and is on
         # its way out; both are served while the client moves across.
-        r.on "user" do
-          r.post("batch") { batch(r, :user_records) }
-          r.put { put_user_record(r) }
-          r.get(String) { |pubkey| fetch(:user_record, pubkey) }
+        r.on "identity" do
+          r.post("batch") { batch(r, :identities) }
+          r.put { put_identity(r) }
+          r.get(String) { |pubkey| fetch(:identity, pubkey) }
         end
 
         r.on "attestation" do
@@ -285,11 +285,11 @@ module ReputableChat
     # the right shape, and stores what it is given.
     # --- chain records -----------------------------------------------------
 
-    # Who somebody is. `master_pubkey` and `previous_pubkey` are placeholders
+    # An identity declaration. `master_pubkey` and `previous_pubkey` are placeholders
     # for key rotation and must still be null: accepting a value for a field
     # nothing implements would let a client publish a claim the network would
     # later have to honour or explain away.
-    def put_user_record(r)
+    def put_identity(r)
       pubkey  = current_pubkey(r)
       revision = Params.integer(r.params["revision"], min: 1) or bad_request(r, "bad revision")
       handle  = Params.handle(r.params["handle"])           or bad_request(r, "bad handle")
@@ -301,11 +301,11 @@ module ReputableChat
 
       bad_request(r, "key rotation is not implemented") if r.params["master_pubkey"] || r.params["previous_pubkey"]
 
-      payload = Cryptography::Payload.user(
+      payload = Cryptography::Payload.identity(
         pubkey: pubkey, revision: revision, handle: handle, bio: bio, icon: icon,
         ack: ack, issued_at: ts, note: optional_note(r)
       )
-      store_record(r, :store_user_record, pubkey, revision, payload, sig)
+      store_record(r, :store_identity, pubkey, revision, payload, sig)
     end
 
     # What somebody thinks of everyone else. The server checks the shape and

@@ -127,12 +127,12 @@ every old signature stops verifying against the new shape.
 | `reputablechat:login:v1` | purpose, pubkey, nonce, origin, ts |
 | `reputablechat:message:v1` | purpose, author, room, seq, prev, reply_to, ack, note, ts, body |
 | `reputablechat:emote:v1` | purpose, author, room, message, emote, ack, note, ts |
-| `reputablechat:user:v1` | purpose, pubkey, revision, handle, bio, icon, master_pubkey, previous_pubkey, ack, note, ts |
+| `reputablechat:identity:v1` | purpose, pubkey, revision, handle, bio, icon, master_pubkey, previous_pubkey, ack, note, ts |
 | `reputablechat:attestation:v1` | purpose, pubkey, revision, scores, derived, ack, note, ts |
 | `reputablechat:adjustment:v1` | purpose, pubkey, base_revision, seq, target, reputation, trust, ack, note, ts |
 | `reputablechat:release:v1` | purpose, publisher, revision, label, files, notes, ack, note, ts |
 | `reputablechat:notice:v1` | purpose, publisher, revision, kind, title, body, supersedes, ack, note, ts |
-| `reputablechat:config:v1` | superseded by `user` + `attestation` |
+| `reputablechat:config:v1` | superseded by `identity` + `attestation` |
 | `reputablechat:private-config:v1` | purpose, pubkey, revision, settings, voted, ts |
 
 Every chain record also carries `note` — free text the software never reads,
@@ -197,7 +197,7 @@ fixtures and compares the bytes, and is the thing that catches that.
 ## Layout
 
 ```
-config/genesis/tim.json   the genesis user record; the chain hangs off its hash
+config/genesis/<env>.json the genesis identity declaration; the chain hangs off its hash
 config/server.yml         origin, database and image paths (env overrides)
 config/reputation.yml     tunable reputation parameters (the defaults layer)
 config/emotes.yml         which emotes count positive, negative, neutral

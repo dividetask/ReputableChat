@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-# Generates the genesis user record -- Tim's -- and writes it to
+# Generates the genesis identity declaration -- Tim's -- and writes it to
 # config/genesis/tim.json for committing.
 #
 #   bundle exec rake genesis                      # development
@@ -98,7 +98,7 @@ module GenerateGenesis
   # `ack` is null: this is the one record in the system that acknowledges
   # nothing, because there was nothing to acknowledge.
   def record_for(pubkey, options)
-    Crypto::Payload.user(
+    Crypto::Payload.identity(
       pubkey: pubkey, revision: 1, handle: options[:handle], bio: options[:bio],
       icon: nil, ack: nil, issued_at: Time.now.to_i
     )

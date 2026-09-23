@@ -24,7 +24,7 @@ module GenesisFixture
     signing = Ed25519::SigningKey.generate
     pubkey  = Crypto::Signature.encode(signing.verify_key.to_bytes)
 
-    payload = Crypto::Payload.user(
+    payload = Crypto::Payload.identity(
       pubkey: pubkey, revision: 1, handle: handle, bio: "", icon: nil,
       ack: nil, issued_at: Time.now.to_i
     )

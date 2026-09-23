@@ -7,7 +7,7 @@ require_relative "cryptography/record"
 require_relative "cryptography/signature"
 
 module ReputableChat
-  # The bottom of the chain: Tim's user record.
+  # The bottom of the chain: Tim's identity declaration.
   #
   # Every record that has seen nothing else acknowledges this one, and it is the
   # only record whose own `ack` is null. It is also the only record stored as a
@@ -126,11 +126,11 @@ module ReputableChat
     def shape!(path)
       record = JSON.parse(payload)
 
-      unless record["purpose"] == Cryptography::Payload::USER
-        raise Corrupt, "#{path} is not a #{Cryptography::Payload::USER} record"
+      unless record["purpose"] == Cryptography::Payload::IDENTITY
+        raise Corrupt, "#{path} is not a #{Cryptography::Payload::IDENTITY} record"
       end
 
-      expected = Cryptography::Payload.user(
+      expected = Cryptography::Payload.identity(
         pubkey: pubkey, revision: 1, handle: "x", bio: "", icon: nil, ack: nil, issued_at: 0
       ).keys.sort
 

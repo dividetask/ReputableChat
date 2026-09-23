@@ -68,12 +68,13 @@ module ReputableChat
         # `hash` is the record hash -- what everything else on the chain names
         # this message by. Unique because a repeat means the identical record
         # arrived twice, not that two records collided.
-        # Who somebody is, and what they think of everyone else. Both replace
+        # An identity declaration and an attestation: who somebody is, and what
+        # they think of everyone else. Both replace
         # halves of the old config blob, and both are revisioned for the same
         # reason it was: without a monotonic counter inside the signature, the
         # server could serve an old copy to hide something and the signature on
         # it would still verify perfectly.
-        %i[user_records attestations].each do |table|
+        %i[identities attestations].each do |table|
           @db.create_table?(table) do
             String   :pubkey, primary_key: true
             Integer  :revision, null: false
@@ -222,17 +223,17 @@ module ReputableChat
         :ok
       end
 
-      # --- user records and attestations --------------------------------------
+      # --- identity declarations and attestations -------------------------------
       #
       # Same shape and same rules, so one pair of methods serves both rather
       # than two copies that can drift apart.
 
-      def user_record(pubkey) = revisioned(:user_records, pubkey)
-      def user_records(pubkeys) = revisioned_batch(:user_records, pubkeys)
+      def identity(pubkey) = revisioned(:identities, pubkey)
+      def identities(pubkeys) = revisioned_batch(:identities, pubkeys)
       def attestation(pubkey) = revisioned(:attestations, pubkey)
       def attestations(pubkeys) = revisioned_batch(:attestations, pubkeys)
 
-      def store_user_record(**row) = store_revisioned(:user_records, **row)
+      def store_identity(**row) = store_revisioned(:identities, **row)
       def store_attestation(**row) = store_revisioned(:attestations, **row)
 
       def revisioned(table, pubkey) = @db[table].where(pubkey: pubkey).first

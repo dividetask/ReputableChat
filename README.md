@@ -83,7 +83,7 @@ nobody. It is an ordinary friendship in your own config, listed beside everyone
 else's, and you can remove it — a trust you cannot withdraw would not be a
 default.
 
-Tim's user record is the genesis. Generate it once with `bundle exec rake
+Tim's identity declaration is the genesis. Generate it once with `bundle exec rake
 genesis` and commit it; every client needs the same hash before it has fetched
 anything, so it cannot be downloaded.
 

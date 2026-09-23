@@ -26,7 +26,7 @@ module ReputableChat
       CONFIG         = "reputablechat:config:v1"
       PRIVATE_CONFIG = "reputablechat:private-config:v1"
       EMOTE          = "reputablechat:emote:v1"
-      USER           = "reputablechat:user:v1"
+      IDENTITY       = "reputablechat:identity:v1"
       ATTESTATION    = "reputablechat:attestation:v1"
       ADJUSTMENT     = "reputablechat:adjustment:v1"
       RELEASE        = "reputablechat:release:v1"
@@ -44,17 +44,18 @@ module ReputableChat
         }
       end
 
-      # Who somebody is. The genesis record is one of these with every optional
+      # An identity declaration: who somebody is, in their own words and under
+      # their own signature. The genesis record is one of these with every optional
       # field null -- see config/genesis/tim.json.
       #
       # `master_pubkey` and `previous_pubkey` are placeholders for key rotation
       # and are always null for now. They are in the signed shape from the
       # start because adding a field later changes the canonical bytes of every
       # record, which invalidates every signature ever made.
-      def user(pubkey:, revision:, handle:, bio:, icon:, ack:, issued_at:,
+      def identity(pubkey:, revision:, handle:, bio:, icon:, ack:, issued_at:,
                master_pubkey: nil, previous_pubkey: nil, note: nil)
         {
-          "purpose"         => USER,
+          "purpose"         => IDENTITY,
           "pubkey"          => pubkey,
           "revision"         => revision.to_i,
           "handle"          => handle,

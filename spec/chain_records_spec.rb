@@ -55,22 +55,22 @@ class ChainRecordsSpec < Minitest::Test
     post_json "/api/register", {}
   end
 
-  # --- user records -------------------------------------------------------
+  # --- identity declarations -------------------------------------------------------
 
-  def user_body(revision: 1, handle: "alice", bio: "", icon: nil, extra: {})
+  def identity_body(revision: 1, handle: "alice", bio: "", icon: nil, extra: {})
     ts = Time.now.to_i
-    payload = Payload.user(pubkey: @pubkey, revision: revision, handle: handle, bio: bio,
+    payload = Payload.identity(pubkey: @pubkey, revision: revision, handle: handle, bio: bio,
                            icon: icon, ack: ack, issued_at: ts)
     { "revision" => revision, "handle" => handle, "bio" => bio, "icon" => icon,
       "ack" => ack, "ts" => ts, "signature" => sign(payload) }.merge(extra)
   end
 
-  def test_stores_a_user_record_and_serves_it_back
-    put_json "/api/user", user_body(handle: "alice", bio: "hello")
+  def test_stores_an_identity_declaration_and_serves_it_back
+    put_json "/api/identity", identity_body(handle: "alice", bio: "hello")
     assert_equal 200, last_response.status
 
-    get "/api/user/#{@pubkey}"
-    record = json["user_record"]
+    get "/api/identity/#{@pubkey}"
+    record = json["identity"]
     payload = JSON.parse(record["payload"])
 
     assert_equal "alice", payload["handle"]
@@ -80,9 +80,9 @@ class ChainRecordsSpec < Minitest::Test
   # RULE: the hash the server serves is the hash of what it serves, so a reader
   # re-deriving it from the blob catches a server that invented one.
   def test_the_served_hash_matches_the_served_record
-    put_json "/api/user", user_body
-    get "/api/user/#{@pubkey}"
-    record = json["user_record"]
+    put_json "/api/identity", identity_body
+    get "/api/identity/#{@pubkey}"
+    record = json["identity"]
 
     assert_equal Record.digest(payload: record["payload"], signature: record["signature"]),
                  record["hash"]
@@ -90,35 +90,35 @@ class ChainRecordsSpec < Minitest::Test
 
   # RULE: a revision must climb. Without it the server could serve an old copy
   # to hide something and the signature on it would still verify perfectly.
-  def test_refuses_a_rolled_back_user_record
-    put_json "/api/user", user_body(revision: 2)
+  def test_refuses_a_rolled_back_identity_declaration
+    put_json "/api/identity", identity_body(revision: 2)
     assert_equal 200, last_response.status
 
-    put_json "/api/user", user_body(revision: 1)
+    put_json "/api/identity", identity_body(revision: 1)
     assert_equal 409, last_response.status
   end
 
   # RULE: the key rotation fields are placeholders. Accepting a value for
   # something nothing implements would let a client publish a claim the network
   # would later have to honour or explain away.
-  def test_refuses_a_user_record_claiming_key_rotation
-    put_json "/api/user", user_body(extra: { "master_pubkey" => somebody })
+  def test_refuses_an_identity_declaration_claiming_key_rotation
+    put_json "/api/identity", identity_body(extra: { "master_pubkey" => somebody })
 
     assert_equal 400, last_response.status
   end
 
-  def test_refuses_a_user_record_with_no_ack
-    body = user_body
+  def test_refuses_an_identity_declaration_with_no_ack
+    body = identity_body
     body.delete("ack")
-    put_json "/api/user", body
+    put_json "/api/identity", body
 
     assert_equal 400, last_response.status
   end
 
   # RULE: everything in the record is signed, so nothing can be swapped in
   # transit -- not the handle, and not the ack.
-  def test_refuses_a_user_record_whose_handle_was_altered
-    put_json "/api/user", user_body(handle: "alice").merge("handle" => "mallory")
+  def test_refuses_an_identity_declaration_whose_handle_was_altered
+    put_json "/api/identity", identity_body(handle: "alice").merge("handle" => "mallory")
 
     assert_equal 400, last_response.status
   end
@@ -291,8 +291,8 @@ class ChainRecordsSpec < Minitest::Test
 
   # RULE: a note is signed with everything else, so the server cannot add one,
   # strip one, or swap one out.
-  def test_refuses_a_user_record_whose_note_was_altered
-    put_json "/api/user", user_body.merge("note" => "not what was signed")
+  def test_refuses_an_identity_declaration_whose_note_was_altered
+    put_json "/api/identity", identity_body.merge("note" => "not what was signed")
 
     assert_equal 400, last_response.status
   end
@@ -300,17 +300,17 @@ class ChainRecordsSpec < Minitest::Test
   def test_stores_a_note_and_serves_it_back
     ts = Time.now.to_i
     note = "posted from a terminal, for whoever reads the raw chain"
-    payload = Payload.user(pubkey: @pubkey, revision: 1, handle: "alice", bio: "",
+    payload = Payload.identity(pubkey: @pubkey, revision: 1, handle: "alice", bio: "",
                            icon: nil, ack: ack, issued_at: ts, note: note)
 
-    put_json "/api/user",
+    put_json "/api/identity",
              { "revision" => 1, "handle" => "alice", "bio" => "", "icon" => nil,
                "ack" => ack, "note" => note, "ts" => ts, "signature" => sign(payload) }
     assert_equal 200, last_response.status
 
-    get "/api/user/#{@pubkey}"
+    get "/api/identity/#{@pubkey}"
 
-    assert_equal note, JSON.parse(json["user_record"]["payload"])["note"]
+    assert_equal note, JSON.parse(json["identity"]["payload"])["note"]
   end
 
   # RULE: a malformed note is a rejection, not something to quietly drop. A
@@ -319,10 +319,10 @@ class ChainRecordsSpec < Minitest::Test
   def test_refuses_an_oversized_note
     ts = Time.now.to_i
     note = "x" * (ReputableChat::Params::MAX_NOTE + 1)
-    payload = Payload.user(pubkey: @pubkey, revision: 1, handle: "alice", bio: "",
+    payload = Payload.identity(pubkey: @pubkey, revision: 1, handle: "alice", bio: "",
                            icon: nil, ack: ack, issued_at: ts, note: note)
 
-    put_json "/api/user",
+    put_json "/api/identity",
              { "revision" => 1, "handle" => "alice", "bio" => "", "icon" => nil,
                "ack" => ack, "note" => note, "ts" => ts, "signature" => sign(payload) }
 
@@ -336,7 +336,7 @@ class ChainRecordsSpec < Minitest::Test
   # not expressible rather than being a check that has to stay correct.
   def test_publishing_requires_a_session
     clear_cookies
-    put_json "/api/user", user_body
+    put_json "/api/identity", identity_body
 
     assert_equal 401, last_response.status
   end

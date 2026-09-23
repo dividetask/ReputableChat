@@ -140,7 +140,7 @@ export const PURPOSE = {
   CONFIG: "reputablechat:config:v1",
   PRIVATE_CONFIG: "reputablechat:private-config:v1",
   EMOTE: "reputablechat:emote:v1",
-  USER: "reputablechat:user:v1",
+  IDENTITY: "reputablechat:identity:v1",
   ATTESTATION: "reputablechat:attestation:v1",
   ADJUSTMENT: "reputablechat:adjustment:v1",
   RELEASE: "reputablechat:release:v1",
@@ -176,12 +176,12 @@ export function privateConfigPayload({ pubkey, revision, settings, voted, ts }) 
 // are always null for now. They sit in the signed shape from the start because
 // adding a field later changes the canonical bytes of every record, which
 // invalidates every signature ever made.
-export function userPayload({
+export function identityPayload({
   pubkey, revision, handle, bio, icon, ack, ts,
   masterPubkey = null, previousPubkey = null, note = null,
 }) {
   return {
-    purpose: PURPOSE.USER, pubkey, revision, handle, bio, icon,
+    purpose: PURPOSE.IDENTITY, pubkey, revision, handle, bio, icon,
     master_pubkey: masterPubkey, previous_pubkey: previousPubkey, ack, note, ts,
   };
 }

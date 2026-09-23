@@ -57,7 +57,7 @@
     }
   },
   {
-    "purpose": "reputablechat:user:v1",
+    "purpose": "reputablechat:identity:v1",
     "pubkey": "k",
     "revision": 1,
     "handle": "Tom",

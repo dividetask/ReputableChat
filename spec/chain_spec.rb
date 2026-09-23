@@ -182,7 +182,7 @@ class ChainSpec < Minitest::Test
   # would be a record nothing else could anchor to.
   def test_every_shared_record_shape_carries_an_ack
     shapes = {
-      "user" => Payload.user(pubkey: "k", revision: 1, handle: "t", bio: "", icon: nil,
+      "identity" => Payload.identity(pubkey: "k", revision: 1, handle: "t", bio: "", icon: nil,
                              ack: "a", issued_at: 1),
       "attestation" => Payload.attestation(pubkey: "k", revision: 1, scores: {}, derived: {},
                                            ack: "a", issued_at: 1),
@@ -248,7 +248,7 @@ class ChainSpec < Minitest::Test
 
   def shapes
     {
-      "user" => Payload.user(pubkey: "k", revision: 1, handle: "t", bio: "", icon: nil,
+      "identity" => Payload.identity(pubkey: "k", revision: 1, handle: "t", bio: "", icon: nil,
                              ack: "a", issued_at: 1),
       "attestation" => Payload.attestation(pubkey: "k", revision: 1, scores: {}, derived: {},
                                            ack: "a", issued_at: 1),
@@ -275,7 +275,7 @@ class ChainSpec < Minitest::Test
   # Adding a field later changes the canonical bytes of every record, which
   # invalidates every signature ever made.
   def test_the_key_rotation_placeholders_are_present_and_null
-    payload = Payload.user(pubkey: "k", revision: 1, handle: "t", bio: "", icon: nil,
+    payload = Payload.identity(pubkey: "k", revision: 1, handle: "t", bio: "", icon: nil,
                            ack: nil, issued_at: 1)
 
     assert payload.key?("master_pubkey")
