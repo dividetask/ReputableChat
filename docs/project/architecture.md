@@ -199,7 +199,7 @@ fixtures and compares the bytes, and is the thing that catches that.
 
 ```
 config/genesis/<env>.json the genesis identity declaration; the chain hangs off its hash
-config/server.yml         origin, database and image paths (env overrides)
+config/server.yml         origin, database and image paths, size limits (env overrides)
 config/reputation.yml     tunable reputation parameters (the defaults layer)
 config/emotes.yml         which emotes count positive, negative, neutral
 config/bip39-english.txt  wordlist; one source of truth, served at /wordlist.txt

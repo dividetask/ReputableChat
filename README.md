@@ -43,6 +43,24 @@ Each key can be overridden by the matching environment variable (`ORIGIN`,
 `DATABASE_URL`, `IMAGE_ROOT`) for deployments that inject configuration rather
 than edit files.
 
+### Limits
+
+`config/server.yml` also carries a `limits:` section — the vault's ciphertext,
+an image, a message body, a notice body, a note — served at `/api/limits`.
+These are an operator's decision rather than a property of the protocol: a
+server with more disk can afford a larger vault. Serving them is the point,
+because the alternative is a client finding the ceiling by being refused after
+somebody has already done the work.
+
+A limit that is absent, unparseable or not positive falls back to its default
+rather than to zero. A zero would refuse every save, and a typo should not be
+able to do that quietly.
+
+`seen_entries` is advice rather than a limit: nothing rejects a vault for
+exceeding it. The server cannot see inside a vault, so it cannot prune one —
+only the client can decide what to drop, and friends and blocked accounts are
+never it.
+
 `SESSION_SECRET` is environment-only, since `config/server.yml` is in the
 repository. Without it a random secret is generated at boot — fine locally, but
 it signs everyone out on every restart.
