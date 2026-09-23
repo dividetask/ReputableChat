@@ -19,3 +19,26 @@ image_root: "data/images"
 # repository. Set it in the environment when you deploy. Without it a random
 # one is generated at boot, which is fine locally but signs everyone out on
 # every restart.
+
+# Size limits, and one piece of advice.
+#
+# These are an operator's decision, not a property of the protocol -- a server
+# with more disk can afford a larger vault. They are served at /api/limits so a
+# client knows them before it tries to save, rather than discovering the ceiling
+# by being refused.
+#
+# Each can be overridden by the matching environment variable, named for the
+# key in upper case: VAULT_BYTES, IMAGE_BYTES, and so on.
+limits:
+  # The vault's ciphertext. The server cannot see inside it, so this is the
+  # only limit it has -- it cannot count your friends, so it counts your bytes.
+  vault_bytes: 1048576
+  image_bytes: 262144
+  message_bytes: 4000
+  notice_bytes: 16000
+  note_bytes: 2000
+  # Advice rather than a limit: nothing rejects a vault for holding more. It
+  # tells a client how many first-seen entries to keep before pruning, since it
+  # is the client that has to decide what to drop. Friends and blocked accounts
+  # are never what gets dropped.
+  seen_entries: 5000

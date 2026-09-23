@@ -5,6 +5,7 @@ require "json"
 require "yaml"
 require "securerandom"
 require_relative "params"
+require_relative "server_config"
 require_relative "cryptography/signature"
 require_relative "cryptography/canonical"
 require_relative "cryptography/payload"
@@ -70,12 +71,19 @@ module ReputableChat
 
     class << self
       attr_accessor :store, :images, :origin, :genesis
+      attr_writer :limits
+
+      # Defaulted rather than required, so a test or a script can build the app
+      # without assembling a config first.
+      def limits = @limits || ServerConfig::LIMITS
     end
 
     def store = self.class.store
     def images = self.class.images
     def origin = self.class.origin
     def genesis = self.class.genesis
+    def limits = self.class.limits
+    def limit(name) = limits.fetch(name.to_s)
 
     route do |r|
       r.public
@@ -102,6 +110,11 @@ module ReputableChat
         # reason the emotes are: baking them into the JS means a new kind
         # cannot reach anyone already running an old copy.
         r.get("notice-kinds") { NOTICES }
+        # Served so a client knows the ceilings before it tries to save,
+        # rather than discovering them by being refused. `seen_entries` is
+        # advice: nothing rejects a vault for exceeding it, but a client that
+        # ignores it will eventually write one too large to store.
+        r.get("limits") { limits }
         # The bottom of the chain. Served so a client can check the hash it
         # was built with against the one this server is running, rather than
         # discovering a mismatch as signatures that will not verify.
@@ -210,7 +223,7 @@ module ReputableChat
     # sniffed from them, so nothing a client claims about an upload is trusted.
     def upload_image(r)
       declared = r.env["CONTENT_LENGTH"].to_i
-      r.halt(413, { "error" => "image too large" }) if declared > Store::Images::MAX_BYTES
+      r.halt(413, { "error" => "image too large" }) if declared > images.max_bytes
 
       case (result = images.store(r.body.read))
       when :too_large   then r.halt(413, { "error" => "image too large" })
@@ -257,7 +270,7 @@ module ReputableChat
     def put_vault(r)
       pubkey     = current_pubkey(r)
       revision   = Params.integer(r.params["revision"], min: 1) or bad_request(r, "bad revision")
-      ciphertext = Params.sealed(r.params["ciphertext"])         or bad_request(r, "bad ciphertext")
+      ciphertext = Params.sealed(r.params["ciphertext"], max: limit(:vault_bytes)) or bad_request(r, "bad ciphertext")
       iv         = Params.iv(r.params["iv"])                     or bad_request(r, "bad iv")
       sig        = Params.signature(r.params["signature"])       or bad_request(r, "bad signature")
       ts         = Params.integer(r.params["ts"])                or bad_request(r, "bad timestamp")
@@ -389,7 +402,7 @@ module ReputableChat
       revision   = Params.integer(r.params["revision"], min: 1) or bad_request(r, "bad revision")
       kind       = Params.notice_kind(r.params["kind"], allowed: NOTICE_KINDS) or bad_request(r, "unknown kind")
       title      = Params.title(r.params["title"])       or bad_request(r, "bad title")
-      body       = Params.notice_body(r.params["body"])  or bad_request(r, "bad body")
+      body       = Params.notice_body(r.params["body"], max: limit(:notice_bytes)) or bad_request(r, "bad body")
       ack        = Params.record_hash(r.params["ack"])   or bad_request(r, "bad ack")
       sig        = Params.signature(r.params["signature"]) or bad_request(r, "bad signature")
       ts         = Params.integer(r.params["ts"])        or bad_request(r, "bad timestamp")
@@ -482,7 +495,7 @@ module ReputableChat
     def post_message(r, room)
       author = current_pubkey(r)
       seq    = Params.integer(r.params["seq"], min: 1) or bad_request(r, "bad seq")
-      body   = Params.string(r.params["body"], max: MAX_BODY) or bad_request(r, "bad body")
+      body   = Params.string(r.params["body"], max: limit(:message_bytes)) or bad_request(r, "bad body")
       sig    = Params.signature(r.params["signature"]) or bad_request(r, "bad signature")
       ts     = Params.integer(r.params["ts"]) or bad_request(r, "bad timestamp")
       ack    = Params.record_hash(r.params["ack"]) or bad_request(r, "bad ack")
@@ -564,7 +577,7 @@ module ReputableChat
     def optional_note(r)
       return nil if r.params["note"].nil? || r.params["note"].to_s.strip.empty?
 
-      Params.note(r.params["note"]) or bad_request(r, "bad note")
+      Params.note(r.params["note"], max: limit(:note_bytes)) or bad_request(r, "bad note")
     end
 
     # Signed blobs go out exactly as they came in. The client verifies them

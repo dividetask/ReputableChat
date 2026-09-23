@@ -62,10 +62,29 @@ class ServerConfigSpec < Minitest::Test
   end
 
   def test_a_missing_or_empty_file_still_yields_defaults
-    assert_equal ReputableChat::ServerConfig::DEFAULTS,
-                 Settings.load(path: File.join(@dir, "absent.yml"), env: {})
-    assert_equal ReputableChat::ServerConfig::DEFAULTS,
-                 Settings.load(path: write(""), env: {})
+    expected = ReputableChat::ServerConfig::DEFAULTS
+               .merge("limits" => ReputableChat::ServerConfig::LIMITS)
+
+    assert_equal expected, Settings.load(path: File.join(@dir, "absent.yml"), env: {})
+    assert_equal expected, Settings.load(path: write(""), env: {})
+  end
+
+  # RULE: a limit that is absent, unparseable or not positive falls back to the
+  # default rather than to zero. A zero would refuse every save, and a typo in a
+  # config file must not be able to do that silently.
+  def test_a_broken_limit_falls_back_rather_than_to_zero
+    default = ReputableChat::ServerConfig::LIMITS.fetch("vault_bytes")
+
+    assert_equal default, Settings.load(path: write("limits:\n  vault_bytes: nonsense\n"), env: {})["limits"]["vault_bytes"]
+    assert_equal default, Settings.load(path: write("limits:\n  vault_bytes: 0\n"), env: {})["limits"]["vault_bytes"]
+    assert_equal default, Settings.load(path: write("limits:\n  vault_bytes: -5\n"), env: {})["limits"]["vault_bytes"]
+  end
+
+  def test_a_limit_is_read_from_the_file_and_the_environment
+    path = write("limits:\n  vault_bytes: 2048\n")
+
+    assert_equal 2048, Settings.load(path: path, env: {})["limits"]["vault_bytes"]
+    assert_equal 4096, Settings.load(path: path, env: { "VAULT_BYTES" => "4096" })["limits"]["vault_bytes"]
   end
 
   # RULE: secrets never come from a file that is in the repository.

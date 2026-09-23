@@ -29,15 +29,18 @@ module ReputableChat
 
       NAME = /\A[0-9a-f]{64}\.(png|jpg|gif|webp)\z/
 
-      def initialize(root)
+      attr_reader :max_bytes
+
+      def initialize(root, max_bytes: MAX_BYTES)
         @root = root
+        @max_bytes = max_bytes
         FileUtils.mkdir_p(@root)
       end
 
       # :too_large, :unsupported, or the filename.
       def store(bytes)
         raw = bytes.to_s.b
-        return :too_large if raw.bytesize > MAX_BYTES || raw.empty?
+        return :too_large if raw.bytesize > max_bytes || raw.empty?
 
         extension = sniff(raw) or return :unsupported
 

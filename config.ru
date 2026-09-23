@@ -9,7 +9,10 @@ require "reputable_chat/genesis"
 settings = ReputableChat::ServerConfig.load
 
 ReputableChat::App.store  = ReputableChat::Store::Database.new(settings.fetch("database_url"))
-ReputableChat::App.images = ReputableChat::Store::Images.new(settings.fetch("image_root"))
+ReputableChat::App.limits = settings.fetch("limits")
+ReputableChat::App.images = ReputableChat::Store::Images.new(
+  settings.fetch("image_root"), max_bytes: settings.fetch("limits").fetch("image_bytes")
+)
 ReputableChat::App.origin = settings.fetch("origin")
 # Loaded at boot, and verified as it loads: a genesis that has been edited or
 # truncated would otherwise put every client on a slightly different chain and

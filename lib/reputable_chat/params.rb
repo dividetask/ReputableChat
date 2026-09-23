@@ -151,10 +151,10 @@ module ReputableChat
     # on and is signed there permanently. Absent and empty both mean nil, so
     # that an empty string and no note cannot produce two different signatures
     # for what a reader would call the same record.
-    def note(value)
+    def note(value, max: MAX_NOTE)
       return nil if value.nil? || value.to_s.strip.empty?
 
-      string(value, max: MAX_NOTE)
+      string(value, max: max)
     end
 
     def bio(value)
@@ -231,7 +231,7 @@ module ReputableChat
     # A notice body is the longest thing the chain carries on purpose. The
     # founding notice is a document, so the bound is generous -- but bounded,
     # because every record is stored, served and signed forever.
-    def notice_body(value) = string(value, max: MAX_NOTICE)
+    def notice_body(value, max: MAX_NOTICE) = string(value, max: max)
 
     # One of the kinds the server publishes, never an arbitrary string.
     def notice_kind(value, allowed:)
