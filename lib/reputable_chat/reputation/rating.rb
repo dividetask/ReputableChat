@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "bigdecimal"
+require_relative "decimals"
 
 module ReputableChat
   module Reputation
@@ -11,9 +12,6 @@ module ReputableChat
     # strand every signed config in the network behind a stale number -- each
     # reader applies their own config to everyone else's raw counts.
     Rating = Struct.new(:friend, :reported, :net_votes, :cleared, keyword_init: true) do
-      ZERO     = BigDecimal("0")
-      ONE      = BigDecimal("1")
-      NEGATIVE = BigDecimal("-1")
 
       def self.from_h(hash)
         new(

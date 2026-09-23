@@ -69,8 +69,12 @@ export class Reputation {
   // the mean, and so remains outvoteable. `cleared` pins someone to zero
   // however often they are emoted or replied to, before or after; friending is
   // deliberate and outranks it.
+  // A published score is taken as it stands: the curve already ran in whoever
+  // published it, so there is nothing left to compute. Actions only appear
+  // here for the viewer's own entry, which is built from their vault.
   ratingValue(rating) {
     if (!rating) return null;
+    if (rating.reputation !== undefined) return clamp(toFixed(rating.reputation));
     if (rating.reported) return -SCALE;
 
     const votes = this.curve(rating.net_votes || 0);
@@ -78,6 +82,40 @@ export class Reputation {
     if (rating.cleared) return 0n;
 
     return clamp(votes);
+  }
+
+  // What this person's recommendations are worth, as distinct from what they
+  // are worth. Defaults to full for anyone positive and none for anyone
+  // blocked, so an attestation only carries an entry where it was overridden.
+  multiplierOf(rating) {
+    if (rating?.trust !== undefined && rating.trust !== null) return toFixed(rating.trust);
+
+    return this.ratingValue(rating) > 0n ? SCALE : 0n;
+  }
+
+  // A report is the only thing that reaches exactly -1, so a published score
+  // of -1 is a report. Actions are private; this is what survives of them.
+  reportedBy(rating) {
+    if (!rating) return false;
+    if (rating.reputation !== undefined) return toFixed(rating.reputation) <= -SCALE;
+
+    return Boolean(rating.reported);
+  }
+
+  // How much each person's recommendations are worth, compounded along the
+  // path that reached them. A nought anywhere makes everything past it count
+  // for nothing; a negative inverts it.
+  trustTo(viewer, graph, depths) {
+    const trust = new Map([[viewer, SCALE]]);
+
+    for (const [rater] of [...depths].sort((a, b) => a[1] - b[1])) {
+      const carried = trust.get(rater) ?? SCALE;
+      for (const [subject, rating] of Object.entries(graph.ratingsBy(rater) || {})) {
+        if (trust.has(subject)) continue;
+        trust.set(subject, mul(carried, this.multiplierOf(rating)));
+      }
+    }
+    return trust;
   }
 
   // Breadth-first, gated at every hop. Reaching a hop means every link on the
@@ -123,6 +161,10 @@ export class Reputation {
     if (viewer === target) return { effective: 0n, levels: [] };
 
     const walk = depths || this.reachableDepths(viewer, graph);
+    // Recomputed per call rather than cached on the instance: one Reputation
+    // answers for whatever viewer it is asked about, and a cache that did not
+    // know that would hand one person's trust to another.
+    const trust = this.trustTo(viewer, graph, walk);
     const byDepth = new Map();
 
     for (const [rater, depth] of walk) {
@@ -132,8 +174,13 @@ export class Reputation {
       const value = this.ratingValue(rating);
       if (value === null) continue;
 
+      // What a rater says is worth what the path to them is worth.
+      const weighted = mul(value, trust.get(rater) ?? SCALE);
+
       if (!byDepth.has(depth)) byDepth.set(depth, []);
-      byDepth.get(depth).push({ pubkey: rater, rating: value, reported: Boolean(rating.reported) });
+      byDepth.get(depth).push({
+        pubkey: rater, rating: weighted, reported: this.reportedBy(rating),
+      });
     }
 
     const levels = [];

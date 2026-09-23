@@ -4,6 +4,7 @@ require "bigdecimal"
 require_relative "curve"
 require_relative "ladder"
 require_relative "rating"
+require_relative "score"
 
 module ReputableChat
   module Reputation
@@ -13,6 +14,7 @@ module ReputableChat
     # +/-1e-17 and flip people across it.
     class Engine
       ZERO = BigDecimal("0")
+      ONE  = BigDecimal("1")
 
       attr_reader :config, :store, :curve, :ladder
 
@@ -45,11 +47,15 @@ module ReputableChat
         return { effective: ZERO, levels: [] } if viewer == target
 
         depths ||= reachable_depths(viewer)
+        # Passed down rather than memoized on the engine: one engine answers
+        # for whatever viewer it is asked about, and a cache that did not know
+        # that would hand one person's trust to another.
+        trust = trust_to(viewer, depths)
         levels = []
         total  = ZERO
 
         (0..ladder.max_hops).each do |depth|
-          raters = raters_at(depths, depth, target)
+          raters = raters_at(depths, depth, target, trust)
           next if raters.empty?
 
           mean         = raters.sum(ZERO) { |r| r.fetch(:rating) } / BigDecimal(raters.size)
@@ -93,6 +99,24 @@ module ReputableChat
       # the person one step closer in. Each person is counted once, at their
       # shortest distance. The walk also stops once max_configs have been
       # discovered, whichever limit is hit first -- a positive-only graph still
+      # How much each person's recommendations are worth, compounded along the
+      # path that reached them. The viewer trusts their own judgement fully; a
+      # nought prunes, which is why it never appears here.
+      def trust_to(viewer, depths)
+        trust = { viewer => ONE }
+
+        depths.sort_by { |_, depth| depth }.each do |rater, _|
+          carried = trust.fetch(rater, ONE)
+          store.ratings_by(rater).each do |subject, rating|
+            next if trust.key?(subject)
+
+            trust[subject] = carried * multiplier_of(rating)
+          end
+        end
+
+        trust
+      end
+
       # branches, so seven hops is unbounded in practice.
       def reachable_depths(viewer)
         depths   = { viewer => 0 }
@@ -131,18 +155,32 @@ module ReputableChat
       # The people who actually rated the target at this depth. The mean is
       # taken over these, not over everyone at this depth with non-raters
       # counted as zero.
-      def raters_at(depths, depth, target)
+      def raters_at(depths, depth, target, trust = {})
         depths.filter_map do |rater, rater_depth|
           next unless rater_depth == depth
           next if rater == target
 
           rating = store.rating(rater, target)
-          rating && { pubkey: rater, rating: value_of(rating), reported: rating.reported }
+          next unless rating
+
+          # What a rater says is worth what the path to them is worth. The
+          # multiplier compounds, so a nought anywhere makes everything past it
+          # count for nothing and a negative inverts what they recommend.
+          weight = trust.fetch(rater, ONE)
+          { pubkey: rater, rating: value_of(rating) * weight, reported: rating.reported }
         end
       end
 
       def value_of(rating)
         rating.value(curve: curve, friend_value: @friend_value)
+      end
+
+      # A Rating has no multiplier of its own -- it is what an author works
+      # from, not what they publish -- so it carries the default.
+      def multiplier_of(rating)
+        return rating.multiplier if rating.respond_to?(:multiplier)
+
+        value_of(rating) > ZERO ? ONE : ZERO
       end
 
       def positive?(rating)
