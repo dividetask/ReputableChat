@@ -1,0 +1,11 @@
+{
+  "name": "reputablechat",
+  "private": true,
+  "description": "Browser tests only. The application ships no JavaScript dependencies: its two vendored files are committed with their hashes recorded in CLAUDE.md.",
+  "scripts": {
+    "browser-spec": "node spec/browser/account.mjs"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.49.0"
+  }
+}

@@ -149,7 +149,7 @@ h3.section:first-child { margin-top: 0; }
   font-size: 72px;
   margin-bottom: 10px;
 }
-.avatar-large.avatar { cursor: default; }
+.avatar-large.avatar { cursor: zoom-in; }
 
 /* Reply: a quoted line above the message, and a bar above the composer. */
 .reply-quote {

@@ -24,7 +24,8 @@
 - Linux, vim. Node 22 is available and is used by the parity spec.
 
 ```bash
-bundle exec rake spec       # full suite
+bundle exec rake spec       # full suite (browser tests skip without `npm install`)
+npm install                 # once, for the browser tests
 bundle exec rake curve      # print current curve, ladder and safety window
 bundle exec rake dump       # readable dump of the database
 bundle exec rake "dump[messages,reactions]"   # just those sections
@@ -98,6 +99,23 @@ inventing a word for something that already has one.
 - The server reads as little of a signed blob as it can, and serves blobs back
   byte-identical.
 - Render user text with `textContent`, never `innerHTML`.
+
+## Testing the interface
+
+Most of the interface is asserted against `public/js/app.js` **as source**
+(`spec/ui_rules_spec.rb`). That catches a rule being deleted and cannot catch a
+rule being broken: it will happily confirm that `avatarFor` is called while the
+argument passed to it makes the picture disappear, which is a bug that shipped.
+
+`spec/browser_spec.rb` is the answer to that. It starts a server on a free port
+with its own database and image root, drives the real page in Chromium through
+`playwright-core`, and asserts on what is actually rendered. It skips rather
+than fails when `node_modules` is absent, because a clone should not need
+`npm install` to run `rake spec`.
+
+`playwright-core` rather than `playwright`: it is a single package with no
+dependency tree, and it uses the Chromium already on the machine instead of
+downloading one. The application itself still ships no JavaScript dependencies.
 
 ## Vendored files
 

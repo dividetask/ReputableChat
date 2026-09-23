@@ -751,6 +751,10 @@ function iconFor(pubkey) {
 }
 
 function avatarFor(pubkey, extra = "", icon = iconFor(pubkey)) {
+  // The avatar already on somebody's profile is the end of the journey, so it
+  // enlarges. Everywhere else an avatar is a way to get there.
+  const onProfile = extra.includes("avatar-large");
+
   // An <img> with an empty src resolves to the page URL and renders as a
   // broken image, so anyone without an icon gets the placeholder instead.
   if (icon) {
@@ -758,7 +762,7 @@ function avatarFor(pubkey, extra = "", icon = iconFor(pubkey)) {
     img.className = `avatar ${extra}`.trim();
     img.src = `/images/${icon}`;
     img.alt = "";
-    enlargeable(img, `/images/${icon}`, pubkey);
+    if (onProfile) enlarges(img, `/images/${icon}`); else opensProfile(img, pubkey);
     return img;
   }
 
@@ -769,31 +773,44 @@ function avatarFor(pubkey, extra = "", icon = iconFor(pubkey)) {
   placeholder.className = `avatar placeholder ${extra}`.trim();
   placeholder.style.background = `hsl(${hash % 360} 42% 30%)`;
   placeholder.textContent = pubkey.slice(0, 2);
-  // A placeholder is two letters on a colour; there is nothing to enlarge, and
-  // blowing it up full screen would be a joke at the reader's expense.
-  placeholder.addEventListener("click", () => showProfile(pubkey));
+  // A placeholder is two letters on a colour. There is nothing to enlarge, so
+  // on a profile it does nothing at all.
+  if (!onProfile) opensProfile(placeholder, pubkey);
   return placeholder;
 }
 
-// Hover to see an avatar full size; leaving it, or Escape, puts it away.
-// Clicking opens the profile, which is what an avatar has always done and what
-// somebody reaches for when they want to know who this is.
-//
-// The overlay does not take pointer events, so what dismisses it is leaving the
-// original image rather than reaching the backdrop -- an overlay that swallowed
-// the pointer would cover the thing whose hover is keeping it open, and flicker
-// between the two states forever.
-function enlargeable(element, source, pubkey) {
+// How long the pointer has to rest on an avatar before it counts as wanting
+// something. Without it, crossing a list of messages would open every profile
+// on the way past, which is worse than no hover at all.
+const HOVER_INTENT_MS = 400;
+
+function opensProfile(element, pubkey) {
+  let waiting = null;
+
   element.classList.add("enlargeable");
+  element.addEventListener("mouseenter", () => {
+    waiting = setTimeout(() => showProfile(pubkey), HOVER_INTENT_MS);
+  });
+  element.addEventListener("mouseleave", () => clearTimeout(waiting));
+  element.addEventListener("click", (event) => {
+    // A tap fires this without ever hovering, so it must not wait.
+    clearTimeout(waiting);
+    event.stopPropagation();
+    showProfile(pubkey);
+  });
+}
+
+// The overlay does not take pointer events, so what dismisses it is leaving the
+// image rather than reaching the backdrop -- an overlay that swallowed the
+// pointer would cover the thing whose hover is keeping it open, and flicker
+// between the two states forever.
+function enlarges(element, source) {
   element.addEventListener("mouseenter", () => showLarge(source));
   element.addEventListener("mouseleave", () => hideLarge());
   element.addEventListener("click", (event) => {
     event.stopPropagation();
-    // The enlargement is a hover affordance, and a tap is not a hover: on a
-    // touch screen the click arrives with the overlay already up, so it has to
-    // come down before the panel underneath it changes.
-    hideLarge();
-    showProfile(pubkey);
+    // A tap is not a hover: on a touch screen the overlay is not already up.
+    if ($("lightbox").classList.contains("hidden")) showLarge(source); else hideLarge();
   });
 }
 
@@ -1297,6 +1314,7 @@ async function addByKey() {
   refreshMessages();
 
   $("add-key").value = "";
+  renderRelations();
   status($("profile-status"), `Added. They are now ${state.session.bucketOf(pubkey)}.`, "ok");
 }
 

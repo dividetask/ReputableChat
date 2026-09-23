@@ -62,15 +62,35 @@ class UiRulesSpec < Minitest::Test
     assert_includes lightbox, "pointer-events: none"
   end
 
-  # RULE: clicking an avatar opens that person's profile. It is what an avatar
-  # has always done and what somebody reaches for when they want to know who
-  # this is; enlarging is the hover affordance, not the click one.
-  def test_clicking_an_avatar_opens_the_profile
-    enlargeable = within(app_js, from: "function enlargeable(", lines: 20)
+  # RULE: an avatar is a way to reach somebody's profile; the avatar already on
+  # that profile is the end of the journey, so it is the one that enlarges.
+  def test_an_avatar_opens_a_profile_and_the_profile_one_enlarges
+    opens = within(app_js, from: "function opensProfile(", lines: 18)
+    enlarges = within(app_js, from: "function enlarges(", lines: 14)
 
-    assert_includes enlargeable, "showProfile(pubkey)", "a click must open the profile"
-    assert_includes enlargeable, "hideLarge()",
-                    "a tap arrives with the overlay up, so it must come down first"
+    assert_includes opens, "showProfile(pubkey)"
+    assert_includes enlarges, "showLarge(source)"
+    assert_match(/const onProfile = extra\.includes\("avatar-large"\)/, app_js,
+                 "which behaviour an avatar gets must follow from where it is")
+  end
+
+  # RULE: hovering waits before it acts. Without a dwell, crossing a list of
+  # messages would open every profile on the way past, which is worse than no
+  # hover at all. A tap never waits -- it is not a hover.
+  def test_hovering_waits_but_tapping_does_not
+    opens = within(app_js, from: "function opensProfile(", lines: 18)
+
+    assert_includes opens, "HOVER_INTENT_MS", "hover must dwell before opening"
+    assert_includes opens, "clearTimeout(waiting)", "leaving must cancel a pending open"
+  end
+
+  # RULE: adding somebody from the profile page shows them straight away. The
+  # list is already on screen, so not repainting it reads as the add failing.
+  def test_adding_a_friend_repaints_the_list
+    add = app_js[/async function addByKey\(\)[\s\S]{0,900}?\n\}/]
+    refute_nil add, "addByKey not found"
+
+    assert_includes add, "renderRelations()", "the friend list must repaint"
   end
 
   # RULE: friend and blocked lists show the whole key. This is the list where

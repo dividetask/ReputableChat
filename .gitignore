@@ -12,3 +12,6 @@ vendor/bundle/
 # fresh clone able to run the genesis account locally.
 config/genesis/*.seed
 !config/genesis/development.seed
+
+# Browser tests only. The application itself ships no JavaScript dependencies.
+node_modules/
