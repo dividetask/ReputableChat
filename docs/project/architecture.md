@@ -101,8 +101,9 @@ has to stay correct.
 ### Two numbers, named apart
 
 - The `:v1` at the end of `purpose` is the **shape** of the payload — which
-  fields it has. It moves only when the field list changes, which invalidates
-  every signature ever made under the old shape. It is part of the domain
+  fields it has. It moves only when the field list changes. Records signed
+  under the old shape stay valid and stay on the chain; the old shape has to
+  stay understood so they can still be checked. It is part of the domain
   separation described under **Signed payloads** below.
 - `revision` is a **counter for this one record**, climbing by one every time
   its owner republishes. It says nothing about the shape.
@@ -112,8 +113,8 @@ shape. They never move together. Every record carries its own counter, so a
 declaration at 7 beside a vault at 3 is two independent tallies rather than a
 disagreement — one has been saved seven times and the other three.
 
-They were both called `version` until it became clear that nobody could read the
-two lines together and tell them apart.
+They were both called `version` until it became clear that nobody could read
+the two lines together and tell them apart.
 
 The counter is **inside the signed payload**, which is the whole point of it.
 Without it the server could serve an old copy of somebody's attestation to hide
@@ -168,10 +169,10 @@ gone rather than deprecated — see **Retired terms** in
 Every chain record also carries `note` — free text the software never reads,
 signed for whoever browses the raw chain. See **Notes** in [chain.md](chain.md).
 
-Everything but `login` and `vault` carries `ack`, the hash of the last record
-its author had seen. That is what makes these a chain rather than a pile — see
-[chain.md](chain.md). The vault has none because nobody else ever sees it, so
-there is nothing to anchor it to and nobody to prove anything to.
+Everything but `login` and `vault` carries `ack`, the record hashes of the most
+recent records its author had seen. That is what makes these a chain rather than
+a pile — see [chain.md](chain.md). The vault has none because nobody else ever
+sees it, so there is nothing to anchor it to and nobody to prove anything to.
 
 `room` in the message payload stops a message being replanted in a different
 channel. `seq` and `prev` chain an author's own messages so the server cannot
@@ -183,23 +184,21 @@ separately and unsigned.
 Edits and deletes will be new signed records referencing the original, never
 mutations — a mutated record no longer matches its signature.
 
-## Reactions
+## Emotes
 
-A reaction is its own signed record naming the message it reacts to (by that
+An emote is its own signed record naming the message it reacts to (by that
 message's signature) and the room, so it cannot be transplanted. One per person
 per message, enforced by a unique constraint rather than trusted from the
 client, and the emote must be one the server publishes in `config/emotes.yml` —
 an arbitrary string would otherwise be stored and rendered back to everyone.
 
-The client tallies them per message and **drops reactions from blocked
+The client tallies them per message and **drops emotes from blocked
 accounts**, so a pile of spam accounts cannot inflate a count. Counts are
 therefore per-viewer, like everything else here.
 
-Reactions are also folded into the reacting user's vault as `net_votes`, which
-is what their own reputation maths reads and what the score in their attestation
-is computed from. The records are the display form; the aggregate is the
-reputation form. They can in principle disagree, since nothing forces a client
-to publish both.
+An emote also moves its author's score for the person emoted, and the emote
+record is itself the adjustment that says so — see **Adjustments** in
+[chain.md](chain.md).
 
 ## Record hashes
 
@@ -269,8 +268,11 @@ public/js/
   detecting tampering is why it is signed.
 - Key rotation. `master_pubkey` and `previous_pubkey` are in the signed shape
   and must still be null; nothing implements them.
-- Removing a reaction; currently a reaction is final
+- Removing an emote; currently an emote is final
 - WebSocket delivery — messages currently poll every 4s
 - Chunking an attestation, which currently grows an entry per person ever scored
 - Federation between servers. The payload domain separation is already in place
-  for it, but nothing else is.
+  for it, but nothing else is. The principle it has to keep: a person sees
+  messages whatever server they came from, and is largely unaware which server
+  anyone else uses. What they see is decided by their friend list, never by
+  where somebody's account lives.

@@ -22,7 +22,7 @@ module ReputableChat
       @body_width = body_width
     end
 
-    def render(sections = %w[users identities attestations messages reactions vaults])
+    def render(sections = %w[users identities attestations messages emotes vaults])
       sections.each do |section|
         send(:"dump_#{section}")
         @out.puts
@@ -152,14 +152,14 @@ module ReputableChat
       end
     end
 
-    def dump_reactions
+    def dump_emotes
       unless @db.table_exists?(:emotes)
-        heading("REACTIONS", 0)
+        heading("EMOTES", 0)
         return
       end
 
       rows = @db[:emotes].order(:id).all
-      heading("REACTIONS", rows.size)
+      heading("EMOTES", rows.size)
 
       by_hash = ids_by_hash
       rows.group_by { |row| row[:message] }.each do |target, group|

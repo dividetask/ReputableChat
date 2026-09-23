@@ -380,9 +380,9 @@ class AppSpec < Minitest::Test
     assert_equal @pubkey, stored.first["author"], "the author is needed to show whether you reacted"
   end
 
-  # One reaction per person per message, enforced server-side rather than
+  # One emote per person per message, enforced server-side rather than
   # trusted from the client.
-  def test_one_reaction_per_person_per_message
+  def test_one_emote_per_person_per_message
     log_in
     body = emote_body(message: a_message_signature)
 
@@ -390,7 +390,7 @@ class AppSpec < Minitest::Test
     assert_equal 200, last_response.status
 
     post_json "/api/room/general/emote", emote_body(message: a_message_signature, emote: SECOND_EMOTE)
-    assert_equal 409, last_response.status, "a different emote is still a second reaction"
+    assert_equal 409, last_response.status, "a different emote is still a second one"
   end
 
   # An arbitrary string must never be storable, or it renders back to everyone.

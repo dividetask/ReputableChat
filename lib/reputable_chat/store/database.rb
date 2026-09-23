@@ -128,7 +128,7 @@ module ReputableChat
           unique %i[author seq]
         end
 
-        # One reaction per person per message, enforced here rather than
+        # One emote per person per message, enforced here rather than
         # trusted from the client.
         @db.create_table?(:emotes) do
           primary_key :id

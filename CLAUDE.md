@@ -28,7 +28,7 @@ bundle exec rake spec       # full suite (browser tests skip without `npm instal
 npm install                 # once, for the browser tests
 bundle exec rake curve      # print current curve, ladder and safety window
 bundle exec rake dump       # readable dump of the database
-bundle exec rake "dump[messages,reactions]"   # just those sections
+bundle exec rake "dump[messages,emotes]"      # just those sections
 bundle exec rake genesis    # development genesis (already committed)
 RACK_ENV=production bundle exec rake genesis   # production genesis (once, ever)
 

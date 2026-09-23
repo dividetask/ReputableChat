@@ -193,12 +193,12 @@ module ReputableChat
         }
       end
 
-      # One person's reaction to one message. `message` is that message's
+      # One person's emote on one message. `message` is that message's
       # record hash. `room` is carried for the same reason a message carries
-      # it: so a reaction cannot be transplanted elsewhere.
+      # it: so an emote cannot be transplanted elsewhere.
       #
       # An emote record is also its own attestation adjustment -- it names the
-      # author, the target message and the reaction, which is everything needed
+      # author, the target message and the emote, which is everything needed
       # to move the author's score for that message's author.
       def emote(author:, room:, message:, emote:, ack:, issued_at:, note: nil)
         {
