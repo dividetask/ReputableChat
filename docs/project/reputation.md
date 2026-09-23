@@ -16,14 +16,14 @@ What one person publishes about another. Three actions:
 | action | effect |
 |---|---|
 | friend | +0.5 |
-| positive emote on a comment | net vote count, through the curve below |
+| positive emote on a message | net vote count, through the curve below |
 | report | −1, absolute |
 
 A rating is clamped to −1..+1. Friending plus a maxed-out curve reaches exactly
 +1.
 
 **A report is absolute within one rater.** Reporting someone makes that rater's
-rating −1 regardless of how many of the target's comments they previously liked.
+rating −1 regardless of how many of the target's messages they previously liked.
 
 **A report is not absolute across raters.** At aggregation it is just −1 in the
 mean, so roughly three friendships at the same depth outvote it. This is
@@ -68,7 +68,7 @@ These sum to 1, so an effective reputation is always inside −1..+1 with no
 clamping. Depth 0 takes `1-k` of the total, which means **the ceiling for anyone
 you have never personally rated is exactly `k`** — 0.1. That is intended:
 strangers are meant to sit in the Tolerated band, and the pressure that creates to
-friend people or like their comments is the point of the app.
+friend people or like their messages is the point of the app.
 
 Effective reputation is the weighted sum over depths of the mean rating at that
 depth. The mean is taken over **the people who actually rated the target** at

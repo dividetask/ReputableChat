@@ -41,8 +41,9 @@ Split by **who needs to read it**.
 purpose:
 
 - The `:v1` at the end of `purpose` is the **shape** of the payload — which
-  fields it has. It moves only when the field list changes, which invalidates
-  every signature ever made under the old shape. It is part of the domain
+  fields it has. It moves only when the field list changes. Records signed
+  under the old shape stay valid and stay on the chain; the old shape has to
+  stay understood so they can still be checked. It is part of the domain
   separation described under **Signed payloads** below.
 - `revision` is a **counter for this one record**, climbing by one every time
   its owner republishes. It says nothing about the shape.
@@ -75,8 +76,8 @@ Actions, not scores — see the end of [reputation.md](reputation.md) for why.
 
 `settings` is a sparse override tree mirroring `config/reputation.yml` — the
 user layer of the three described under **Config layering** in
-[reputation.md](reputation.md). `voted` is which comments have already been
-emoted on, so one-vote-per-comment survives moving to another device.
+[reputation.md](reputation.md). `voted` is which messages have already been
+emoted on, so one-vote-per-message survives moving to another device.
 
 The server holds it so it cannot be lost, and validates only that `settings` is
 a bounded structure of scalars — it never interprets the contents.
@@ -139,8 +140,8 @@ every old signature stops verifying against the new shape.
 Every chain record also carries `note` — free text the software never reads,
 signed for whoever browses the raw chain. See **Notes** in [chain.md](chain.md).
 
-Everything but `login` and `private-config` carries `ack`, the hash of the last
-record its author had seen. That is what makes these a chain rather than a pile
+Everything but `login` and `private-config` carries `ack`, the hashes of the most
+recent records its author had seen. That is what makes these a chain rather than a pile
 — see [chain.md](chain.md). `private-config` has none because nobody else ever
 sees it, so there is nothing to anchor it to.
 
@@ -154,22 +155,21 @@ separately and unsigned.
 Edits and deletes will be new signed records referencing the original, never
 mutations — a mutated record no longer matches its signature.
 
-## Reactions
+## Emotes
 
-A reaction is its own signed record naming the message it reacts to (by that
+An emote is its own signed record naming the message it reacts to (by that
 message's signature) and the room, so it cannot be transplanted. One per person
 per message, enforced by a unique constraint rather than trusted from the
 client, and the emote must be one the server publishes in `config/emotes.yml` —
 an arbitrary string would otherwise be stored and rendered back to everyone.
 
-The client tallies them per message and **drops reactions from blocked
+The client tallies them per message and **drops emotes from blocked
 accounts**, so a pile of spam accounts cannot inflate a count. Counts are
 therefore per-viewer, like everything else here.
 
-Reactions are also folded into the reacting user's public config as
-`net_votes`, which is what reputation reads. The records are the display form;
-the aggregate is the reputation form. They can in principle disagree, since
-nothing forces a client to publish both.
+An emote also moves its author's score for the person emoted, and the emote
+record is itself the adjustment that says so — see **Adjustments** in
+[chain.md](chain.md).
 
 ## Record hashes
 
@@ -236,8 +236,11 @@ public/js/
   (`session.verify_signatures`). Your own private config is already verified,
   since detecting tampering is why it is signed.
 - Encrypting the private config so the server cannot read it
-- Removing a reaction; currently a reaction is final
+- Removing an emote; currently an emote is final
 - WebSocket delivery — messages currently poll every 4s
 - Private config contents beyond the placeholder
 - Federation between servers. The payload domain separation is already in place
-  for it, but nothing else is.
+  for it, but nothing else is. The principle it has to keep: a person sees
+  messages whatever server they came from, and is largely unaware which server
+  anyone else uses. What they see is decided by their friend list, never by
+  where somebody's account lives.

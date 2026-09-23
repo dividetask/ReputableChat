@@ -28,9 +28,10 @@ between republishes, naming the `base_revision` it amends and its `seq` in that
 run. An emote record is already its own adjustment; these exist for the changes
 with no other public record.
 
-**Message** (`reputablechat:message:v1`) — a comment in a room.
+**Message** (`reputablechat:message:v1`) — text one person sends to a room.
+The only word for it: not a comment, a post or a transaction.
 
-**Emote** (`reputablechat:emote:v1`) — one person's reaction to one message.
+**Emote** (`reputablechat:emote:v1`) — one person's response to one message.
 
 **Notice** (`reputablechat:notice:v1`) — an official statement from a
 publisher: an outage, a policy, a release, the founding statement. `kind` comes
@@ -39,17 +40,29 @@ from `config/notices.yml`.
 **Release** (`reputablechat:release:v1`) — a manifest of `path → sha256`
 pinning a version of the client. A manifest, never an archive.
 
-**Genesis** — the first identity declaration, the only record whose `ack` is
-null, and the thing every record that has seen nothing else acknowledges.
+**Genesis** — the genesis account's first identity declaration: the only
+record whose `ack` is empty, and the thing every record that has seen nothing
+else acknowledges. Its `note` carries version 1 of the rules.
 Committed as a file because clients must agree on its hash before fetching
 anything. There are two: development's seed is public, production's is not.
+
+**Genesis account** — the account that signs the genesis. Its handle on this
+server is Tim; another server may run its own under another name. Every new
+account starts with it as a friend, and what that account publishes in its
+attestation is the only way it reaches anyone.
+
+**Rules** — what every field of every record means and what makes a record
+valid. Carried in the `note` of the genesis account's identity declaration, one
+revision per version, never edited. A record follows the newest version it
+acknowledges. [chain.md](chain.md)
 
 **Founding notice** — the notice that supersedes nothing. One per chain.
 
 ## Fields that travel on many records
 
-**`ack`** — the record hash of the last record this record's author had seen.
-What makes a set of signatures a chain. Chosen subjectively, and unenforceable
+**`ack`** — the record hashes of the most recent records this record's author
+had seen: sorted, no duplicates, at most 16, empty only on the genesis. What
+makes a set of signatures a chain. Chosen subjectively, and unenforceable
 by the server.
 
 **`note`** — free text the software never reads, for a person browsing the raw
@@ -59,7 +72,13 @@ chain. Signed, inert, bounded, null unless set.
 owner republishes. Every record has its own. Not the shape.
 
 **Shape**, written `:v1` — which fields a payload has. Moves only when the
-field list changes, which invalidates every signature made under the old one.
+field list changes. Records signed under the old shape stay valid and stay on
+the chain; a signature made for one shape can never be presented as another,
+and the old shape has to stay understood so its records can still be checked.
+
+**`ts`** — when the author says they signed, in whole Unix seconds. The
+author's own clock, so it is a claim and nothing more: it orders nothing, and
+the server records its own receipt time separately and unsigned.
 
 **`purpose`** — the domain-separated string naming the shape, signed alongside
 everything else so a signature for one kind of record cannot be presented as
@@ -158,6 +177,11 @@ Do not reintroduce these; they each have a current name above.
 | config / public config | identity declaration + attestation |
 | version (as a per-record counter) | revision |
 | `tim.json` | `<environment>.json` |
+| transaction | record |
+| comment, post (as a noun) | message |
+| reaction | emote |
+| announcement | notice |
+| Tim (as the general term) | genesis account |
 
 And one word to avoid rather than replace: **troll** is not a category this
 system has an opinion about. Someone unbearable to one reader is worth reading
