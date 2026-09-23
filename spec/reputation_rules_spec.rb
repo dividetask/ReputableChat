@@ -164,9 +164,9 @@ class ReputationRulesSpec < Minitest::Test
     assert_equal 7, depths.values.max
   end
 
-  # RULE: the traversal also stops at max_configs, whichever limit comes first.
+  # RULE: the traversal also stops at max_accounts, whichever limit comes first.
   # A positive-only graph still branches, so seven hops is unbounded without it.
-  def test_traversal_respects_max_configs
+  def test_traversal_respects_max_accounts
     graph = store
     # Fan out widely: 20 contacts, each friending 20 more.
     (1..20).each do |i|
@@ -177,7 +177,7 @@ class ReputationRulesSpec < Minitest::Test
     unbounded = engine(graph).reachable_depths(VIEWER)
     assert_operator unbounded.size, :>, 50, "this graph should exceed the cap"
 
-    capped = engine(graph, "ladder" => { "max_configs" => 50 })
+    capped = engine(graph, "ladder" => { "max_accounts" => 50 })
     assert_operator capped.reachable_depths(VIEWER).size, :<=, 50
   end
 

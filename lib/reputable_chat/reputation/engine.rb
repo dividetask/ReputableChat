@@ -34,8 +34,8 @@ module ReputableChat
       # Effective reputation of `target` from `viewer`'s point of view.
       #
       # `depths` lets a caller supply a walk taken earlier. A Session passes
-      # the one it took at login so that later changes to other people's
-      # configs stay invisible until the next login.
+      # the one it took at login so that attestations published since stay
+      # invisible until the next login.
       def effective(viewer:, target:, depths: nil)
         breakdown(viewer: viewer, target: target, depths: depths).fetch(:effective)
       end
@@ -97,7 +97,7 @@ module ReputableChat
       #
       # Reaching a hop means every link on the path was rated above the gate by
       # the person one step closer in. Each person is counted once, at their
-      # shortest distance. The walk also stops once max_configs have been
+      # shortest distance. The walk also stops once max_accounts have been
       # discovered, whichever limit is hit first -- a positive-only graph still
       # How much each person's recommendations are worth, compounded along the
       # path that reached them. The viewer trusts their own judgement fully; a
@@ -121,7 +121,7 @@ module ReputableChat
       def reachable_depths(viewer)
         depths   = { viewer => 0 }
         frontier = [viewer]
-        budget   = ladder.max_configs
+        budget   = ladder.max_accounts
 
         (0...ladder.max_hops).each do |depth|
           next_frontier = []

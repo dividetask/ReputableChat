@@ -15,8 +15,8 @@ require_relative "store/database"
 require_relative "store/images"
 
 module ReputableChat
-  # The server does as little as it can: it verifies signatures, rejects config
-  # rollbacks, and stores signed blobs. It never sees a seed, holds a private
+  # The server does as little as it can: it verifies signatures, rejects
+  # revision rollbacks, and stores signed blobs. It never sees a seed, holds a private
   # key, or computes a reputation -- reputation is subjective per viewer, so it
   # belongs on the client.
   class App < Roda
@@ -130,13 +130,7 @@ module ReputableChat
           r.put { put_vault(r) }
         end
 
-        r.on "private-config" do
-          r.get { own_private_config(r) }
-          r.put { store_private_config(r) }
-        end
-
-        # The chain records. `config` below is what these replace and is on
-        # its way out; both are served while the client moves across.
+        # The chain records.
         r.on "identity" do
           r.post("batch") { batch(r, :identities) }
           r.put { put_identity(r) }
@@ -157,12 +151,6 @@ module ReputableChat
         r.on "adjustment" do
           r.post { post_adjustment(r) }
           r.get(String) { |pubkey| fetch_adjustments(r, pubkey) }
-        end
-
-        r.on "config" do
-          r.post("batch") { config_batch(r) }
-          r.put { store_config(r) }
-          r.get(String) { |pubkey| fetch_config(pubkey) }
         end
 
         r.on "room", String do |room_name|
@@ -209,8 +197,8 @@ module ReputableChat
 
     # A valid but unregistered seed reaches here. The client warns before
     # calling it -- a mistyped seed that happens to pass the checksum would
-    # otherwise silently create a new empty account. The display name is not
-    # set here; the client publishes it in its first signed config.
+    # otherwise silently create a new empty account. The handle is not set
+    # here; the client publishes it in its first identity declaration.
     def register(r)
       pubkey = current_pubkey(r)
       r.halt(409, { "error" => "already registered" }) if store.registered?(pubkey)
@@ -230,29 +218,6 @@ module ReputableChat
       when :unsupported then bad_request(r, "unsupported image type")
       else { "icon" => result }
       end
-    end
-
-    def fetch_config(pubkey_param)
-      pubkey = Params.pubkey(pubkey_param)
-      return { "config" => nil } unless pubkey
-
-      { "config" => present_config(store.config_blob(pubkey)) }
-    end
-
-    # One round trip for a whole traversal level. A seven-deep walk done one
-    # fetch at a time would be hundreds of sequential requests.
-    def config_batch(r)
-      pubkeys = Params.array_of(r.params["pubkeys"], max: MAX_BATCH) { |v| Params.pubkey(v) }
-      bad_request(r, "bad pubkeys") unless pubkeys
-
-      { "configs" => store.config_blobs(pubkeys).map { |row| present_config(row) } }
-    end
-
-    # Takes no pubkey -- it uses the session's. Asking for somebody else's
-    # private config is not expressible through this route, rather than being
-    # a check that has to stay correct.
-    def own_private_config(r)
-      { "config" => present_config(store.private_config(current_pubkey(r))) }
     end
 
     def own_vault(r)
@@ -281,50 +246,6 @@ module ReputableChat
       verify!(r, pubkey, sig, payload)
 
       result = store.store_vault(
-        pubkey: pubkey, revision: revision,
-        payload: Cryptography::Canonical.dump(payload), signature: sig
-      )
-      r.halt(409, { "error" => "revision is not newer than the stored one" }) if result == :stale
-
-      { "stored" => true, "revision" => revision }
-    end
-
-    def store_private_config(r)
-      pubkey   = current_pubkey(r)
-      revision  = Params.integer(r.params["revision"], min: 1) or bad_request(r, "bad revision")
-      settings = Params.settings(r.params["settings"])       or bad_request(r, "bad settings")
-      voted    = Params.voted(r.params["voted"] || [])       or bad_request(r, "bad voted list")
-      sig      = Params.signature(r.params["signature"])     or bad_request(r, "bad signature")
-      ts       = Params.integer(r.params["ts"])              or bad_request(r, "bad timestamp")
-
-      payload = Cryptography::Payload.private_config(
-        pubkey: pubkey, revision: revision, settings: settings, voted: voted, issued_at: ts
-      )
-      verify!(r, pubkey, sig, payload)
-
-      result = store.store_private_config(
-        pubkey: pubkey, revision: revision,
-        payload: Cryptography::Canonical.dump(payload), signature: sig
-      )
-      r.halt(409, { "error" => "revision is not newer than the stored one" }) if result == :stale
-
-      { "stored" => true, "revision" => revision }
-    end
-
-    def store_config(r)
-      pubkey  = current_pubkey(r)
-      revision = Params.integer(r.params["revision"], min: 1) or bad_request(r, "bad revision")
-      profile = Params.profile(r.params["profile"])         or bad_request(r, "bad profile")
-      ratings = Params.ratings(r.params["ratings"])         or bad_request(r, "bad ratings")
-      sig     = Params.signature(r.params["signature"])     or bad_request(r, "bad signature")
-      ts      = Params.integer(r.params["ts"])              or bad_request(r, "bad timestamp")
-
-      payload = Cryptography::Payload.config(
-        pubkey: pubkey, revision: revision, profile: profile, ratings: ratings, issued_at: ts
-      )
-      verify!(r, pubkey, sig, payload)
-
-      result = store.store_config(
         pubkey: pubkey, revision: revision,
         payload: Cryptography::Canonical.dump(payload), signature: sig
       )
@@ -578,16 +499,6 @@ module ReputableChat
       return nil if r.params["note"].nil? || r.params["note"].to_s.strip.empty?
 
       Params.note(r.params["note"], max: limit(:note_bytes)) or bad_request(r, "bad note")
-    end
-
-    # Signed blobs go out exactly as they came in. The client verifies them
-    # against the author's key, so the server re-serializing them would only
-    # create a way to break signatures.
-    def present_config(row)
-      return nil unless row
-
-      { "pubkey" => row[:pubkey], "revision" => row[:revision],
-        "payload" => row[:payload], "signature" => row[:signature] }
     end
 
     # Signed blobs go out exactly as they came in, with the record hash the

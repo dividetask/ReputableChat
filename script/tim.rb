@@ -31,7 +31,9 @@ require "reputable_chat/server_config"
 require "reputable_chat/cryptography/canonical"
 require "reputable_chat/cryptography/payload"
 require "reputable_chat/cryptography/record"
+require "reputable_chat/cryptography/vault"
 require "reputable_chat/reputation/engine"
+require "reputable_chat/reputation/fingerprint"
 require "reputable_chat/store/memory"
 
 module Tim
@@ -49,13 +51,14 @@ module Tim
   # inside the signature, so it has to be the origin the server is configured
   # with rather than the URL we happened to dial.
   class Client
-    attr_reader :pubkey
+    attr_reader :pubkey, :vault_key
 
-    def initialize(url:, origin:, private_key:, pubkey:)
+    def initialize(url:, origin:, private_key:, pubkey:, vault_key:)
       @base = URI.parse(url)
       @origin = origin
       @private_key = private_key
       @pubkey = pubkey
+      @vault_key = vault_key
       @cookie = nil
     end
 
@@ -133,14 +136,18 @@ module Tim
 
   def status(options)
     client = connect(options)
-    config = own_config(client)
-    ratings = config["ratings"]
+    declaration = own_identity(client)
+    vault = own_vault(client)
+    ratings = vault.fetch("ratings")
 
     puts
-    puts "  Handle       #{config['profile']['username']}"
+    puts "  Handle       #{declaration['handle']}"
     puts "  Public key   #{client.pubkey}"
     puts "  Genesis      #{ReputableChat::Genesis.current.hash}"
-    puts "  Config       revision #{config['revision']}, #{ratings.size} #{ratings.size == 1 ? 'rating' : 'ratings'}"
+    puts "  Identity     revision #{declaration['revision']}"
+    puts "  Attestation  revision #{attestation_revision(client)}, " \
+         "#{ratings.size} #{ratings.size == 1 ? 'score' : 'scores'}"
+    puts "  Vault        revision #{vault['revision']} (private: the server cannot read it)"
     puts
 
     return puts("  Nobody rated yet.\n\n") if ratings.empty?
@@ -200,12 +207,17 @@ module Tim
     client = connect(options)
     abort "  that is the genesis account's own key" if target == client.pubkey
 
-    config = own_config(client)
-    ratings = config["ratings"]
+    vault = own_vault(client)
+    ratings = vault.fetch("ratings")
     before = ratings[target]
 
     ratings[target] = kind == :friend ? friended(before) : made_visible(before)
-    publish(client, config)
+    # The vault first. It is the only copy of the decision -- an attestation
+    # carries what the decision came to, not the decision -- so a failure after
+    # this point loses a published number that can be republished, rather than
+    # the rating it was computed from.
+    push_vault(client, vault)
+    publish_attestation(client, ratings)
 
     engine = engine_for(client.pubkey, ratings)
     puts
@@ -253,35 +265,110 @@ module Tim
     "+#{rating['net_votes']}"
   end
 
-  # --- config -------------------------------------------------------------
+  # --- the identity declaration --------------------------------------------
 
-  # Seeded from the genesis record when there is no config yet, so the handle
-  # and bio the chain was created with are the ones the network sees rather
-  # than a placeholder that has to be corrected later.
-  def own_config(client)
-    blob = client.get_json("/api/config/#{client.pubkey}")["config"]
-    return from_genesis if blob.nil?
+  # Falls back to the genesis record, which is itself an identity declaration:
+  # the handle and bio the chain was created with are the ones the network sees
+  # rather than a placeholder that has to be corrected later.
+  def own_identity(client)
+    blob = client.get_json("/api/identity/#{client.pubkey}")["identity"]
+    return JSON.parse(ReputableChat::Genesis.current.payload).merge("revision" => 0) if blob.nil?
+
+    JSON.parse(blob["payload"])
+  end
+
+  # --- the vault ------------------------------------------------------------
+
+  # Friending, reporting and voting are private. They live in the vault, sealed
+  # with a key the server does not have, and only what they come to is
+  # published. So this is where a rating is read and written; the attestation
+  # is downstream of it.
+  #
+  # A vault that will not open is raised on rather than replaced with a blank
+  # one. The browser can afford to shrug one off and carry on, because a person
+  # is sitting there; here a blank vault would be published as an attestation
+  # that silently unfriends everybody.
+  def own_vault(client)
+    blob = client.get_json("/api/vault")["vault"]
+    return { "revision" => 0, "ratings" => {}, "contents" => {} } if blob.nil?
 
     payload = JSON.parse(blob["payload"])
-    { "revision" => payload["revision"].to_i, "profile" => payload["profile"], "ratings" => payload["ratings"] || {} }
+    contents = Crypto::Vault.unseal(client.vault_key,
+                                    ciphertext: payload["ciphertext"], iv: payload["iv"])
+    raise Failed, "the stored vault will not open with this seed. Wrong seed file, " \
+                  "or a changed seed.kdf.vault_domain." if contents.nil?
+
+    { "revision" => payload["revision"].to_i, "ratings" => contents["ratings"] || {},
+      "contents" => contents }
   end
 
-  def from_genesis
-    record = JSON.parse(ReputableChat::Genesis.current.payload)
-
-    { "revision" => 0, "ratings" => {},
-      "profile" => { "username" => record["handle"], "message" => record["bio"], "icon" => record["icon"] } }
-  end
-
-  def publish(client, config)
-    revision = config["revision"].to_i + 1
+  # Everything the vault held is written back, not just the ratings: a browser
+  # keeps the friend order, the seen set and the settings in here too, and this
+  # must not be the thing that drops them.
+  def push_vault(client, vault)
+    revision = vault["revision"].to_i + 1
+    contents = vault["contents"].merge("ratings" => vault["ratings"])
+    sealed = Crypto::Vault.seal(client.vault_key, contents)
     ts = Time.now.to_i
-    payload = Payload.config(pubkey: client.pubkey, revision: revision, profile: config["profile"],
-                             ratings: config["ratings"], issued_at: ts)
 
-    client.put_json("/api/config", { "revision" => revision, "profile" => config["profile"],
-                                     "ratings" => config["ratings"], "ts" => ts,
-                                     "signature" => client.sign(payload) })
+    payload = Payload.vault(pubkey: client.pubkey, revision: revision,
+                            ciphertext: sealed["ciphertext"], iv: sealed["iv"], issued_at: ts)
+
+    client.put_json("/api/vault", sealed.merge("revision" => revision, "ts" => ts,
+                                               "signature" => client.sign(payload)))
+  end
+
+  # --- the attestation ------------------------------------------------------
+
+  def attestation_revision(client)
+    blob = client.get_json("/api/attestation/#{client.pubkey}")["attestation"]
+    blob ? JSON.parse(blob["payload"])["revision"].to_i : 0
+  end
+
+  # What the vault's private actions come to, as numbers. The curve runs here,
+  # once, rather than in every reader -- that is the whole difference between an
+  # attestation and the config it replaces.
+  def publish_attestation(client, ratings)
+    revision = attestation_revision(client) + 1
+    ts = Time.now.to_i
+    body = { "revision" => revision, "scores" => scores_for(ratings),
+             "derived" => derived, "ack" => ReputableChat::Genesis.current.hash, "ts" => ts }
+
+    payload = Payload.attestation(pubkey: client.pubkey, revision: revision,
+                                  scores: body["scores"], derived: body["derived"],
+                                  ack: body["ack"], issued_at: ts, note: nil)
+
+    client.put_json("/api/attestation", body.merge("signature" => client.sign(payload)))
+  end
+
+  def scores_for(ratings)
+    engine = engine_for("self", ratings)
+    friend_value = ReputableChat::Config.load.decimal("actions.friend.value")
+
+    ratings.each_with_object({}) do |(target, rating), out|
+      score = ReputableChat::Reputation::Rating.from_h(rating)
+      value = score.value(curve: engine.curve, friend_value: friend_value)
+
+      out[target] = { "reputation" => decimal(value),
+                      "trust" => decimal(value > 0 ? ReputableChat::Reputation::ONE : ReputableChat::Reputation::ZERO) }
+    end
+  end
+
+  # An empty cache, deliberately. `derived` is the author's own calculated
+  # scores for everyone their walk reached, and this CLI does not walk -- it
+  # never fetches anybody else's attestation. Publishing hops 0 and no scores
+  # says exactly that, where publishing a hop-0 answer as though it were a walk
+  # would offer readers a cache that is wrong rather than absent.
+  def derived
+    { "hops" => 0, "scores" => {},
+      "params" => ReputableChat::Reputation::Fingerprint.of(ReputableChat::Config.load) }
+  end
+
+  # The same text the browser writes for the same number. Shared rather than
+  # reimplemented here, because two producers of a signed field that agree on
+  # the value and differ on its spelling is a trap rather than a difference.
+  def decimal(value)
+    ReputableChat::Reputation.decimal(value, ReputableChat::Config.load.scale)
   end
 
   # --- the chain ----------------------------------------------------------
@@ -293,7 +380,7 @@ module Tim
   def choose_ack(client, messages)
     config = ReputableChat::Config.load
     bar = config.decimal("chain.min_reputation_to_acknowledge")
-    engine = engine_for(client.pubkey, own_config(client)["ratings"])
+    engine = engine_for(client.pubkey, own_vault(client).fetch("ratings"))
 
     hit = messages.reverse.find do |message|
       next false unless message["hash"]
@@ -330,8 +417,16 @@ module Tim
             "Wrong seed file, or a changed seed.kdf.domain."
     end
 
-    Client.new(url: options[:url], origin: options[:origin],
-               private_key: keys["private_key"], pubkey: keys["pubkey"]).log_in
+    # The raw Argon2id output IS the Ed25519 private key, and the vault key is
+    # HKDF over it under a separate domain -- one derivation, two keys, exactly
+    # as public/js/vault.js does it in the browser.
+    vault_key = Crypto::Vault.derive_key(
+      Crypto::Vault.from_b64url(keys["private_key"]),
+      ReputableChat::Config.load.fetch("seed.kdf.vault_domain")
+    )
+
+    Client.new(url: options[:url], origin: options[:origin], private_key: keys["private_key"],
+               pubkey: keys["pubkey"], vault_key: vault_key).log_in
   end
 
   def parse(argv)

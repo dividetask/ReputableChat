@@ -82,7 +82,7 @@ person one step closer in; a single non-positive link and the whole branch
 beyond it goes unread.
 
 The walk stops at **hop 2**, and the fourth term comes from other people's
-arithmetic rather than from walking further. `max_configs` still bounds it, and
+arithmetic rather than from walking further. `max_accounts` still bounds it, and
 still has to: a positive-only graph branches, so even two hops is 900 people at
 30 ratings each and 22,500 at 150.
 
@@ -154,7 +154,7 @@ without asking the server to be trusted about what it left out.
 
 ### Sampling
 
-`max_configs` truncates the walk. On a large graph that means the mean at
+`max_accounts` truncates the walk. On a large graph that means the mean at
 depth 2 is taken over whichever people breadth-first order happened to reach
 first, which is arbitrary and differs between clients for no principled reason.
 Deterministic selection — nearest first, then by pubkey — at least makes two

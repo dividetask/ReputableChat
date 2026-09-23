@@ -83,11 +83,14 @@ function status(el, message, kind = "") {
 // fingerprint is all that stands between a user and a convincing impersonator.
 const fingerprint = (pubkey) => pubkey.slice(0, 8);
 
-// --- private config ----------------------------------------------------
+// --- the vault ----------------------------------------------------------
 //
-// Settings and the voted list live on the server so they survive a new device,
-// and are signed so tampering with them is detectable. Note that signed is not
-// encrypted: this is private from other users, not from the server operator.
+// Settings, the voted list, the friend list, the seen set and the private
+// ratings behind every published score. Held on the server so they survive a
+// new device, sealed before they leave the browser, and signed over the
+// ciphertext so tampering is detectable. The server holds it and cannot read
+// it -- not merely private from other users, which is what the signed-only
+// record this replaces amounted to.
 
 function deepMerge(base, overrides) {
   const merged = { ...base };
@@ -510,8 +513,6 @@ async function logOff() {
   location.reload();
 }
 
-// --- config ------------------------------------------------------------
-
 // --- identity declarations and attestations -----------------------------
 //
 // Two documents where there used to be one. An identity declaration says who
@@ -649,29 +650,29 @@ async function loadOwnIdentity() {
 }
 
 // Walks outward from the viewer, fetching a whole hop per request. Bounded by
-// max_hops and max_configs together: a positive-only graph still branches, so
+// max_hops and max_accounts together: a positive-only graph still branches, so
 // hop count alone does not bound the fetch.
 async function loadNetwork() {
-  const { max_hops: maxHops, max_configs: maxConfigs } = state.config.ladder;
+  const { max_hops: maxHops, max_accounts: maxAccounts } = state.config.ladder;
   state.graph = new Graph();
   state.graph.add(state.me.pubkey, state.ratings);
   state.profiles = new Map([[state.me.pubkey, state.profile]]);
 
-  // The genesis account has no config to fetch, so its name comes from the
-  // declaration already in hand. Seeded before the walk, so a config it has
-  // published since wins over it.
+  // The genesis account has no declaration to fetch -- its declaration is the
+  // genesis record itself -- so its name comes from the copy already in hand.
+  // Seeded before the walk, so one it has published since wins over it.
   const genesis = genesisProfile(state.genesis);
   if (genesis) state.profiles.set(state.genesis.pubkey, genesis);
 
   let frontier = [state.me.pubkey];
   const seen = new Set(frontier);
 
-  for (let hop = 0; hop < maxHops && seen.size < maxConfigs; hop++) {
+  for (let hop = 0; hop < maxHops && seen.size < maxAccounts; hop++) {
     const wanted = [];
 
     for (const rater of frontier) {
       for (const [subject, rating] of Object.entries(state.graph.ratingsBy(rater))) {
-        if (seen.has(subject) || seen.size + wanted.length >= maxConfigs) continue;
+        if (seen.has(subject) || seen.size + wanted.length >= maxAccounts) continue;
         if (state.reputation.ratingValue(rating) <= state.reputation.minRating) continue;
         wanted.push(subject);
       }
@@ -917,8 +918,8 @@ function blockedStub(message) {
 
 // Names are not unique, so an avatar derived from the key gives every person a
 // stable look even before they upload one. Same key, same colour, always.
-// Where an icon comes from, in order: a config fetched during the walk, then
-// the genesis declaration the client holds before it has fetched anything.
+// Where an icon comes from, in order: a declaration fetched during the walk,
+// then the genesis declaration the client holds before it has fetched anything.
 //
 // The second is why the genesis account has a face on the account creation
 // screen, where no config has been fetched and none can be -- the account

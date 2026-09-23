@@ -2,6 +2,7 @@
 
 require "json"
 require "time"
+require_relative "genesis"
 require_relative "store/database"
 
 module ReputableChat
@@ -21,7 +22,7 @@ module ReputableChat
       @body_width = body_width
     end
 
-    def render(sections = %w[users configs messages reactions private])
+    def render(sections = %w[users identities attestations messages reactions vaults])
       sections.each do |section|
         send(:"dump_#{section}")
         @out.puts
@@ -32,15 +33,33 @@ module ReputableChat
 
     def short(pubkey) = pubkey.to_s[0, SHORT]
 
-    # Display names come from the signed configs, so a key with no config
-    # published yet simply has no name.
+    # Names come from the signed identity declarations, so a key that has not
+    # published one simply has no name.
+    #
+    # Seeded from the genesis record, which is itself an identity declaration
+    # and the one that is never in this table. The genesis account is named on
+    # nearly every line of a dump -- as an author, as an ack, as the first
+    # person everybody scores -- and reading it as "(no declaration)" is the
+    # least useful place for a blank.
     def names
-      @names ||= @db[:configs].select(:pubkey, :payload).each_with_object({}) do |row, map|
-        map[row[:pubkey]] = parse(row[:payload]).dig("profile", "username")
-      end
+      @names ||= genesis_name.merge(
+        @db[:identities].select(:pubkey, :payload).each_with_object({}) do |row, map|
+          map[row[:pubkey]] = parse(row[:payload])["handle"]
+        end
+      )
     end
 
-    def named(pubkey) = "#{short(pubkey)} #{names[pubkey] || '(no profile)'}"
+    # A dump of a database is worth having even where the genesis record is not
+    # readable, so this is a missing name rather than a failure.
+    def genesis_name
+      record = Genesis.current
+
+      { record.pubkey => parse(record.payload)["handle"] }
+    rescue StandardError
+      {}
+    end
+
+    def named(pubkey) = "#{short(pubkey)} #{names[pubkey] || '(no declaration)'}"
 
     # Not an endless def: a trailing `rescue` on one binds to the class body
     # instead of the method, which quietly puts every later definition inside
@@ -71,34 +90,46 @@ module ReputableChat
       rows.each { |row| @out.puts format("  %-20s joined %s", named(row[:pubkey]), at(row[:created_at])) }
     end
 
-    def dump_configs
-      rows = @db[:configs].order(:pubkey).all
-      heading("PUBLIC CONFIGS", rows.size)
+    def dump_identities
+      rows = @db[:identities].order(:pubkey).all
+      heading("IDENTITY DECLARATIONS", rows.size)
 
       rows.each do |row|
         payload = parse(row[:payload])
-        profile = payload["profile"] || {}
         @out.puts format("  %-20s v%-3d %s", named(row[:pubkey]), row[:revision],
-                         profile["icon"] ? "icon #{profile['icon'][0, 12]}…" : "no icon")
-        @out.puts "      bio: #{clip(profile['message'])}" unless profile["message"].to_s.empty?
-
-        ratings = payload["ratings"] || {}
-        @out.puts "      rates nobody" if ratings.empty?
-        ratings.each { |target, rating| @out.puts "      #{format('%-20s', named(target))} #{describe(rating)}" }
+                         payload["icon"] ? "icon #{payload['icon'][0, 12]}…" : "no icon")
+        @out.puts "      bio: #{clip(payload['bio'])}" unless payload["bio"].to_s.empty?
+        @out.puts "      ack #{short_hash(payload['ack'])}" if payload["ack"]
+        @out.puts "      note #{clip(payload['note'])}" if payload["note"]
       end
     end
 
-    # The stored actions, not a score -- what the rating comes to depends on
-    # whose config is reading it.
-    def describe(rating)
-      parts = []
-      parts << "REPORTED" if rating["reported"]
-      parts << "friend" if rating["friend"]
-      parts << "cleared" if rating["cleared"]
-      votes = rating["net_votes"].to_i
-      parts << format("votes %+d", votes) unless votes.zero?
+    def dump_attestations
+      rows = @db[:attestations].order(:pubkey).all
+      heading("ATTESTATIONS", rows.size)
 
-      parts.empty? ? "(nothing)" : parts.join(", ")
+      rows.each do |row|
+        payload = parse(row[:payload])
+        scores = payload["scores"] || {}
+        derived = payload["derived"] || {}
+
+        @out.puts format("  %-20s v%-3d %d scored, cache of %d to %d hops",
+                         named(row[:pubkey]), row[:revision], scores.size,
+                         (derived["scores"] || {}).size, derived["hops"].to_i)
+        @out.puts "      note #{clip(payload['note'])}" if payload["note"]
+        @out.puts "      scores nobody" if scores.empty?
+        scores.each { |target, score| @out.puts "      #{format('%-20s', named(target))} #{describe(score)}" }
+      end
+    end
+
+    # The published score, not the actions behind it. Those are private now --
+    # they live in the author's vault, which this tool cannot read.
+    def describe(score)
+      reputation = score["reputation"].to_s
+      trust = score["trust"].to_s
+      label = reputation == "-1" ? "REPORTED" : "reputation #{reputation}"
+
+      trust == "1" ? label : "#{label}, trust #{trust}"
     end
 
     def dump_messages
@@ -156,28 +187,23 @@ module ReputableChat
 
     def short_hash(hash) = "#{hash[0, 12]}…"
 
-    def dump_private
-      unless @db.table_exists?(:private_configs)
-        heading("PRIVATE CONFIGS", 0)
+    # Size and revision and nothing else, because there is nothing else to
+    # show. The vault is sealed with a key derived from its owner\'s seed, which
+    # the server does not have and this tool therefore cannot use. An operator
+    # reading a dump should be able to see that directly.
+    def dump_vaults
+      unless @db.table_exists?(:vaults)
+        heading("VAULTS", 0)
         return
       end
 
-      rows = @db[:private_configs].order(:pubkey).all
-      heading("PRIVATE CONFIGS", rows.size)
+      rows = @db[:vaults].order(:pubkey).all
+      heading("VAULTS", rows.size)
 
       rows.each do |row|
         payload = parse(row[:payload])
-        settings = flatten(payload["settings"] || {})
-        @out.puts format("  %-20s v%-3d voted on %d", named(row[:pubkey]), row[:revision],
-                         (payload["voted"] || []).size)
-        @out.puts "      #{settings.empty? ? 'no pinned settings' : settings.join('  ')}"
-      end
-    end
-
-    def flatten(hash, prefix = "")
-      hash.flat_map do |key, value|
-        path = prefix.empty? ? key.to_s : "#{prefix}.#{key}"
-        value.is_a?(Hash) ? flatten(value, path) : ["#{path}=#{value}"]
+        @out.puts format("  %-20s v%-3d %d bytes sealed (not readable from here)",
+                         named(row[:pubkey]), row[:revision], payload["ciphertext"].to_s.bytesize)
       end
     end
   end

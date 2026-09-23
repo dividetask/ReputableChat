@@ -45,7 +45,7 @@ export class Reputation {
     this.cap = toFixed(curve.cap);
     this.k = toFixed(config.constants.k);
     this.maxHops = Number(config.ladder.max_hops);
-    this.maxConfigs = Number(config.ladder.max_configs);
+    this.maxAccounts = Number(config.ladder.max_accounts);
     this.friendValue = toFixed(config.actions.friend.value);
     this.minRating = toFixed(config.gate.min_rating);
     this.visibleAbove = toFixed(config.display.visible_above);
@@ -133,7 +133,7 @@ export class Reputation {
   // Breadth-first, gated at every hop. Reaching a hop means every link on the
   // path was rated above the gate by the person one step closer in. Each
   // person is counted once, at their shortest distance. The walk also stops at
-  // maxConfigs -- a positive-only graph still branches, so seven hops is
+  // maxAccounts -- a positive-only graph still branches, so seven hops is
   // unbounded in practice.
   reachableDepths(viewer, graph) {
     const depths = new Map([[viewer, 0]]);
@@ -144,7 +144,7 @@ export class Reputation {
 
       for (const rater of frontier) {
         for (const [subject, rating] of Object.entries(graph.ratingsBy(rater) || {})) {
-          if (depths.size >= this.maxConfigs) return depths;
+          if (depths.size >= this.maxAccounts) return depths;
           if (depths.has(subject)) continue;
           if (this.ratingValue(rating) <= this.minRating) continue;
 
@@ -240,15 +240,20 @@ export class Reputation {
   }
 }
 
-// Holds verified configs keyed by pubkey. Only signature-checked ratings ever
-// reach here -- see app.js.
+// What everybody has published about everybody else, keyed by pubkey: one
+// entry per author, holding the scores from their attestation. The viewer's own
+// entry is the exception -- it holds their vault's actions, because it is the
+// one entry that can contain a rating nobody has published yet. `ratingValue`
+// reads either shape.
+//
+// Only signature-checked records ever reach here -- see app.js.
 export class Graph {
   constructor() {
-    this.configs = new Map();
+    this.scores = new Map();
   }
 
   add(pubkey, ratings) {
-    this.configs.set(pubkey, ratings || {});
+    this.scores.set(pubkey, ratings || {});
   }
 
   // A fixed copy of what the walk reached. Freezing only the walk is not
@@ -261,11 +266,11 @@ export class Graph {
   }
 
   has(pubkey) {
-    return this.configs.has(pubkey);
+    return this.scores.has(pubkey);
   }
 
   ratingsBy(pubkey) {
-    return this.configs.get(pubkey) || {};
+    return this.scores.get(pubkey) || {};
   }
 
   rating(pubkey, target) {

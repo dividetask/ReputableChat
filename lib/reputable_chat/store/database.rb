@@ -47,24 +47,6 @@ module ReputableChat
           Integer  :created_at, null: false
         end
 
-        @db.create_table?(:configs) do
-          String   :pubkey, primary_key: true
-          Integer  :revision, null: false
-          String   :payload, text: true, null: false
-          String   :signature, null: false
-          Integer  :updated_at, null: false
-        end
-
-        # Served only to its owner. The read path takes no pubkey at all -- it
-        # uses the session's -- so asking for someone else's is not expressible.
-        @db.create_table?(:private_configs) do
-          String   :pubkey, primary_key: true
-          Integer  :revision, null: false
-          String   :payload, text: true, null: false
-          String   :signature, null: false
-          Integer  :updated_at, null: false
-        end
-
         # `hash` is the record hash -- what everything else on the chain names
         # this message by. Unique because a repeat means the identical record
         # arrived twice, not that two records collided.
@@ -207,32 +189,6 @@ module ReputableChat
         @db[:users].insert(pubkey: pubkey, created_at: now)
       end
 
-      # --- configs ---------------------------------------------------------
-
-      def config_blob(pubkey) = @db[:configs].where(pubkey: pubkey).first
-
-      def config_blobs(pubkeys)
-        @db[:configs].where(pubkey: pubkeys.first(MAX_BATCH)).all
-      end
-
-      # Rejects a stale revision. Without this the server could serve an old
-      # copy of someone's config to hide a report, and the signature on it
-      # would still verify perfectly.
-      def store_config(pubkey:, revision:, payload:, signature:)
-        existing = config_blob(pubkey)
-        return :stale if existing && revision <= existing[:revision]
-
-        row = { pubkey: pubkey, revision: revision, payload: payload,
-                signature: signature, updated_at: now }
-
-        if existing
-          @db[:configs].where(pubkey: pubkey).update(row)
-        else
-          @db[:configs].insert(row)
-        end
-        :ok
-      end
-
       # --- identity declarations and attestations -------------------------------
       #
       # Same shape and same rules, so one pair of methods serves both rather
@@ -327,25 +283,6 @@ module ReputableChat
       def room_emotes(room, limit: 5_000)
         @db[:emotes].where(room: room).order(:id).limit(limit)
                     .select(:author, :message, :emote).all
-      end
-
-      # --- private configs ---------------------------------------------------
-
-      def private_config(pubkey) = @db[:private_configs].where(pubkey: pubkey).first
-
-      def store_private_config(pubkey:, revision:, payload:, signature:)
-        existing = private_config(pubkey)
-        return :stale if existing && revision <= existing[:revision]
-
-        row = { pubkey: pubkey, revision: revision, payload: payload,
-                signature: signature, updated_at: now }
-
-        if existing
-          @db[:private_configs].where(pubkey: pubkey).update(row)
-        else
-          @db[:private_configs].insert(row)
-        end
-        :ok
       end
 
       # --- vaults -------------------------------------------------------------

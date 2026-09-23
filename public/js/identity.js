@@ -143,8 +143,6 @@ export async function sign(identity, payload) {
 export const PURPOSE = {
   LOGIN: "reputablechat:login:v1",
   MESSAGE: "reputablechat:message:v1",
-  CONFIG: "reputablechat:config:v1",
-  PRIVATE_CONFIG: "reputablechat:private-config:v1",
   EMOTE: "reputablechat:emote:v1",
   IDENTITY: "reputablechat:identity:v1",
   ATTESTATION: "reputablechat:attestation:v1",
@@ -167,10 +165,6 @@ export function messagePayload({ author, room, seq, prev, body, ack, ts, replyTo
   return { purpose: PURPOSE.MESSAGE, author, room, seq, prev, reply_to: replyTo, ack, note, ts, body };
 }
 
-export function configPayload({ pubkey, revision, profile, ratings, ts }) {
-  return { purpose: PURPOSE.CONFIG, pubkey, revision, profile, ratings, ts };
-}
-
 export function emotePayload({ author, room, message, emote, ack, ts, note = null }) {
   return { purpose: PURPOSE.EMOTE, author, room, message, emote, ack, note, ts };
 }
@@ -179,10 +173,6 @@ export function emotePayload({ author, room, message, emote, ack, ts, note = nul
 // on a document it can otherwise make nothing of.
 export function vaultPayload({ pubkey, revision, ciphertext, iv, ts }) {
   return { purpose: PURPOSE.VAULT, pubkey, revision, ciphertext, iv, ts };
-}
-
-export function privateConfigPayload({ pubkey, revision, settings, voted, ts }) {
-  return { purpose: PURPOSE.PRIVATE_CONFIG, pubkey, revision, settings, voted, ts };
 }
 
 // `master_pubkey` and `previous_pubkey` are placeholders for key rotation and

@@ -46,13 +46,17 @@ class ParamsSpec < Minitest::Test
     assert_nil P.integer(-1)
   end
 
-  def test_ratings_shape_is_enforced
-    good = { KEY => { "friend" => true, "reported" => false, "net_votes" => 3 } }
-    assert_equal good, P.ratings(good)
+  # RULE: a signature is not a record hash. They were the same length and the
+  # same shape of text before the chain existed, so anything sending the old
+  # one has to be refused rather than quietly stored as something nothing can
+  # be matched against. Every `ack` in the system rests on this.
+  def test_a_signature_is_not_accepted_as_a_record_hash
+    assert_equal "a" * 64, P.record_hash("a" * 64)
 
-    assert_nil P.ratings({ KEY => { "friend" => "yes" } })
-    assert_nil P.ratings({ "not-a-key" => { "friend" => true, "reported" => false, "net_votes" => 0 } })
-    assert_nil P.ratings("nope")
+    assert_nil P.record_hash("a" * 86), "an Ed25519 signature is not a record hash"
+    assert_nil P.record_hash("z" * 64), "a record hash is hex"
+    assert_nil P.record_hash("a" * 63)
+    assert_nil P.record_hash(nil)
   end
 
   def test_arrays_are_bounded

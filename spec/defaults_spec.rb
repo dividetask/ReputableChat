@@ -73,17 +73,17 @@ class DefaultsSpec < Minitest::Test
     assert_nil defaults.fetch("genesis_profile_missing")
   end
 
-  # RULE: the seeded profile must not beat a config the genesis has since
-  # published. It is a fallback for having nothing, not a pin.
-  def test_the_seeded_profile_is_set_before_the_walk_fetches_configs
+  # RULE: the seeded profile must not beat an identity declaration the genesis
+  # has since published. It is a fallback for having nothing, not a pin.
+  def test_the_seeded_profile_is_set_before_the_walk_fetches_declarations
     app = File.read(File.expand_path("../public/js/app.js", __dir__), encoding: "UTF-8")
     seeded = app.index("genesisProfile(state.genesis)")
     fetched = app.index("state.profiles.set(blob.pubkey")
 
     refute_nil seeded, "the genesis profile is never seeded"
-    refute_nil fetched, "configs never populate profiles"
+    refute_nil fetched, "fetched declarations never populate profiles"
     assert_operator seeded, :<, fetched,
-                    "seed the genesis profile before fetched configs overwrite it"
+                    "seed the genesis profile before fetched declarations overwrite it"
   end
 
   # RULE: seeded once, when account creation begins, and never re-applied.
