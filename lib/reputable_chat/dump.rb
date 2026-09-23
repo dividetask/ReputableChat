@@ -115,6 +115,9 @@ module ReputableChat
         @out.puts format("  #%-4d %-20s %s%s", row[:id], named(row[:author]), at(row[:received_at]), reply)
         @out.puts "        #{clip(payload['body'])}"
         @out.puts "        ack #{ack_label(row[:ack], by_hash)}"
+        # The note exists for a person reading the chain, so the tool for
+        # reading the chain has to show it.
+        @out.puts "        note #{clip(payload['note'])}" if payload["note"]
       end
     end
 

@@ -4,6 +4,7 @@ require_relative "spec_helper"
 require_relative "genesis_fixture"
 require "reputable_chat/cryptography/record"
 require "reputable_chat/cryptography/payload"
+require "reputable_chat/params"
 require "reputable_chat/cryptography/canonical"
 require "reputable_chat/reputation/fingerprint"
 require "json"
@@ -196,6 +197,70 @@ class ChainSpec < Minitest::Test
     }
 
     shapes.each { |name, payload| assert_equal "a", payload["ack"], "#{name} lost its ack" }
+  end
+
+  # RULE: every shared record can carry a note, and it is null unless set.
+  # The slot exists from the start because adding a field later changes the
+  # canonical bytes of every record and invalidates every signature ever made.
+  def test_every_shared_record_shape_carries_a_note_slot
+    shapes.each do |name, payload|
+      assert payload.key?("note"), "#{name} has no note slot"
+      assert_nil payload["note"], "#{name} defaults its note to something other than null"
+    end
+  end
+
+  # RULE: an absent note and an empty one are the same record. Otherwise two
+  # records a reader would call identical would carry different signatures.
+  def test_an_empty_note_is_the_same_record_as_no_note
+    absent = Payload.message(author: "k", room: "r", seq: 1, prev: nil, body: "b",
+                             ack: "a", issued_at: 1)
+    empty = Payload.message(author: "k", room: "r", seq: 1, prev: nil, body: "b",
+                            ack: "a", issued_at: 1, note: ReputableChat::Params.note("   "))
+
+    assert_equal Canonical.dump(absent), Canonical.dump(empty)
+  end
+
+  # RULE: the note is inside the signed payload, so it cannot be attached to
+  # somebody else's record or edited after the fact.
+  def test_a_note_changes_the_record
+    without = Payload.message(author: "k", room: "r", seq: 1, prev: nil, body: "b",
+                              ack: "a", issued_at: 1)
+    with = Payload.message(author: "k", room: "r", seq: 1, prev: nil, body: "b",
+                           ack: "a", issued_at: 1, note: "for whoever reads this")
+
+    refute_equal Record.digest(payload: without, signature: "AAAA"),
+                 Record.digest(payload: with, signature: "AAAA")
+  end
+
+  # RULE: a note is bounded. It rides inside every record it is set on and is
+  # signed there permanently, so it cannot be a place to park a document.
+  def test_an_oversized_note_is_refused
+    assert_nil ReputableChat::Params.note("x" * (ReputableChat::Params::MAX_NOTE + 1))
+    assert ReputableChat::Params.note("x" * ReputableChat::Params::MAX_NOTE)
+  end
+
+  # Newlines and tabs are allowed -- a note is prose for a person. Everything
+  # else in the control range is not.
+  def test_a_note_may_span_lines_but_carries_no_control_characters
+    assert ReputableChat::Params.note("first line\nsecond line\twith a tab")
+    assert_nil ReputableChat::Params.note("sneaky\x00null")
+  end
+
+  def shapes
+    {
+      "user" => Payload.user(pubkey: "k", revision: 1, handle: "t", bio: "", icon: nil,
+                             ack: "a", issued_at: 1),
+      "attestation" => Payload.attestation(pubkey: "k", revision: 1, scores: {}, derived: {},
+                                           ack: "a", issued_at: 1),
+      "adjustment" => Payload.adjustment(pubkey: "k", base_revision: 1, seq: 1, target: "t",
+                                         reputation: "0.5", trust: "1", ack: "a", issued_at: 1),
+      "message" => Payload.message(author: "k", room: "r", seq: 1, prev: nil, body: "b",
+                                   ack: "a", issued_at: 1),
+      "emote" => Payload.emote(author: "k", room: "r", message: "m", emote: "+",
+                               ack: "a", issued_at: 1),
+      "release" => Payload.release(publisher: "k", revision: 1, label: "0.1.0", files: {},
+                                   notes: "", ack: "a", issued_at: 1)
+    }
   end
 
   # RULE: the private vault has no ack. Nobody else ever sees it, so there is

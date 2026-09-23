@@ -171,13 +171,13 @@ module Tim
     # is not implemented anywhere yet, and a chain that is right within one
     # room and silently skips in another is worse than an absent one.
     payload = Payload.message(author: client.pubkey, room: room, seq: seq, prev: nil,
-                              body: body, ack: ack, issued_at: ts)
+                              body: body, ack: ack, issued_at: ts, note: options[:note])
     canonical = Crypto::Canonical.dump(payload)
     signature = client.sign(payload)
 
     client.post_json("/api/room/#{room}/message",
                      { "seq" => seq, "prev" => nil, "ack" => ack, "body" => body,
-                       "ts" => ts, "signature" => signature })
+                       "note" => options[:note], "ts" => ts, "signature" => signature })
 
     # The same hash the server derived, from the same two strings.
     hash = Crypto::Record.digest(payload: canonical, signature: signature)
@@ -185,6 +185,7 @@ module Tim
     puts "  Posted to ##{room} as ##{seq}."
     puts "  Record  #{hash}"
     puts "  Ack     #{ack}#{ack == ReputableChat::Genesis.current.hash ? '  (genesis)' : ''}"
+    puts "  Note    #{options[:note]}" if options[:note]
     puts
   end
 
@@ -336,7 +337,7 @@ module Tim
   def parse(argv)
     settings = ReputableChat::ServerConfig.load
     options = { command: nil, args: [], room: ROOM, origin: settings.fetch("origin"),
-                url: nil, seed_path: ReputableChat::Operator.seed_path }
+                url: nil, seed_path: ReputableChat::Operator.seed_path, note: nil }
 
     until argv.empty?
       flag = argv.shift
@@ -345,6 +346,7 @@ module Tim
       when "--origin" then options[:origin]    = argv.shift.to_s
       when "--url"    then options[:url]       = argv.shift.to_s
       when "--seed"   then options[:seed_path] = File.expand_path(argv.shift.to_s)
+      when "--note"   then options[:note]      = ReputableChat::Params.note(argv.shift)
       when "--help", "-h" then usage
       else options[:command] ? options[:args] << flag : options[:command] = flag
       end
@@ -370,6 +372,8 @@ module Tim
 
       options:
         --room NAME         room for `post` (default: #{ROOM})
+        --note TEXT         free text signed into the record for anyone reading
+                            the raw chain; the software never reads it
         --url URL           where to reach the server (default: the origin)
         --origin ORIGIN     the origin inside the signature (default: config/server.yml)
         --seed FILE         seed file (default: config/genesis/seed)

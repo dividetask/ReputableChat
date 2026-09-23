@@ -292,7 +292,7 @@ module ReputableChat
 
       payload = Cryptography::Payload.user(
         pubkey: pubkey, revision: revision, handle: handle, bio: bio, icon: icon,
-        ack: ack, issued_at: ts
+        ack: ack, issued_at: ts, note: optional_note(r)
       )
       store_record(r, :store_user_record, pubkey, revision, payload, sig)
     end
@@ -311,7 +311,7 @@ module ReputableChat
 
       payload = Cryptography::Payload.attestation(
         pubkey: pubkey, revision: revision, scores: scores, derived: derived,
-        ack: ack, issued_at: ts
+        ack: ack, issued_at: ts, note: optional_note(r)
       )
       store_record(r, :store_attestation, pubkey, revision, payload, sig)
     end
@@ -348,7 +348,7 @@ module ReputableChat
 
       payload = Cryptography::Payload.adjustment(
         pubkey: pubkey, base_revision: base, seq: seq, target: target,
-        reputation: score, trust: trust, ack: ack, issued_at: ts
+        reputation: score, trust: trust, ack: ack, issued_at: ts, note: optional_note(r)
       )
       verify!(r, pubkey, sig, payload)
 
@@ -398,7 +398,7 @@ module ReputableChat
 
       payload = Cryptography::Payload.message(
         author: author, room: room, seq: seq, prev: prev, body: body,
-        ack: ack, issued_at: ts, reply_to: reply
+        ack: ack, issued_at: ts, reply_to: reply, note: optional_note(r)
       )
       verify!(r, author, sig, payload)
 
@@ -423,7 +423,7 @@ module ReputableChat
 
       payload = Cryptography::Payload.emote(
         author: author, room: room, message: message, emote: choice,
-        ack: ack, issued_at: ts
+        ack: ack, issued_at: ts, note: optional_note(r)
       )
       verify!(r, author, sig, payload)
 
@@ -464,6 +464,14 @@ module ReputableChat
       return nil if r.params[field].nil?
 
       Params.record_hash(r.params[field]) or bad_request(r, "bad #{field}")
+    end
+
+    # Same reasoning: a note too long or full of control characters is a
+    # rejection, not something to quietly drop out of a signed payload.
+    def optional_note(r)
+      return nil if r.params["note"].nil? || r.params["note"].to_s.strip.empty?
+
+      Params.note(r.params["note"]) or bad_request(r, "bad note")
     end
 
     # Signed blobs go out exactly as they came in. The client verifies them

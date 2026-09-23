@@ -36,6 +36,36 @@ therefore the same hash and the same signature, every time, on any machine. The
 moment that stops being true the whole structure stops verifying, which is why
 `spec/canonical_parity_spec.rb` exists and why floats are refused outright.
 
+## Notes
+
+Every chain record carries a `note`: free text, null unless set, which the
+software never reads.
+
+It is there because a chain is browsable. Somebody reading the raw records — an
+archivist, an auditor, a person checking what was signed when — gets a place
+where the author can speak to them directly, rather than only to whatever
+client happened to render the record. Bitcoin's genesis block has a newspaper
+headline in it for the same reason.
+
+Three properties make it safe to have:
+
+- **It is signed.** A note sits inside the payload, so nobody can attach one to
+  somebody else's record, strip one, or edit one afterwards.
+- **Nothing branches on it.** No code reads it, so nothing can be smuggled
+  through it by writing something that reads like a directive. It is inert by
+  construction rather than by policy.
+- **It is bounded** (2000 bytes) and **normalized**: an absent note and an
+  empty one produce identical bytes, so two records a reader would call the
+  same cannot carry different signatures.
+
+Anything that renders a note treats it as text and never as markup, like every
+other string somebody else wrote. That rule is not special to notes — see the
+`textContent` line in CLAUDE.md — but a note is the field most likely to be
+displayed by a tool nobody thought about when it was written.
+
+A note is permanent and cannot be retracted, which is worth saying twice: it is
+signed into a record that other records will acknowledge.
+
 ## Record hashes
 
 `ack` points at a hash, and `reply_to` and an emote's `message` field now do

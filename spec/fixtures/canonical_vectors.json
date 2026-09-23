@@ -135,5 +135,17 @@
     "emote": "👍",
     "ack": "2222222222222222222222222222222222222222222222222222222222222222",
     "ts": 9
+  },
+  {
+    "purpose": "reputablechat:message:v1",
+    "author": "k",
+    "room": "general",
+    "seq": 5,
+    "prev": null,
+    "reply_to": null,
+    "ack": "3333333333333333333333333333333333333333333333333333333333333333",
+    "note": "two lines\nand a\ttab, plus é中🚀 and \"quotes\"",
+    "ts": 21,
+    "body": "a message with a note"
   }
 ]

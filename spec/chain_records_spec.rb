@@ -287,6 +287,48 @@ class ChainRecordsSpec < Minitest::Test
     assert_equal 400, last_response.status
   end
 
+  # --- notes --------------------------------------------------------------
+
+  # RULE: a note is signed with everything else, so the server cannot add one,
+  # strip one, or swap one out.
+  def test_refuses_a_user_record_whose_note_was_altered
+    put_json "/api/user", user_body.merge("note" => "not what was signed")
+
+    assert_equal 400, last_response.status
+  end
+
+  def test_stores_a_note_and_serves_it_back
+    ts = Time.now.to_i
+    note = "posted from a terminal, for whoever reads the raw chain"
+    payload = Payload.user(pubkey: @pubkey, revision: 1, handle: "alice", bio: "",
+                           icon: nil, ack: ack, issued_at: ts, note: note)
+
+    put_json "/api/user",
+             { "revision" => 1, "handle" => "alice", "bio" => "", "icon" => nil,
+               "ack" => ack, "note" => note, "ts" => ts, "signature" => sign(payload) }
+    assert_equal 200, last_response.status
+
+    get "/api/user/#{@pubkey}"
+
+    assert_equal note, JSON.parse(json["user_record"]["payload"])["note"]
+  end
+
+  # RULE: a malformed note is a rejection, not something to quietly drop. A
+  # dropped one would store a record whose signature covers text the server
+  # never saw, so nothing would verify afterwards.
+  def test_refuses_an_oversized_note
+    ts = Time.now.to_i
+    note = "x" * (ReputableChat::Params::MAX_NOTE + 1)
+    payload = Payload.user(pubkey: @pubkey, revision: 1, handle: "alice", bio: "",
+                           icon: nil, ack: ack, issued_at: ts, note: note)
+
+    put_json "/api/user",
+             { "revision" => 1, "handle" => "alice", "bio" => "", "icon" => nil,
+               "ack" => ack, "note" => note, "ts" => ts, "signature" => sign(payload) }
+
+    assert_equal 400, last_response.status
+  end
+
   # --- authorization ------------------------------------------------------
 
   # RULE: a record is published by its author and nobody else. The routes take

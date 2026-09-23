@@ -104,6 +104,7 @@ module ReputableChat
 
     # --- chain records ------------------------------------------------------
 
+    MAX_NOTE    = 2_000
     MAX_HANDLE  = 64
     MAX_BIO     = 280
     MAX_SCORES  = 10_000
@@ -127,6 +128,17 @@ module ReputableChat
     end
 
     def handle(value) = string(value, max: MAX_HANDLE)
+
+    # Free text for a person reading the raw chain, which the software never
+    # interprets. Bounded, because it rides along inside every record it is set
+    # on and is signed there permanently. Absent and empty both mean nil, so
+    # that an empty string and no note cannot produce two different signatures
+    # for what a reader would call the same record.
+    def note(value)
+      return nil if value.nil? || value.to_s.strip.empty?
+
+      string(value, max: MAX_NOTE)
+    end
 
     def bio(value)
       return "" if value.nil? || value.to_s.empty?

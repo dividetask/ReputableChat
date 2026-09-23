@@ -125,14 +125,17 @@ every old signature stops verifying against the new shape.
 | purpose | fields |
 |---|---|
 | `reputablechat:login:v1` | purpose, pubkey, nonce, origin, ts |
-| `reputablechat:message:v1` | purpose, author, room, seq, prev, reply_to, ack, ts, body |
-| `reputablechat:emote:v1` | purpose, author, room, message, emote, ack, ts |
-| `reputablechat:user:v1` | purpose, pubkey, revision, handle, bio, icon, master_pubkey, previous_pubkey, ack, ts |
-| `reputablechat:attestation:v1` | purpose, pubkey, revision, scores, derived, ack, ts |
-| `reputablechat:adjustment:v1` | purpose, pubkey, base_revision, seq, target, reputation, trust, ack, ts |
-| `reputablechat:release:v1` | purpose, publisher, revision, label, files, notes, ack, ts |
+| `reputablechat:message:v1` | purpose, author, room, seq, prev, reply_to, ack, note, ts, body |
+| `reputablechat:emote:v1` | purpose, author, room, message, emote, ack, note, ts |
+| `reputablechat:user:v1` | purpose, pubkey, revision, handle, bio, icon, master_pubkey, previous_pubkey, ack, note, ts |
+| `reputablechat:attestation:v1` | purpose, pubkey, revision, scores, derived, ack, note, ts |
+| `reputablechat:adjustment:v1` | purpose, pubkey, base_revision, seq, target, reputation, trust, ack, note, ts |
+| `reputablechat:release:v1` | purpose, publisher, revision, label, files, notes, ack, note, ts |
 | `reputablechat:config:v1` | superseded by `user` + `attestation` |
 | `reputablechat:private-config:v1` | purpose, pubkey, revision, settings, voted, ts |
+
+Every chain record also carries `note` — free text the software never reads,
+signed for whoever browses the raw chain. See **Notes** in [chain.md](chain.md).
 
 Everything but `login` and `private-config` carries `ack`, the hash of the last
 record its author had seen. That is what makes these a chain rather than a pile

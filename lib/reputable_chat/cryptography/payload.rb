@@ -9,6 +9,17 @@ module ReputableChat
     # Every shape but `login` and `private_config` carries `ack`: the hash of
     # the last record its author had seen. That is what makes the set of
     # signatures a chain rather than a pile. See docs/project/chain.md.
+    #
+    # They also carry `note`: free text the software never reads, for a person
+    # browsing the raw chain. It is signed like everything else, so it cannot be
+    # added or altered after the fact, and it is deliberately inert -- nothing
+    # branches on it, so nothing can be smuggled through it by writing something
+    # that reads like a directive. Anything that renders it treats it as text,
+    # never markup.
+    #
+    # Always present, null when unused. Adding a field later changes the
+    # canonical bytes of every record and invalidates every signature ever made,
+    # so the slot exists from the start.
     module Payload
       LOGIN          = "reputablechat:login:v1"
       MESSAGE        = "reputablechat:message:v1"
@@ -40,7 +51,7 @@ module ReputableChat
       # start because adding a field later changes the canonical bytes of every
       # record, which invalidates every signature ever made.
       def user(pubkey:, revision:, handle:, bio:, icon:, ack:, issued_at:,
-               master_pubkey: nil, previous_pubkey: nil)
+               master_pubkey: nil, previous_pubkey: nil, note: nil)
         {
           "purpose"         => USER,
           "pubkey"          => pubkey,
@@ -51,6 +62,7 @@ module ReputableChat
           "master_pubkey"   => master_pubkey,
           "previous_pubkey" => previous_pubkey,
           "ack"             => ack,
+          "note"            => note,
           "ts"              => issued_at.to_i
         }
       end
@@ -68,7 +80,7 @@ module ReputableChat
       # that hash a reader cannot tell whether the numbers mean anything to
       # them, and taking them anyway would mean silently adopting a stranger's
       # settings.
-      def attestation(pubkey:, revision:, scores:, derived:, ack:, issued_at:)
+      def attestation(pubkey:, revision:, scores:, derived:, ack:, issued_at:, note: nil)
         {
           "purpose" => ATTESTATION,
           "pubkey"  => pubkey,
@@ -76,6 +88,7 @@ module ReputableChat
           "scores"  => scores,
           "derived" => derived,
           "ack"     => ack,
+          "note"    => note,
           "ts"      => issued_at.to_i
         }
       end
@@ -87,7 +100,8 @@ module ReputableChat
       # `base_revision` names the attestation this amends and `seq` orders it
       # within that run, both inside the signature, so the server cannot
       # reorder a run or replay one against a later snapshot.
-      def adjustment(pubkey:, base_revision:, seq:, target:, reputation:, trust:, ack:, issued_at:)
+      def adjustment(pubkey:, base_revision:, seq:, target:, reputation:, trust:, ack:,
+                     issued_at:, note: nil)
         {
           "purpose"      => ADJUSTMENT,
           "pubkey"       => pubkey,
@@ -97,6 +111,7 @@ module ReputableChat
           "reputation"   => reputation,
           "trust"        => trust,
           "ack"          => ack,
+          "note"         => note,
           "ts"           => issued_at.to_i
         }
       end
@@ -108,7 +123,7 @@ module ReputableChat
       #
       # `publisher` is carried so a per-user trusted-developer setting can
       # arrive later without re-signing anything. Nothing consults it yet.
-      def release(publisher:, revision:, label:, files:, notes:, ack:, issued_at:)
+      def release(publisher:, revision:, label:, files:, notes:, ack:, issued_at:, note: nil)
         {
           "purpose"   => RELEASE,
           "publisher" => publisher,
@@ -117,6 +132,7 @@ module ReputableChat
           "files"     => files,
           "notes"     => notes,
           "ack"       => ack,
+          "note"      => note,
           "ts"        => issued_at.to_i
         }
       end
@@ -132,7 +148,7 @@ module ReputableChat
       # `reply_to` is the record hash of the message being replied to, or nil.
       # Always present so the canonical form does not change shape between a
       # reply and an ordinary message.
-      def message(author:, room:, seq:, prev:, body:, ack:, issued_at:, reply_to: nil)
+      def message(author:, room:, seq:, prev:, body:, ack:, issued_at:, reply_to: nil, note: nil)
         {
           "purpose"  => MESSAGE,
           "author"   => author,
@@ -141,6 +157,7 @@ module ReputableChat
           "prev"     => prev,
           "reply_to" => reply_to,
           "ack"      => ack,
+          "note"     => note,
           "ts"       => issued_at.to_i,
           "body"     => body
         }
@@ -153,7 +170,7 @@ module ReputableChat
       # An emote record is also its own attestation adjustment -- it names the
       # author, the target message and the reaction, which is everything needed
       # to move the author's score for that message's author.
-      def emote(author:, room:, message:, emote:, ack:, issued_at:)
+      def emote(author:, room:, message:, emote:, ack:, issued_at:, note: nil)
         {
           "purpose" => EMOTE,
           "author"  => author,
@@ -161,6 +178,7 @@ module ReputableChat
           "message" => message,
           "emote"   => emote,
           "ack"     => ack,
+          "note"    => note,
           "ts"      => issued_at.to_i
         }
       end
