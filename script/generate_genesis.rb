@@ -3,16 +3,22 @@
 # Generates the genesis user record -- Tim's -- and writes it to
 # config/genesis/tim.json for committing.
 #
-#   bundle exec rake genesis
-#   bundle exec ruby script/generate_genesis.rb --handle Tim --words 12
+#   bundle exec rake genesis                      # development
+#   RACK_ENV=production bundle exec rake genesis   # production
+#   bundle exec ruby script/generate_genesis.rb --production --handle Tim
 #
-# Writes two files: the genesis record, which is committed, and the seed, which
-# is gitignored and 0600. Nothing secret is printed -- a terminal scrollback,
-# a CI log and a screen share are all places a seed should not turn up.
+# Writes two files: the genesis record and the seed beside it.
 #
-# There is no recovery. Lose the seed file and the genesis identity is gone,
-# and with it the ability to publish a release anyone will run, so back it up
-# somewhere outside the checkout.
+# Which pair depends on the environment. The DEVELOPMENT seed is committed and
+# therefore public -- anyone who has cloned the repository owns that identity,
+# which is the point: a fresh clone can run the genesis account locally without
+# being handed a secret. The PRODUCTION seed is gitignored, 0600, and never
+# printed, because a terminal scrollback, a CI log and a screen share are all
+# places it should not turn up.
+#
+# There is no recovery for the production one. Lose it and the genesis identity
+# is gone, and with it the ability to publish a release anyone will run, so
+# back it up somewhere outside the checkout.
 #
 # Refuses to overwrite either file, because a second genesis would orphan every
 # record in the chain that acknowledges the first.
@@ -30,6 +36,7 @@ require "reputable_chat/cryptography/canonical"
 require "reputable_chat/cryptography/payload"
 require "reputable_chat/cryptography/record"
 require "reputable_chat/cryptography/signature"
+require "reputable_chat/environment"
 require "reputable_chat/genesis"
 require "reputable_chat/operator"
 
@@ -121,19 +128,27 @@ module GenerateGenesis
   # record hash is what every other record will acknowledge, and the public key
   # is the identity itself. The seed is never printed.
   def report(options, pubkey, hash)
+    production = options[:environment] == ReputableChat::Environment::PRODUCTION
+
     puts
-    puts "  Genesis created."
+    puts "  Genesis created for #{options[:environment]}."
     puts
     puts "  Record       #{relative(options[:path])}"
-    puts "  Seed         #{relative(options[:seed_path])}  (0600, gitignored, never printed)"
+    puts "  Seed         #{relative(options[:seed_path])}#{production ? '  (0600, gitignored, never printed)' : '  (0600, committed on purpose -- this identity is public)'}"
     puts "  Public key   #{pubkey}"
     puts "  Record hash  #{hash}"
     puts
-    puts "  Commit the record: every client needs the same genesis hash before"
-    puts "  it has fetched anything, so it cannot be downloaded."
-    puts
-    puts "  Back the seed up somewhere outside this checkout. It is the whole"
-    puts "  identity and there is no recovery."
+
+    if production
+      puts "  Commit the record, never the seed. Back the seed up somewhere"
+      puts "  outside this checkout: it is the whole identity and there is no"
+      puts "  recovery."
+    else
+      puts "  Commit both. The development identity is meant to be shared, so"
+      puts "  that a fresh clone can sign as the genesis account without being"
+      puts "  handed a secret. Never point a production deployment at it --"
+      puts "  the server refuses to boot if you do."
+    end
     puts
   end
 
@@ -144,11 +159,11 @@ module GenerateGenesis
   DEFAULT_BIO = "Tim is legally distinct from, and no relation to, Tom"
 
   DEFAULTS = { handle: "Tim", bio: DEFAULT_BIO, words: 12,
-               path: ReputableChat::Genesis::PATH,
-               seed_path: ReputableChat::Operator::SEED_PATH }.freeze
+               environment: nil, path: nil, seed_path: nil }.freeze
 
   def parse(argv)
     options = DEFAULTS.dup
+    environment = nil
 
     until argv.empty?
       flag = argv.shift
@@ -158,10 +173,18 @@ module GenerateGenesis
       when "--words"  then options[:words]  = Integer(argv.shift)
       when "--path"   then options[:path]   = File.expand_path(argv.shift.to_s)
       when "--seed"   then options[:seed_path] = File.expand_path(argv.shift.to_s)
+      when "--production"  then environment = ReputableChat::Environment::PRODUCTION
+      when "--development" then environment = ReputableChat::Environment::DEVELOPMENT
       when "--help", "-h" then usage
       else abort "unknown option: #{flag}\n\n#{usage_text}"
       end
     end
+
+    # An explicit flag wins over RACK_ENV, so a production genesis can be cut
+    # from a development shell without exporting anything.
+    options[:environment] = environment || ReputableChat::Environment.name
+    options[:path] ||= ReputableChat::Genesis.path(options[:environment])
+    options[:seed_path] ||= ReputableChat::Operator.path_for(options[:environment])
 
     validate_options!(options)
     options
@@ -209,8 +232,12 @@ module GenerateGenesis
                         (default: "#{DEFAULT_BIO}")
         --words N       seed length; more than the 8-word minimum, since this
                         key signs releases (default: 12)
-        --path FILE     where to write the record (default: config/genesis/tim.json)
-        --seed FILE     where to write the seed (default: config/genesis/seed)
+        --production    cut the production genesis; its seed is never
+                        committed and never printed
+        --development   cut the development genesis (the default); its seed
+                        is committed on purpose so a clone can use it
+        --path FILE     where to write the record
+        --seed FILE     where to write the seed
     TEXT
   end
 end

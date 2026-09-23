@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "json"
+require_relative "environment"
 require_relative "cryptography/payload"
 require_relative "cryptography/record"
 require_relative "cryptography/signature"
@@ -15,15 +16,31 @@ module ReputableChat
   # download from the server is not a genesis.
   #
   # Generated once by script/generate_genesis.rb and committed.
+  #
+  # There are two of them, because a developer needs to be able to sign as the
+  # genesis account and a production operator needs nobody else to be able to.
+  # Development's seed is committed and therefore public: anyone who has cloned
+  # the repository owns that identity, which is exactly what makes a fresh
+  # clone useful. Production's seed is never committed.
   class Genesis
-    PATH = File.expand_path("../../config/genesis/tim.json", __dir__)
+    DIRECTORY = File.expand_path("../../config/genesis", __dir__)
 
     class Missing < StandardError; end
     class Corrupt < StandardError; end
+    class WrongEnvironment < StandardError; end
+
+    # Named for the environment rather than for the handle, so which one is
+    # loaded is obvious from the filename rather than from remembering which
+    # person's name meant which deployment.
+    def self.path(environment = Environment.name)
+      File.join(DIRECTORY, "#{environment}.json")
+    end
+
+    PATH = path(Environment::DEVELOPMENT)
 
     attr_reader :pubkey, :payload, :signature, :hash
 
-    def self.load(path: PATH)
+    def self.load(path: self.path)
       raise Missing, missing_message(path) unless File.exist?(path)
 
       new(JSON.parse(File.read(path)), path: path)
@@ -32,16 +49,40 @@ module ReputableChat
     end
 
     # Memoized, since it never changes while a process is running.
-    def self.current = @current ||= load
+    def self.current = @current ||= refuse_development_in_production(load)
+
+    # The failure this exists to prevent: a production deployment running the
+    # published development identity, where every person who has cloned the
+    # repository can sign releases and announcements as the genesis account.
+    #
+    # Checked by comparing keys rather than by trusting the filename, because
+    # the realistic mistake is copying the development record into place, not
+    # misnaming it.
+    def self.refuse_development_in_production(genesis)
+      return genesis unless Environment.production?
+
+      development = begin
+        load(path: path(Environment::DEVELOPMENT))
+      rescue Missing, Corrupt
+        nil
+      end
+      return genesis unless development && development.pubkey == genesis.pubkey
+
+      raise WrongEnvironment,
+            "this is the development genesis, whose seed is committed to the repository and " \
+            "therefore public. Generate a production one with " \
+            "`RACK_ENV=production bundle exec rake genesis` and keep its seed out of git."
+    end
 
     def self.reset! = @current = nil
 
     def self.missing_message(path)
-      "no genesis record at #{path}. Generate one with `bundle exec rake genesis` " \
+      "no genesis record at #{path}. Generate one with " \
+        "`#{Environment.production? ? 'RACK_ENV=production ' : ''}bundle exec rake genesis` " \
         "and commit it -- nothing can be acknowledged until it exists."
     end
 
-    def initialize(record, path: PATH)
+    def initialize(record, path: Genesis.path)
       @pubkey    = record["pubkey"]
       @payload   = record["payload"]
       @signature = record["signature"]
