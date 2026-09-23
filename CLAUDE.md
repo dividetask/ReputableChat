@@ -22,14 +22,6 @@
   `/opt/rbenv/versions/3.3.6/bin`, which is **not** on `PATH` by default — use
   `bundle exec`, or export that directory first.
 - Linux, vim. Node 22 is available and is used by the parity spec.
-- `data/` holds the real database. It is gitignored, so nothing in git protects
-  it and nothing in git restores it. When a change needs a running server to
-  check, point it at a throwaway instead of clearing `data/`:
-
-  ```bash
-  DATABASE_URL=sqlite://tmp/scratch.db bundle exec puma -p 9294
-  bundle exec ruby script/tim.rb status --url http://localhost:9294
-  ```
 
 ```bash
 bundle exec rake spec       # full suite
