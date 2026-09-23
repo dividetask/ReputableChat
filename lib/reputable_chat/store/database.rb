@@ -121,6 +121,16 @@ module ReputableChat
           unique %i[pubkey base_revision seq]
         end
 
+        # Opaque to the server by design. It stores the blob, rejects a
+        # rollback by revision, and serves it back to nobody but its owner.
+        @db.create_table?(:vaults) do
+          String   :pubkey, primary_key: true
+          Integer  :revision, null: false
+          String   :payload, text: true, null: false
+          String   :signature, null: false
+          Integer  :updated_at, null: false
+        end
+
         @db.create_table?(:messages) do
           primary_key :id
           String   :hash, null: false, unique: true
@@ -335,6 +345,25 @@ module ReputableChat
         else
           @db[:private_configs].insert(row)
         end
+        :ok
+      end
+
+      # --- vaults -------------------------------------------------------------
+      #
+      # The read path takes no pubkey -- the route uses the session's -- so
+      # asking for somebody else's is not expressible rather than being a check
+      # that has to stay correct.
+
+      def vault(pubkey) = @db[:vaults].where(pubkey: pubkey).first
+
+      def store_vault(pubkey:, revision:, payload:, signature:)
+        existing = vault(pubkey)
+        return :stale if existing && revision <= existing[:revision]
+
+        row = { pubkey: pubkey, revision: revision, payload: payload,
+                signature: signature, updated_at: now }
+
+        existing ? @db[:vaults].where(pubkey: pubkey).update(row) : @db[:vaults].insert(row)
         :ok
       end
 

@@ -82,6 +82,9 @@ sees it. [identity.md](identity.md)
 **Private config** (`reputablechat:private-config:v1`) — the vault's
 predecessor, signed but not encrypted. Being replaced.
 
+**Sealed** — the vault's ciphertext, as the server sees it. Named apart from
+"encrypted" because the server never handles a key, only a blob.
+
 **Config** (`reputablechat:config:v1`) — retired. Split into an identity
 declaration and an attestation.
 

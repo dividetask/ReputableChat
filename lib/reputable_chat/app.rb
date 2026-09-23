@@ -110,6 +110,13 @@ module ReputableChat
         r.post("register")  { register(r) }
         r.post("image")     { upload_image(r) }
 
+        # Takes no pubkey on either verb: it uses the session's, so asking for
+        # somebody else's vault is not expressible through the API.
+        r.on "vault" do
+          r.get { own_vault(r) }
+          r.put { put_vault(r) }
+        end
+
         r.on "private-config" do
           r.get { own_private_config(r) }
           r.put { store_private_config(r) }
@@ -233,6 +240,40 @@ module ReputableChat
     # a check that has to stay correct.
     def own_private_config(r)
       { "config" => present_config(store.private_config(current_pubkey(r))) }
+    end
+
+    def own_vault(r)
+      row = store.vault(current_pubkey(r))
+      return { "vault" => nil } unless row
+
+      { "vault" => { "revision" => row[:revision], "payload" => row[:payload],
+                     "signature" => row[:signature] } }
+    end
+
+    # The server verifies the signature over the ciphertext and rejects a
+    # rollback, and that is everything it can do. It cannot read the contents,
+    # so it cannot check their shape -- the byte bound on the ciphertext is the
+    # only limit it has.
+    def put_vault(r)
+      pubkey     = current_pubkey(r)
+      revision   = Params.integer(r.params["revision"], min: 1) or bad_request(r, "bad revision")
+      ciphertext = Params.sealed(r.params["ciphertext"])         or bad_request(r, "bad ciphertext")
+      iv         = Params.iv(r.params["iv"])                     or bad_request(r, "bad iv")
+      sig        = Params.signature(r.params["signature"])       or bad_request(r, "bad signature")
+      ts         = Params.integer(r.params["ts"])                or bad_request(r, "bad timestamp")
+
+      payload = Cryptography::Payload.vault(
+        pubkey: pubkey, revision: revision, ciphertext: ciphertext, iv: iv, issued_at: ts
+      )
+      verify!(r, pubkey, sig, payload)
+
+      result = store.store_vault(
+        pubkey: pubkey, revision: revision,
+        payload: Cryptography::Canonical.dump(payload), signature: sig
+      )
+      r.halt(409, { "error" => "revision is not newer than the stored one" }) if result == :stale
+
+      { "stored" => true, "revision" => revision }
     end
 
     def store_private_config(r)

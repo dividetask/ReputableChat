@@ -31,6 +31,7 @@ module ReputableChat
       ADJUSTMENT     = "reputablechat:adjustment:v1"
       RELEASE        = "reputablechat:release:v1"
       NOTICE         = "reputablechat:notice:v1"
+      VAULT          = "reputablechat:vault:v1"
 
       module_function
 
@@ -211,6 +212,32 @@ module ReputableChat
           "ack"     => ack,
           "note"    => note,
           "ts"      => issued_at.to_i
+        }
+      end
+
+      # The owner's private document: settings, which comments have been emoted
+      # on, and the friend and report lists. Encrypted, then signed.
+      #
+      # Encrypted under a key derived from the seed under `seed.kdf.vault_domain`
+      # -- not under the identity key, because Ed25519 cannot encrypt and the
+      # signing key is a non-extractable WebCrypto key whose bytes can never be
+      # read back. See docs/project/identity.md.
+      #
+      # `revision` is OUTSIDE the ciphertext on purpose. The server has to be
+      # able to reject a rollback, and that means reading one number from a
+      # document it can otherwise make nothing of. It leaks roughly how many
+      # times the owner has saved, and nothing else.
+      #
+      # No `ack` and no `note`: nobody else ever sees this, so there is nothing
+      # to anchor it to and nobody to address.
+      def vault(pubkey:, revision:, ciphertext:, iv:, issued_at:)
+        {
+          "purpose"    => VAULT,
+          "pubkey"     => pubkey,
+          "revision"   => revision.to_i,
+          "ciphertext" => ciphertext,
+          "iv"         => iv,
+          "ts"         => issued_at.to_i
         }
       end
 

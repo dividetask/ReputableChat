@@ -127,6 +127,23 @@ module ReputableChat
       number.between?(BigDecimal(min.to_s), BigDecimal(max.to_s)) ? value : nil
     end
 
+    # The vault's ciphertext. The server cannot check the shape of what is
+    # inside, so a byte bound is the only control it has -- and it is what
+    # bounds the voted list in practice, since that is the part of a vault that
+    # grows without limit.
+    MAX_VAULT = 1_048_576
+
+    def sealed(value, max: MAX_VAULT)
+      return nil unless value.is_a?(String)
+      return nil unless value.match?(/\A[A-Za-z0-9_-]+\z/)
+
+      value.bytesize.between?(1, max) ? value : nil
+    end
+
+    # AES-GCM nonce: 96 bits, which is what WebCrypto expects and what the
+    # counter construction is safe at.
+    def iv(value) = base64url(value, bytes: 12)
+
     def handle(value) = string(value, max: MAX_HANDLE)
 
     # Free text for a person reading the raw chain, which the software never

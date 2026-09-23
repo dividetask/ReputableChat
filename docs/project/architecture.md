@@ -133,7 +133,8 @@ every old signature stops verifying against the new shape.
 | `reputablechat:release:v1` | purpose, publisher, revision, label, files, notes, ack, note, ts |
 | `reputablechat:notice:v1` | purpose, publisher, revision, kind, title, body, supersedes, ack, note, ts |
 | `reputablechat:config:v1` | superseded by `identity` + `attestation` |
-| `reputablechat:private-config:v1` | purpose, pubkey, revision, settings, voted, ts |
+| `reputablechat:vault:v1` | purpose, pubkey, revision, ciphertext, iv, ts |
+| `reputablechat:private-config:v1` | superseded by `vault` |
 
 Every chain record also carries `note` — free text the software never reads,
 signed for whoever browses the raw chain. See **Notes** in [chain.md](chain.md).

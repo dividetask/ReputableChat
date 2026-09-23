@@ -94,6 +94,27 @@ server can neither read it nor alter it undetected.
 Versioned for the same reason `seed.kdf.domain` is: changing it strands every
 existing vault.
 
+## What the server can still do with a vault it cannot read
+
+Three things, and only three.
+
+It can **verify the signature** over the ciphertext, which is what proves the
+blob came back the way it went in. It can **reject a rollback**, because
+`revision` sits outside the ciphertext — the one number it reads from a document
+it can otherwise make nothing of, leaking roughly how many times you have saved
+and nothing else. And it can **refuse an oversized blob**, which is the only
+limit left once shape checking is impossible: it cannot count your friends, so
+it counts your bytes.
+
+What it gives up is real. The old private config let the server check that
+`settings` was a bounded tree of scalars; an encrypted one cannot be checked at
+all, so the client has to be as careful about what it decrypts as it would be
+about anything else arriving over the wire.
+
+The read route takes **no pubkey** — it uses the session's — so serving somebody
+else's vault is not expressible through the API rather than being a check that
+has to stay correct.
+
 ## Login
 
 Challenge–response:
