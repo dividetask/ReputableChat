@@ -15,5 +15,9 @@ ReputableChat::App.origin = settings.fetch("origin")
 # truncated would otherwise put every client on a slightly different chain and
 # show up only as signatures failing for no visible reason.
 ReputableChat::App.genesis = ReputableChat::Genesis.current
+# The genesis avatar is committed rather than uploaded, because the record
+# naming it is read before any client has fetched anything. Adopting it into
+# the image store keeps one serving path for every image.
+ReputableChat::App.genesis.install_icon(ReputableChat::App.images)
 
 run ReputableChat::App.freeze.app

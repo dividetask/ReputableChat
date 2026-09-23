@@ -10,6 +10,8 @@ require "reputable_chat/reputation/fingerprint"
 require "json"
 require "ed25519"
 require "tmpdir"
+require "digest"
+require "reputable_chat/store/images"
 
 # The rules that make a pile of signatures into a chain.
 class ChainSpec < Minitest::Test
@@ -142,6 +144,70 @@ class ChainSpec < Minitest::Test
       assert_match(/older payload shape/, error.message)
       assert_match(/revision/, error.message)
     end
+  end
+
+  # --- the genesis avatar -------------------------------------------------
+
+  # A one-pixel PNG, so the rules can be checked without a fixture file.
+  TINY_PNG = [
+    "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000a",
+    "49444154789c6360000002000100ffff03000006000557bfabd40000000049454e44ae426082"
+  ].join.freeze
+
+  def a_png = [TINY_PNG].pack("H*")
+
+  # RULE: the genesis avatar's name is the hash of the committed bytes, like
+  # every other image. It is committed rather than uploaded only because the
+  # record naming it is read before any client has fetched anything, and the
+  # image store is not in the repository.
+  def test_installing_the_genesis_icon_yields_the_name_it_declares
+    Dir.mktmpdir do |dir|
+      images = ReputableChat::Store::Images.new(File.join(dir, "images"))
+      name = images.store(a_png)
+      path = File.join(dir, "development.png")
+      File.binwrite(path, a_png)
+
+      genesis = GenesisFixture.build(icon: name)
+
+      assert_equal name, genesis.install_icon(images, path: path)
+      assert_equal a_png, images.read(name)
+    end
+  end
+
+  # RULE: a committed image that is not the one the declaration was signed over
+  # is refused. Left alone it would show up as a broken avatar and nothing
+  # else, which is the quietest possible way for a signed claim to be wrong.
+  def test_an_icon_that_does_not_match_the_declaration_is_refused
+    Dir.mktmpdir do |dir|
+      images = ReputableChat::Store::Images.new(File.join(dir, "images"))
+      path = File.join(dir, "development.png")
+      File.binwrite(path, a_png)
+
+      genesis = GenesisFixture.build(icon: "#{'0' * 64}.png")
+
+      error = assert_raises(ReputableChat::Genesis::Corrupt) { genesis.install_icon(images, path: path) }
+      assert_match(/declares/, error.message)
+    end
+  end
+
+  def test_a_genesis_without_an_icon_installs_nothing
+    Dir.mktmpdir do |dir|
+      images = ReputableChat::Store::Images.new(File.join(dir, "images"))
+
+      assert_nil GenesisFixture.build.install_icon(images, path: nil)
+    end
+  end
+
+  # RULE: the committed avatar is found by environment, the same way the record
+  # and the seed are.
+  def test_the_committed_development_icon_matches_its_declaration
+    path = ReputableChat::Genesis.icon_path("development")
+    skip "no development icon committed" unless path
+
+    genesis = ReputableChat::Genesis.load(path: ReputableChat::Genesis.path("development"))
+    expected = "#{Digest::SHA256.hexdigest(File.binread(path))}#{File.extname(path)}"
+
+    assert_equal expected, genesis.icon
   end
 
   def test_a_missing_genesis_says_how_to_make_one

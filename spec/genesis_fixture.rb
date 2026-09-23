@@ -20,12 +20,12 @@ module GenesisFixture
 
   module_function
 
-  def build(handle: "Tim")
+  def build(handle: "Tim", icon: nil)
     signing = Ed25519::SigningKey.generate
     pubkey  = Crypto::Signature.encode(signing.verify_key.to_bytes)
 
     payload = Crypto::Payload.identity(
-      pubkey: pubkey, revision: 1, handle: handle, bio: "", icon: nil,
+      pubkey: pubkey, revision: 1, handle: handle, bio: "", icon: icon,
       ack: nil, issued_at: Time.now.to_i
     )
     canonical = Crypto::Canonical.dump(payload)

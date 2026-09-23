@@ -1,6 +1,6 @@
 {
-  "pubkey": "ImFz0dGgbMmeP-_dGMUlcUyzey0Xx3N_H_2jExie5-g",
-  "payload": "{\"ack\":null,\"bio\":\"Tim is legally distinct from, and no relation to, Tom\",\"handle\":\"Tim\",\"icon\":null,\"master_pubkey\":null,\"note\":null,\"previous_pubkey\":null,\"pubkey\":\"ImFz0dGgbMmeP-_dGMUlcUyzey0Xx3N_H_2jExie5-g\",\"purpose\":\"reputablechat:identity:v1\",\"revision\":1,\"ts\":1790185769}",
-  "signature": "2cuyZg2Pj81pL89r3iEvNhge6FWavTTDUckaP0amCaBq8J_kTUNzdQjFTGPMr4luPyR9PsL74cM_sNcRL0O3AQ",
-  "hash": "4433a3af7ea6cf1152c227214c162ccb0a7da5aa0dafb6583f7c12928487564d"
+  "pubkey": "0DisFmXs8TFlNvnEP1dJOOBXUC9zFN0VKHZ38iou20g",
+  "payload": "{\"ack\":null,\"bio\":\"Tim is legally distinct from, and no relation to, Tom\",\"handle\":\"Tim\",\"icon\":\"c82154f13e0d0223870bcdc38d937149591d3de252f3eeb208e7a9bb198e9810.jpg\",\"master_pubkey\":null,\"note\":null,\"previous_pubkey\":null,\"pubkey\":\"0DisFmXs8TFlNvnEP1dJOOBXUC9zFN0VKHZ38iou20g\",\"purpose\":\"reputablechat:identity:v1\",\"revision\":1,\"ts\":1790187565}",
+  "signature": "FbVXfyvZi8cQ5x9uakYv2t3dEXbMfAlog_aeRUe3PRXTKkgbCvakY3N5RTJJWvnYM1wE_3Rm5ZwggT_zuIr4Cw",
+  "hash": "0fd601105cd84b388d08d304cfaa0a00f9ff01546322ea85ca077390ce9bc505"
 }

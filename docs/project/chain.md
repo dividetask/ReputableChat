@@ -135,6 +135,24 @@ Removing it is a real choice with real consequences: without the genesis at one
 hop, nothing it vouches for reaches you, and nobody it has made visible is
 visible. That is the user's decision to make, which is why they get to make it.
 
+### Its avatar is committed too
+
+The genesis account's icon sits beside its record as
+`config/genesis/<environment>.<ext>`, and the server adopts it into the image
+store at boot.
+
+Every other image reaches the store by being uploaded. This one cannot: the
+declaration naming it is committed and read before any client has fetched
+anything, and the store lives under `data/`, which is not in the repository. So
+the bytes are committed as well, and the name stays what it is for every other
+image — the SHA-256 of those bytes — which is what lets a reader confirm the
+avatar is the one that was signed for.
+
+Adopting it rather than serving it from `config/` keeps one serving path. And
+the adoption checks: if the committed image does not hash to the name the
+declaration carries, the server says so, because the alternative is a broken
+avatar and no other sign that a signed claim was wrong.
+
 ### Two of them
 
 Development and production have different genesis accounts, and the difference

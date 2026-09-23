@@ -36,9 +36,42 @@ module ReputableChat
       File.join(DIRECTORY, "#{environment}.json")
     end
 
+    # The genesis account's avatar, committed beside its record.
+    #
+    # Every other image reaches the image store by being uploaded. This one
+    # cannot: the declaration naming it is committed and read before any client
+    # has fetched anything, and the image store lives under data/, which is not
+    # in the repository. So the bytes are committed too, and the server adopts
+    # them at boot.
+    def self.icon_path(environment = Environment.name)
+      Dir[File.join(DIRECTORY, "#{environment}.{png,jpg,gif,webp}")].first
+    end
+
     PATH = path(Environment::DEVELOPMENT)
 
     attr_reader :pubkey, :payload, :signature, :hash
+
+    # The icon filename the declaration names, or nil.
+    def icon = declaration["icon"]
+
+    def declaration = @declaration ||= JSON.parse(payload)
+
+    # Puts the committed bytes into the image store, where every other image
+    # lives, so there is one serving path rather than a special case.
+    #
+    # The store derives the name from the bytes, so a mismatch here means the
+    # committed image is not the one the declaration was signed over -- which
+    # would otherwise show up as a broken avatar and nothing else.
+    def install_icon(images, path: Genesis.icon_path)
+      return nil unless icon && path && File.exist?(path)
+
+      stored = images.store(File.binread(path))
+      unless stored == icon
+        raise Corrupt, "#{path} stores as #{stored.inspect} but the genesis declares #{icon.inspect}"
+      end
+
+      stored
+    end
 
     def self.load(path: self.path)
       raise Missing, missing_message(path) unless File.exist?(path)

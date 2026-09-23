@@ -29,6 +29,8 @@ require "json"
 require "open3"
 require "securerandom"
 require "fileutils"
+require "tmpdir"
+require "digest"
 require "reputable_chat/config"
 require "reputable_chat/params"
 require "reputable_chat/cryptography/seed"
@@ -38,6 +40,7 @@ require "reputable_chat/cryptography/record"
 require "reputable_chat/cryptography/signature"
 require "reputable_chat/environment"
 require "reputable_chat/genesis"
+require "reputable_chat/store/images"
 require "reputable_chat/operator"
 
 module GenerateGenesis
@@ -50,6 +53,10 @@ module GenerateGenesis
     options = parse(argv)
     refuse_to_overwrite!(options[:path], "genesis record")
     refuse_to_overwrite!(options[:seed_path], "seed")
+
+    if options[:icon_source]
+      options[:icon] = install_icon(options[:icon_source], options[:path].sub(/\.json\z/, ""))
+    end
 
     kdf    = kdf_parameters
     phrase = new_phrase(options[:words])
@@ -100,8 +107,23 @@ module GenerateGenesis
   def record_for(pubkey, options)
     Crypto::Payload.identity(
       pubkey: pubkey, revision: 1, handle: options[:handle], bio: options[:bio],
-      icon: nil, ack: nil, issued_at: Time.now.to_i
+      icon: options[:icon], ack: nil, issued_at: Time.now.to_i
     )
+  end
+
+  # Copies the image in beside the record and returns the content-addressed
+  # name to sign. The name is the hash of the bytes, so committing them is what
+  # lets any reader confirm the avatar is the one that was signed for.
+  def install_icon(source, destination_stem)
+    raw = File.binread(source)
+    abort "  #{relative(source)} is #{raw.bytesize} bytes; the limit is #{ReputableChat::Store::Images::MAX_BYTES}" if
+      raw.bytesize > ReputableChat::Store::Images::MAX_BYTES
+
+    extension = ReputableChat::Store::Images.new(Dir.mktmpdir).sniff(raw)
+    abort "  #{relative(source)} is not a PNG, JPEG, GIF or WebP" unless extension
+
+    File.binwrite("#{destination_stem}.#{extension}", raw)
+    "#{Digest::SHA256.hexdigest(raw)}.#{extension}"
   end
 
   def verify!(pubkey, signature, payload)
@@ -159,7 +181,8 @@ module GenerateGenesis
   DEFAULT_BIO = "Tim is legally distinct from, and no relation to, Tom"
 
   DEFAULTS = { handle: "Tim", bio: DEFAULT_BIO, words: 12,
-               environment: nil, path: nil, seed_path: nil }.freeze
+               environment: nil, path: nil, seed_path: nil,
+               icon_source: nil, icon: nil }.freeze
 
   def parse(argv)
     options = DEFAULTS.dup
@@ -170,6 +193,7 @@ module GenerateGenesis
       case flag
       when "--handle" then options[:handle] = argv.shift.to_s
       when "--bio"    then options[:bio]    = argv.shift.to_s
+      when "--icon"   then options[:icon_source] = File.expand_path(argv.shift.to_s)
       when "--words"  then options[:words]  = Integer(argv.shift)
       when "--path"   then options[:path]   = File.expand_path(argv.shift.to_s)
       when "--seed"   then options[:seed_path] = File.expand_path(argv.shift.to_s)
@@ -232,6 +256,10 @@ module GenerateGenesis
                         (default: "#{DEFAULT_BIO}")
         --words N       seed length; more than the 8-word minimum, since this
                         key signs releases (default: 12)
+        --icon FILE     avatar for the genesis account. Copied in beside the
+                        record and committed, because the image store is not
+                        in the repository and the record is read before any
+                        client has fetched anything.
         --production    cut the production genesis; its seed is never
                         committed and never printed
         --development   cut the development genesis (the default); its seed
