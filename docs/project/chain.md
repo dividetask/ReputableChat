@@ -15,16 +15,14 @@ the gap being visible.
 
 ## Records
 
-A record is a signed payload. Seven kinds so far:
+A record is a signed payload. Five kinds so far:
 
 | purpose | what it is |
 |---|---|
 | `reputablechat:identity:v1` | an **identity declaration**: who someone is, in their own words |
 | `reputablechat:attestation:v1` | what someone thinks of everyone else |
-| `reputablechat:adjustment:v1` | one change to an attestation, between republishes |
 | `reputablechat:message:v1` | a message in a room |
 | `reputablechat:emote:v1` | one person's response to one message |
-| `reputablechat:notice:v1` | an official statement from a publisher |
 | `reputablechat:release:v1` | a published version of the client |
 
 Every one of them carries `ack`: a list of record hashes, sorted, with no
@@ -130,7 +128,7 @@ genesis it runs.
 
 Nothing enforces who signs what. By convention the genesis account signs what
 covers the whole network — releases and the rules — and the host account signs
-what concerns one server, such as an outage notice. `script/tim.rb --host`
+what concerns one server, such as an outage message. `script/tim.rb --host`
 signs as the host account.
 
 ### Everyone starts by trusting them
@@ -193,7 +191,7 @@ genesis and holds for the host account the same way.
 
 **Development's seed is committed**, so that identity is public: everyone who
 has cloned the repository can sign as it. That is the point. A fresh clone can
-publish notices and vouch for accounts locally without anybody being handed
+post messages and vouch for accounts locally without anybody being handed
 a secret, and the CLI works out of the box. Nothing of value is protected by
 it, because a development chain is not one anybody relies on.
 
@@ -221,8 +219,8 @@ all places a seed should not turn up. Both hold the phrase rather than the
 derived key, so it is the same secret a person would type into the UI and there
 is one thing to look after rather than two that must not disagree.
 
-`script/tim.rb` signs with it, which is how the genesis account publishes
-notices and vouches for new arrivals without somebody sitting at a
+`script/tim.rb` signs with it, which is how the genesis account posts
+messages and vouches for new arrivals without somebody sitting at a
 browser. That file is the one place in this project a private key lives outside
 a browser, and it is the weakest point in the system: whoever holds it is the
 genesis account, and can publish a release every client would run.
@@ -249,10 +247,8 @@ the version it has to conform to. Order means acknowledgement and nothing else.
   those rules are published, because until then there is nothing for it to
   acknowledge them through.
 - **A record written for old rules that arrives after new ones is refused.** The
-  browser notices the refusal and signs it again under the new rules. Messages
-  also chain to their author's previous message through `seq` and `prev`, so
-  everything that author signed after the refused record is signed again with
-  it.
+  browser notices the refusal and signs it again under the new rules, along with
+  anything of its own that acknowledged it.
 - **Records made under old rules stay valid under them for good.** A change of
   rules is never retroactive.
 
@@ -260,11 +256,10 @@ The rules text is for people. Like every note it is never read by code; the
 software implements the rules, and the note is what anyone can hold the
 software to.
 
-### The founding notice is the source
+### The rules file is the source
 
 Each version's text lives in the repository as
-`docs/project/rules/v<version>.md`, and the first one is the founding notice.
-The generator is to read the note straight from that file rather than from a
+`docs/project/rules/v<version>.md`. The generator is to read the note straight from that file rather than from a
 copy, so the file and the chain cannot disagree. A new version is a new
 file; an existing one is never edited once published, because its bytes are
 signed into the chain.
@@ -392,8 +387,7 @@ field named `scores`:
   "ack":     ["<64 hex>"],
   "ts":      1710000000,
   "scores":  { "<pubkey>": { "reputation": "0.5", "trust": "1" } },
-  "derived": { "hops": 3, "params": "<64 hex>",
-               "scores": { "<pubkey>": "0.0123" } } }
+  "derived": { "scores": { "<pubkey>": "0.0123" } } }
 ```
 
 `reputation` is the author's **rating** of that person; the signed field name
@@ -421,117 +415,19 @@ the network sees is the rating that resulted, never the act that caused it.
 
 `derived` is the author's own calculated reputations, out to
 `attestation.published_hops` (3 by default). It is not a convenience: it is the
-**fourth term** of everyone else's reputation calculation, because the walk stops at hop 2 and depth 3 is filled in from
-these summaries rather than reached. See **Why the walk stops at two** in
-[reputation.md](reputation.md).
+**fourth term** of everyone else's reputation calculation, because the walk
+stops at hop 2 and depth 3 is filled in from these summaries rather than
+reached. See **Why the walk stops at two** in [reputation.md](reputation.md).
 
-It is still never an input to a reader's own opinion at depths 0 to 2, which
-are read from ratings. It carries 0.0009 of the total, cannot make anyone
-Trusted on its own, and exists mainly to lift a well-regarded stranger from
-Blocked to Tolerated.
+It is still never an input to a reader's own opinion at depths 0 to 2, which are
+read from ratings. It carries 0.0009 of the total, cannot make anyone Trusted on
+its own, and exists mainly to lift a well-regarded stranger from Blocked to
+Tolerated.
 
-It carries `params`, a hash of the reputation parameters it was computed under,
-because without that it would be worse than useless. Reputation is subjective
-and configuration is per-user: the author may have a different `k`, a different
-curve, `show_unrated` on. A reader whose parameters hash differently has to
-recompute and the cache saves them nothing. A reader who took the numbers
-anyway would silently adopt a stranger's settings.
-
-This is the one place the project publishes a calculated reputation, and
-[reputation.md](reputation.md) argues against exactly that — a published one
-goes stale the moment the curve is retuned. The `params` hash is what contains
-the damage: stale numbers are *detectably* stale rather than quietly wrong.
-
-## Adjustments
-
-Re-signing and re-uploading a whole attestation every time someone emotes a
-message would be absurd — the file grows with every person you have ever rated,
-and an emote changes one number in it.
-
-So between republishes, each change is its own small record:
-
-```json
-{ "purpose": "reputablechat:adjustment:v1",
-  "pubkey":  "...",
-  "base_revision": 4,
-  "seq":     7,
-  "target":  "<pubkey>",
-  "reputation": "0.5032",
-  "trust":   "1",
-  "ack":     ["<64 hex>"],
-  "ts":      1710000000 }
-```
-
-`base_revision` names the attestation it amends and `seq` orders it within that
-run, so a reader takes the snapshot and replays the adjustments on top in a
-fixed order. Both are inside the signature, so the server cannot reorder them.
-
-An **emote record is already its own adjustment** — it names the author, the
-message and the emote, and the author's rating of that person follows from
-it. Adjustments exist for the changes that have no other public record:
-friending, reporting, and a hand-set rating or multiplier. Those acts stay
-private; only their arithmetic result is published.
-
-A full attestation is republished after `attestation.resubmit_after_changes`
-changes or `attestation.resubmit_after_seconds`, whichever comes first, and
-supersedes every adjustment against the previous revision. Only rating-changing
-events count toward the tally. Sending a message is not one — it cannot move a
-number in the file, so counting it would republish for a reason that could not
-have changed anything.
-
-**Nothing is published without something to say.** Both limits are floors on
-when pending changes go out, not schedules: an account with no pending changes
-publishes nothing, and one that was created and never used leaves nothing behind
-but its identity declaration. The clock is only ever read while somebody is
-signed in, so it cannot fire for a dormant account in any case.
-
-Neither limit slows down vouching, and it would be a mistake to read them that
-way. Ten friendships in a row meet the threshold on the spot. The cadence exists
-to stop one attestation being re-signed and re-uploaded per emote — it is not a
-rate limit, and a new account can publish a full set of vouches within a minute
-of being created.
-
-There is no attestation at all until the first one is published, so there is
-nothing for an adjustment to amend until then. Changes before that accumulate in
-the vault, and revision 1 publishes the accumulated set.
-
-## Notices
-
-An official statement signed by a publisher: an outage, a policy, a release,
-the founding statement itself.
-
-```json
-{ "purpose":    "reputablechat:notice:v1",
-  "publisher":  "...",
-  "revision":   4,
-  "kind":       "outage",
-  "title":      "Planned outage",
-  "body":       "02:00-03:00 UTC on Friday.",
-  "supersedes": "<64 hex>",
-  "ack":        ["<64 hex>"],
-  "note":       null,
-  "ts":         1710000000 }
-```
-
-`kind` comes from a closed list in `config/notices.yml`, served at
-`/api/notice-kinds`, for the same reason emotes are a closed list: an arbitrary
-string would be stored and rendered back to everyone, and a client cannot
-present something it has never heard of. Adding a kind is cheap; removing one
-is not, because notices already signed under it stay on the chain and still
-have to render.
-
-**A correction is a new record, never an edit.** `supersedes` names the notice
-being replaced. A mutated record would no longer match its signature, and the
-whole point of a notice is that what was said is still there to be checked — so
-notices accumulate rather than overwrite, and a reader walks back through
-`supersedes` to see what a statement replaced.
-
-`founding` is the kind that supersedes nothing, and the server refuses a
-founding notice that claims to. A chain has one bottom.
-
-The server checks the shape, the signature and the revision, and has no opinion
-about the contents. It does not know what a policy is — only that this
-publisher has not used this number before.
+A reader reaching for it has run out of its own reach: it either takes the
+number or leaves it. It saves work, and a reader who wants the number checked
+can walk far enough to compute it. Nothing about the parameters it was computed
+under is published, which would tell everyone how a particular reader scores.
 
 ## Releases
 

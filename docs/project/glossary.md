@@ -11,9 +11,9 @@ than stored as files, which is only safe because canonical serialization is
 deterministic. [chain.md](chain.md)
 
 **Record hash** — a record's identity: `SHA256("reputablechat:record:v1\n" +
-canonical payload + "\n" + signature)`, hex. What `ack`, `prev`, `reply_to`,
-`supersedes` and an emote's target all name. Not the same as a signature, which
-identifies only the payload. [chain.md](chain.md)
+canonical payload + "\n" + signature)`, hex. What `ack`, `reply_to` and an
+emote's target all name. Not the same as a signature, which identifies only the
+payload. [chain.md](chain.md)
 
 **Identity declaration** (`reputablechat:identity:v1`) — a signed statement
 about yourself: handle, bio, icon, and the key-rotation placeholders.
@@ -22,19 +22,10 @@ about yourself: handle, bio, icon, and the key-rotation placeholders.
 everyone else: a reputation and a trust multiplier per person, plus the derived
 cache. The counterpart to an identity declaration.
 
-**Adjustment** (`reputablechat:adjustment:v1`) — one change to an attestation
-between republishes, naming the `base_revision` it amends and its `seq` in that
-run. An emote record is already its own adjustment; these exist for the changes
-with no other public record.
-
 **Message** (`reputablechat:message:v1`) — text one person sends to a room.
 The only word for it: not a comment, a post or a transaction.
 
 **Emote** (`reputablechat:emote:v1`) — one person's response to one message.
-
-**Notice** (`reputablechat:notice:v1`) — an official statement from a
-publisher: an outage, a policy, a release, the founding statement. `kind` comes
-from `config/notices.yml`.
 
 **Release** (`reputablechat:release:v1`) — a manifest of `path → sha256`
 pinning a version of the client. A manifest, never an archive.
@@ -56,7 +47,7 @@ handle.
 declaration acknowledges the genesis, so it hangs off the one chain. Committed
 beside the genesis under `config/host/`. Where a server has one, a new account
 starts with it as a second friend. By convention it signs what concerns one
-server, such as an outage notice. Nothing enforces either convention.
+server, such as an outage message. Nothing enforces either convention.
 [chain.md](chain.md)
 
 **Rules** — what every field of every record means and what makes a record
@@ -64,11 +55,11 @@ valid. Carried in the `note` of the genesis account's identity declaration, one
 revision per version, never edited. A record follows the newest version it
 acknowledges. [chain.md](chain.md)
 
-**Founding notice** — version 0.001 of the rules, kept as
-`docs/project/rules/v0.001.md`, from which the genesis record's note is
-generated. Versions below 1 are pre-launch; 1 is reserved for the first set
-that goes live.
-As a notice record it is the one kind that supersedes nothing. One per chain.
+**Rules version** — the rules' own number, ordered as a decimal. Each version's
+text lives in the repository as `docs/project/rules/v<version>.md`, and the
+genesis record's note is generated from it. Versions below 1 are pre-launch; 1
+is reserved for the first set that goes live. Not the `:v1` in a purpose string,
+which numbers a payload's fields.
 
 ## Fields that travel on many records
 
@@ -96,12 +87,9 @@ the server records its own receipt time separately and unsigned.
 everything else so a signature for one kind of record cannot be presented as
 another.
 
-**`supersedes`** — the record a correction replaces. Corrections are new
-records; nothing is ever edited, because a mutated record no longer matches its
-signature.
-
-**`publisher`** — who signed a notice or a release. Carried so a per-user
-trusted-developer setting can arrive without re-signing anything.
+**`publisher`** — who signed a release. The same field as `pubkey` and
+`author`, under a third name. Carried so a per-user trusted-developer setting
+can arrive without re-signing anything.
 
 ## Off the chain
 
@@ -144,12 +132,9 @@ from what they are worth. Compounds along a path; a zero prunes the branch
 while leaving that person visible. Clamped to −1..1.
 
 **Derived cache** — an attestation author's own calculated reputations,
-published so they can serve as the fourth term of everybody else's. Carries a parameter
-fingerprint. [reputation.md](reputation.md)
-
-**Parameter fingerprint** — a hash of the parameters a reputation was
-calculated under. Advisory and incomplete: a derived reputation averages
-ratings that each came from a different author's curve.
+published so they can serve as the fourth term of everybody else's. A reader
+reaching for it has run out of its own reach, and either takes the number or
+leaves it. [reputation.md](reputation.md)
 
 **Hop** / **depth** — distance from the viewer. The walk stops at hop 2 and
 fills depth 3 from derived caches.
@@ -196,7 +181,10 @@ Do not reintroduce these; they each have a current name above.
 | transaction | record |
 | comment, post (as a noun) | message |
 | reaction | emote |
-| announcement | notice |
+| announcement, notice (`notice:v1`) | message |
+| adjustment (`adjustment:v1`) | nothing on the chain; a change waits in the vault for the next attestation |
+| founding notice | the rules, in the genesis record's note |
+| `supersedes`, `seq`, `prev`, `derived.hops`, `derived.params` | (removed; no replacement) |
 | Tim (as the general term) | genesis account |
 | server's Tim, server account | host account |
 | score | rating (given) or reputation (calculated) |

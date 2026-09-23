@@ -49,7 +49,7 @@ field named `scores`:
   "revision": 4,
   "ts":      1710000000,
   "scores":  { "<pubkey>": { "reputation": "0.5", "trust": "1" } },
-  "derived": { "hops": 3, "params": "<fingerprint>", "scores": { "<pubkey>": "0.045" } },
+  "derived": { "scores": { "<pubkey>": "0.045" } },
   "ack":     ["<record hash>"], "note": null }
 ```
 
@@ -122,9 +122,7 @@ breaking the signature is what makes serving a stale copy detectable. Cheap
 now, impossible to retrofit without invalidating every signature in the network.
 
 Known limit: an attestation accumulates an entry per person ever rated, and
-grows without bound. Fine for the MVP, needs chunking later. Adjustment records
-already cover the other half of that problem — a single change between
-republishes, rather than re-signing the whole snapshot to move one number.
+grows without bound. Fine for the MVP, needs chunking later.
 
 ## Images
 
@@ -151,13 +149,11 @@ every old signature stops verifying against the new shape.
 | purpose | fields |
 |---|---|
 | `reputablechat:login:v1` | purpose, pubkey, nonce, origin, ts |
-| `reputablechat:message:v1` | purpose, author, room, seq, prev, reply_to, ack, note, ts, body |
+| `reputablechat:message:v1` | purpose, author, room, reply_to, ack, note, ts, body |
 | `reputablechat:emote:v1` | purpose, author, room, message, emote, ack, note, ts |
 | `reputablechat:identity:v1` | purpose, pubkey, revision, handle, bio, icon, master_pubkey, previous_pubkey, ack, note, ts |
 | `reputablechat:attestation:v1` | purpose, pubkey, revision, scores, derived, ack, note, ts |
-| `reputablechat:adjustment:v1` | purpose, pubkey, base_revision, seq, target, reputation, trust, ack, note, ts |
 | `reputablechat:release:v1` | purpose, publisher, revision, label, files, notes, ack, note, ts |
-| `reputablechat:notice:v1` | purpose, publisher, revision, kind, title, body, supersedes, ack, note, ts |
 | `reputablechat:vault:v1` | purpose, pubkey, revision, ciphertext, iv, ts |
 
 `config:v1` and `private-config:v1` were the two shapes these replaced. They are
@@ -173,9 +169,7 @@ a pile — see [chain.md](chain.md). The vault has none because nobody else ever
 sees it, so there is nothing to anchor it to and nobody to prove anything to.
 
 `room` in the message payload stops a message being replanted in a different
-channel. `seq` and `prev` chain an author's own messages so the server cannot
-silently drop or reorder one without it being detectable; `ack` chains it to
-everybody else's records. The two catch different failures and both are kept. `ts` is the client's
+channel, and `ack` chains a record to everybody else's. `ts` is the client's
 clock and is attacker-controlled; the server records its own receipt time
 separately and unsigned.
 
@@ -194,13 +188,12 @@ The client tallies them per message and **drops emotes from blocked
 accounts**, so a pile of spam accounts cannot inflate a count. Counts are
 therefore per-viewer, like everything else here.
 
-An emote also moves its author's rating of the person emoted, and the emote
-record is itself the adjustment that says so — see **Adjustments** in
-[chain.md](chain.md).
+An emote also moves its author's rating of the person emoted. That rating is
+private until their next attestation carries the number it came to.
 
 ## Record hashes
 
-`ack`, `prev`, `reply_to` and an emote's target all name a record by its hash:
+`ack`, `reply_to` and an emote's target all name a record by its hash:
 
 ```
 SHA256("reputablechat:record:v1\n" + canonical_payload + "\n" + signature)
