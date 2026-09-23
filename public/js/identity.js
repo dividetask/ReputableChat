@@ -8,6 +8,7 @@
 
 import * as canonical from "./canonical.js";
 import * as seed from "./seed.js";
+import * as vault from "./vault.js";
 
 const DB_NAME = "reputablechat";
 const STORE = "identity";
@@ -78,9 +79,14 @@ export async function deriveFromSeed(phrase, kdf) {
 
   const rawSeed = await stretch(phrase, kdf);
   const identity = await importKeypair(rawSeed);
+  // The vault key comes off the same expensive derivation, separated by domain
+  // rather than by a second Argon2id pass -- which would double the wait at
+  // login for nothing HKDF does not already give. Derived before the seed is
+  // wiped, because after that there is nothing left to derive from.
+  const vaultKey = await vault.deriveKey(rawSeed, kdf.vault_domain);
   rawSeed.fill(0);
 
-  return identity;
+  return { ...identity, vaultKey };
 }
 
 // --- persistence -------------------------------------------------------
@@ -140,44 +146,56 @@ export const PURPOSE = {
   CONFIG: "reputablechat:config:v1",
   PRIVATE_CONFIG: "reputablechat:private-config:v1",
   EMOTE: "reputablechat:emote:v1",
-  USER: "reputablechat:user:v1",
+  IDENTITY: "reputablechat:identity:v1",
   ATTESTATION: "reputablechat:attestation:v1",
   ADJUSTMENT: "reputablechat:adjustment:v1",
   RELEASE: "reputablechat:release:v1",
+  NOTICE: "reputablechat:notice:v1",
+  VAULT: "reputablechat:vault:v1",
 };
 
 // These must match lib/reputable_chat/cryptography/payload.rb exactly.
+//
+// `note` is free text for a person reading the raw chain. Nothing here or in
+// the server reads it, and nothing branches on it -- render it with
+// textContent, never as markup, like any other text somebody else wrote.
 export function loginPayload({ pubkey, nonce, origin, ts }) {
   return { purpose: PURPOSE.LOGIN, pubkey, nonce, origin, ts };
 }
 
-export function messagePayload({ author, room, seq, prev, body, ack, ts, replyTo = null }) {
-  return { purpose: PURPOSE.MESSAGE, author, room, seq, prev, reply_to: replyTo, ack, ts, body };
+export function messagePayload({ author, room, seq, prev, body, ack, ts, replyTo = null, note = null }) {
+  return { purpose: PURPOSE.MESSAGE, author, room, seq, prev, reply_to: replyTo, ack, note, ts, body };
 }
 
-export function configPayload({ pubkey, version, profile, ratings, ts }) {
-  return { purpose: PURPOSE.CONFIG, pubkey, version, profile, ratings, ts };
+export function configPayload({ pubkey, revision, profile, ratings, ts }) {
+  return { purpose: PURPOSE.CONFIG, pubkey, revision, profile, ratings, ts };
 }
 
-export function emotePayload({ author, room, message, emote, ack, ts }) {
-  return { purpose: PURPOSE.EMOTE, author, room, message, emote, ack, ts };
+export function emotePayload({ author, room, message, emote, ack, ts, note = null }) {
+  return { purpose: PURPOSE.EMOTE, author, room, message, emote, ack, note, ts };
 }
 
-export function privateConfigPayload({ pubkey, version, settings, voted, ts }) {
-  return { purpose: PURPOSE.PRIVATE_CONFIG, pubkey, version, settings, voted, ts };
+// `revision` sits outside the ciphertext so the server can reject a rollback
+// on a document it can otherwise make nothing of.
+export function vaultPayload({ pubkey, revision, ciphertext, iv, ts }) {
+  return { purpose: PURPOSE.VAULT, pubkey, revision, ciphertext, iv, ts };
+}
+
+export function privateConfigPayload({ pubkey, revision, settings, voted, ts }) {
+  return { purpose: PURPOSE.PRIVATE_CONFIG, pubkey, revision, settings, voted, ts };
 }
 
 // `master_pubkey` and `previous_pubkey` are placeholders for key rotation and
 // are always null for now. They sit in the signed shape from the start because
 // adding a field later changes the canonical bytes of every record, which
 // invalidates every signature ever made.
-export function userPayload({
-  pubkey, version, handle, bio, icon, ack, ts,
-  masterPubkey = null, previousPubkey = null,
+export function identityPayload({
+  pubkey, revision, handle, bio, icon, ack, ts,
+  masterPubkey = null, previousPubkey = null, note = null,
 }) {
   return {
-    purpose: PURPOSE.USER, pubkey, version, handle, bio, icon,
-    master_pubkey: masterPubkey, previous_pubkey: previousPubkey, ack, ts,
+    purpose: PURPOSE.IDENTITY, pubkey, revision, handle, bio, icon,
+    master_pubkey: masterPubkey, previous_pubkey: previousPubkey, ack, note, ts,
   };
 }
 
@@ -186,19 +204,34 @@ export function userPayload({
 // `reputation > 0`, which binary floating point cannot be trusted to land on.
 // `derived` is a cache and carries the hash of the parameters it was computed
 // under, so a reader can tell whether the numbers mean anything to them.
-export function attestationPayload({ pubkey, version, scores, derived, ack, ts }) {
-  return { purpose: PURPOSE.ATTESTATION, pubkey, version, scores, derived, ack, ts };
+export function attestationPayload({ pubkey, revision, scores, derived, ack, ts, note = null }) {
+  return { purpose: PURPOSE.ATTESTATION, pubkey, revision, scores, derived, ack, note, ts };
 }
 
-export function adjustmentPayload({ pubkey, baseVersion, seq, target, reputation, trust, ack, ts }) {
+export function adjustmentPayload({
+  pubkey, baseRevision, seq, target, reputation, trust, ack, ts, note = null,
+}) {
   return {
-    purpose: PURPOSE.ADJUSTMENT, pubkey, base_version: baseVersion, seq,
-    target, reputation, trust, ack, ts,
+    purpose: PURPOSE.ADJUSTMENT, pubkey, base_revision: baseRevision, seq,
+    target, reputation, trust, ack, note, ts,
   };
 }
 
-export function releasePayload({ publisher, version, label, files, notes, ack, ts }) {
-  return { purpose: PURPOSE.RELEASE, publisher, version, label, files, notes, ack, ts };
+// `supersedes` is the notice this one replaces, or null. A correction is a new
+// record pointing at the old one, never an edit -- a mutated record no longer
+// matches its signature, and the point of a notice is that what was said is
+// still there to be checked.
+export function noticePayload({
+  publisher, revision, kind, title, body, ack, ts, supersedes = null, note = null,
+}) {
+  return {
+    purpose: PURPOSE.NOTICE, publisher, revision, kind, title, body,
+    supersedes, ack, note, ts,
+  };
+}
+
+export function releasePayload({ publisher, revision, label, files, notes, ack, ts, note = null }) {
+  return { purpose: PURPOSE.RELEASE, publisher, revision, label, files, notes, ack, note, ts };
 }
 
 // Verifies a blob the server handed back against a public key.

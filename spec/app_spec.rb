@@ -130,7 +130,7 @@ class AppSpec < Minitest::Test
     post_json "/api/register", {}
     target = Sig.encode(Ed25519::SigningKey.generate.verify_key.to_bytes)
 
-    put "/api/config", JSON.generate(config_body(version: 1, ratings: ratings_for(target))),
+    put "/api/config", JSON.generate(config_body(revision: 1, ratings: ratings_for(target))),
         "CONTENT_TYPE" => "application/json"
     assert_equal 200, last_response.status
 
@@ -146,7 +146,7 @@ class AppSpec < Minitest::Test
   def test_rejects_a_profile_that_was_not_signed
     log_in
     target = Sig.encode(Ed25519::SigningKey.generate.verify_key.to_bytes)
-    body = config_body(version: 1, ratings: ratings_for(target))
+    body = config_body(revision: 1, ratings: ratings_for(target))
     body["profile"] = body["profile"].merge("username" => "mallory")
 
     put "/api/config", JSON.generate(body), "CONTENT_TYPE" => "application/json"
@@ -205,12 +205,12 @@ class AppSpec < Minitest::Test
 
   PROFILE = { "username" => "alice", "message" => "hello", "icon" => nil }.freeze
 
-  def config_body(version:, ratings:, key: nil, profile: PROFILE)
+  def config_body(revision:, ratings:, key: nil, profile: PROFILE)
     ts = Time.now.to_i
-    payload = Payload.config(pubkey: @pubkey, version: version, profile: profile,
+    payload = Payload.config(pubkey: @pubkey, revision: revision, profile: profile,
                              ratings: ratings, issued_at: ts)
     signature = key ? Sig.encode(key.sign(Canon.bytes(payload))) : sign(payload)
-    { "version" => version, "profile" => profile, "ratings" => ratings,
+    { "revision" => revision, "profile" => profile, "ratings" => ratings,
       "ts" => ts, "signature" => signature }
   end
 
@@ -222,14 +222,14 @@ class AppSpec < Minitest::Test
     log_in
     target = Sig.encode(Ed25519::SigningKey.generate.verify_key.to_bytes)
 
-    put "/api/config", JSON.generate(config_body(version: 1, ratings: ratings_for(target))),
+    put "/api/config", JSON.generate(config_body(revision: 1, ratings: ratings_for(target))),
         "CONTENT_TYPE" => "application/json"
     assert_equal 200, last_response.status
 
     get "/api/config/#{@pubkey}"
     stored = json["config"]
 
-    assert_equal 1, stored["version"]
+    assert_equal 1, stored["revision"]
     assert Sig.verify(pubkey_b64: @pubkey, signature_b64: stored["signature"],
                       payload: JSON.parse(stored["payload"])),
            "the served blob must still verify against the author's key"
@@ -238,24 +238,24 @@ class AppSpec < Minitest::Test
   def test_refuses_an_unsigned_config
     log_in
     target = Sig.encode(Ed25519::SigningKey.generate.verify_key.to_bytes)
-    body = config_body(version: 1, ratings: ratings_for(target), key: Ed25519::SigningKey.generate)
+    body = config_body(revision: 1, ratings: ratings_for(target), key: Ed25519::SigningKey.generate)
 
     put "/api/config", JSON.generate(body), "CONTENT_TYPE" => "application/json"
 
     assert_equal 400, last_response.status
   end
 
-  # Without the version check the server could serve an old config to hide a
+  # Without the revision check the server could serve an old config to hide a
   # report, and its signature would still verify perfectly.
   def test_refuses_a_rollback
     log_in
     target = Sig.encode(Ed25519::SigningKey.generate.verify_key.to_bytes)
 
-    put "/api/config", JSON.generate(config_body(version: 5, ratings: ratings_for(target))),
+    put "/api/config", JSON.generate(config_body(revision: 5, ratings: ratings_for(target))),
         "CONTENT_TYPE" => "application/json"
     assert_equal 200, last_response.status
 
-    put "/api/config", JSON.generate(config_body(version: 4, ratings: ratings_for(target))),
+    put "/api/config", JSON.generate(config_body(revision: 4, ratings: ratings_for(target))),
         "CONTENT_TYPE" => "application/json"
     assert_equal 409, last_response.status
   end
@@ -263,7 +263,7 @@ class AppSpec < Minitest::Test
   def test_rejects_malformed_ratings
     log_in
 
-    put "/api/config", JSON.generate(config_body(version: 1, ratings: { "not-a-key" => {} })),
+    put "/api/config", JSON.generate(config_body(revision: 1, ratings: { "not-a-key" => {} })),
         "CONTENT_TYPE" => "application/json"
 
     assert_equal 400, last_response.status

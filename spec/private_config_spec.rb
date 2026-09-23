@@ -51,14 +51,14 @@ class PrivateConfigSpec < Minitest::Test
     post_json "/api/session", { "pubkey" => pubkey, "nonce" => nonce, "ts" => ts, "signature" => signature }
   end
 
-  def put_private(key, pubkey, version:, settings: SETTINGS, voted: [], signer: nil)
+  def put_private(key, pubkey, revision:, settings: SETTINGS, voted: [], signer: nil)
     ts = Time.now.to_i
-    payload = Payload.private_config(pubkey: pubkey, version: version, settings: settings,
+    payload = Payload.private_config(pubkey: pubkey, revision: revision, settings: settings,
                                      voted: voted, issued_at: ts)
     signature = Sig.encode((signer || key).sign(Canon.bytes(payload)))
 
     put "/api/private-config",
-        JSON.generate({ "version" => version, "settings" => settings, "voted" => voted,
+        JSON.generate({ "revision" => revision, "settings" => settings, "voted" => voted,
                         "ts" => ts, "signature" => signature }),
         "CONTENT_TYPE" => "application/json"
   end
@@ -67,7 +67,7 @@ class PrivateConfigSpec < Minitest::Test
     key, pubkey = new_user
     log_in_as(key, pubkey)
 
-    put_private(key, pubkey, version: 1)
+    put_private(key, pubkey, revision: 1)
     assert_equal 200, last_response.status
 
     get "/api/private-config"
@@ -85,7 +85,7 @@ class PrivateConfigSpec < Minitest::Test
     bob_key, bob = new_user
 
     log_in_as(alice_key, alice)
-    put_private(alice_key, alice, version: 1, settings: { "secret" => "alice only" })
+    put_private(alice_key, alice, revision: 1, settings: { "secret" => "alice only" })
 
     log_in_as(bob_key, bob)
     get "/api/private-config"
@@ -101,7 +101,7 @@ class PrivateConfigSpec < Minitest::Test
     bob_key, bob = new_user
 
     log_in_as(alice_key, alice)
-    put_private(alice_key, alice, version: 1, settings: { "secret" => "alice only" })
+    put_private(alice_key, alice, revision: 1, settings: { "secret" => "alice only" })
 
     log_in_as(bob_key, bob)
     get "/api/private-config", { "pubkey" => alice }
@@ -116,7 +116,7 @@ class PrivateConfigSpec < Minitest::Test
     get "/api/private-config"
     assert_equal 401, last_response.status
 
-    put_private(key, pubkey, version: 1)
+    put_private(key, pubkey, revision: 1)
     assert_equal 401, last_response.status
   end
 
@@ -125,21 +125,21 @@ class PrivateConfigSpec < Minitest::Test
     other_key, = new_user
     log_in_as(key, pubkey)
 
-    put_private(key, pubkey, version: 1, signer: other_key)
+    put_private(key, pubkey, revision: 1, signer: other_key)
 
     assert_equal 400, last_response.status
   end
 
-  # Without a version check the server could serve back an older copy and the
+  # Without a revision check the server could serve back an older copy and the
   # signature on it would still verify perfectly.
   def test_refuses_a_rollback
     key, pubkey = new_user
     log_in_as(key, pubkey)
 
-    put_private(key, pubkey, version: 5)
+    put_private(key, pubkey, revision: 5)
     assert_equal 200, last_response.status
 
-    put_private(key, pubkey, version: 4)
+    put_private(key, pubkey, revision: 4)
     assert_equal 409, last_response.status
   end
 
@@ -147,10 +147,10 @@ class PrivateConfigSpec < Minitest::Test
     key, pubkey = new_user
     log_in_as(key, pubkey)
 
-    put_private(key, pubkey, version: 1, settings: { "a" => [1, 2] })
+    put_private(key, pubkey, revision: 1, settings: { "a" => [1, 2] })
     assert_equal 400, last_response.status, "arrays are not a settings leaf"
 
-    put_private(key, pubkey, version: 1, settings: "not a hash")
+    put_private(key, pubkey, revision: 1, settings: "not a hash")
     assert_equal 400, last_response.status
   end
 
@@ -158,7 +158,7 @@ class PrivateConfigSpec < Minitest::Test
     key, pubkey = new_user
     log_in_as(key, pubkey)
 
-    put_private(key, pubkey, version: 1, voted: ["not a signature"])
+    put_private(key, pubkey, revision: 1, voted: ["not a signature"])
 
     assert_equal 400, last_response.status
   end
@@ -171,7 +171,7 @@ class PrivateConfigSpec < Minitest::Test
     log_in_as(key, pubkey)
     voted = Digest::SHA256.hexdigest("a message")
 
-    put_private(key, pubkey, version: 1, voted: [voted])
+    put_private(key, pubkey, revision: 1, voted: [voted])
     assert_equal 200, last_response.status
 
     get "/api/private-config"
@@ -185,7 +185,7 @@ class PrivateConfigSpec < Minitest::Test
     key, pubkey = new_user
     log_in_as(key, pubkey)
 
-    put_private(key, pubkey, version: 1, voted: ["a" * 86])
+    put_private(key, pubkey, revision: 1, voted: ["a" * 86])
 
     assert_equal 400, last_response.status
   end

@@ -147,7 +147,7 @@ module ReputableChat
         view = build_view
         view.arrive!
 
-        if fresh || view.version.zero?
+        if fresh || view.revision.zero?
           establish(view)
           introduce!
           # The ratings just published are what this bot can see through, and
@@ -182,7 +182,7 @@ module ReputableChat
         friends.each { |member| view.adjust_rating(member.pubkey, friend: true) }
 
         view.publish_config!
-        @state.version = view.version
+        @state.revision = view.revision
         @state.save
 
         named = friends.map { |m| m.username || m.name }.join(", ")
@@ -330,7 +330,7 @@ module ReputableChat
         @state.vote(message.hash)
         view.adjust_rating(message.author, votes: polarity)
         view.publish_config!
-        @state.version = view.version
+        @state.revision = view.revision
         @state.save
       end
 
@@ -353,7 +353,7 @@ module ReputableChat
         chosen = prefer_drawn(candidates.keys)
         view.adjust_rating(chosen, friend: true)
         view.publish_config!
-        @state.version = view.version
+        @state.revision = view.revision
         @state.save
 
         log "friended #{view.display_name(chosen)}"

@@ -24,14 +24,16 @@
 - Linux, vim. Node 22 is available and is used by the parity spec.
 
 ```bash
-bundle exec rake spec       # full suite
+bundle exec rake spec       # full suite (browser tests skip without `npm install`)
+npm install                 # once, for the browser tests
 bundle exec rake curve      # print current curve, ladder and safety window
 bundle exec rake dump       # readable dump of the database
 bundle exec rake "dump[messages,reactions]"   # just those sections
-bundle exec rake genesis    # generate the genesis user record (once, ever)
+bundle exec rake genesis    # development genesis (already committed)
+RACK_ENV=production bundle exec rake genesis   # production genesis (once, ever)
 
 # The genesis account from a terminal, against a running server.
-bundle exec ruby script/tim.rb status
+bundle exec ruby script/tim.rb status             # uses this environment's seed
 bundle exec ruby script/tim.rb post "Planned outage 02:00-03:00 UTC on Friday"
 bundle exec ruby script/tim.rb visible <pubkey>   # least rating that makes them visible
 bundle exec ruby script/tim.rb friend <pubkey>
@@ -44,6 +46,10 @@ bin/bot personas/regular.yml --name ana      # run one
 See [docs/project/reputation.md](docs/project/reputation.md),
 [docs/project/chain.md](docs/project/chain.md) and
 [docs/project/bots.md](docs/project/bots.md).
+
+**One name per thing:** [docs/project/glossary.md](docs/project/glossary.md) is
+the vocabulary, including the terms that have been retired. Check it before
+inventing a word for something that already has one.
 
 ## Things that break silently
 
@@ -65,14 +71,27 @@ See [docs/project/reputation.md](docs/project/reputation.md),
   and so must `reputation/fingerprint.rb` and `public/js/fingerprint.js`. If they
   drift, every `ack` points at a record the other side cannot find and no
   reference resolves. `spec/record_parity_spec.rb` guards both.
-- **The genesis record.** `config/genesis/tim.json` is the bottom of the chain.
-  Regenerating it orphans every record that acknowledged the old one, which is
-  the whole chain. `script/generate_genesis.rb` refuses to overwrite it, or the
-  seed beside it.
-- **The genesis seed.** `config/genesis/seed` is gitignored, 0600, and holds the
-  seed phrase rather than the derived key. It is the one place in this project
-  a private key lives outside a browser, and whoever holds it is the genesis
-  account. Never print it, never commit it, back it up outside the checkout.
+- **The genesis record.** `config/genesis/<environment>.json` is the bottom of
+  the chain. Regenerating one orphans every record that acknowledged the old
+  one, which is the whole chain. `script/generate_genesis.rb` refuses to
+  overwrite either it or the seed beside it.
+- **Two genesis accounts, and only one is secret.**
+  `config/genesis/development.seed` is **committed on purpose** — that identity
+  is public, so a fresh clone can sign as the genesis account without being
+  handed a secret. `config/genesis/production.seed` is gitignored, 0600, and
+  never printed. `.gitignore` ignores every `*.seed` and then un-ignores
+  development's, so a new environment's seed is refused by default rather than
+  committed by omission.
+  A production deployment **refuses to boot on the development genesis**,
+  compared by key rather than by filename, because the realistic mistake is
+  copying the record into place rather than misnaming it.
+  Both hold the seed phrase rather than the derived key, so there is one secret
+  to look after rather than two that must not disagree.
+- **The vault key.** `public/js/vault.js` derives it from the Argon2id output
+  the identity key already comes from, separated by `seed.kdf.vault_domain`
+  through HKDF. Changing that domain strands every existing vault; changing how
+  the identity key is derived strands every existing account, which is why the
+  vault key is layered on top rather than alongside.
 - **The seed derivation domain.** Changing `seed.kdf.domain` in
   `config/reputation.yml` changes every derived key, which strands every
   existing account. It is versioned (`:v1`) so a future change can be handled
@@ -92,6 +111,23 @@ See [docs/project/reputation.md](docs/project/reputation.md),
 - The server reads as little of a signed blob as it can, and serves blobs back
   byte-identical.
 - Render user text with `textContent`, never `innerHTML`.
+
+## Testing the interface
+
+Most of the interface is asserted against `public/js/app.js` **as source**
+(`spec/ui_rules_spec.rb`). That catches a rule being deleted and cannot catch a
+rule being broken: it will happily confirm that `avatarFor` is called while the
+argument passed to it makes the picture disappear, which is a bug that shipped.
+
+`spec/browser_spec.rb` is the answer to that. It starts a server on a free port
+with its own database and image root, drives the real page in Chromium through
+`playwright-core`, and asserts on what is actually rendered. It skips rather
+than fails when `node_modules` is absent, because a clone should not need
+`npm install` to run `rake spec`.
+
+`playwright-core` rather than `playwright`: it is a single package with no
+dependency tree, and it uses the Chromium already on the machine instead of
+downloading one. The application itself still ships no JavaScript dependencies.
 
 ## Vendored files
 

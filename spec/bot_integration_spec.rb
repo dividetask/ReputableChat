@@ -103,7 +103,7 @@ class BotIntegrationSpec < Minitest::Test
     session.log_in(@tim)
     session.register
     session.publish_config(
-      identity: @tim, version: tim_version + 1,
+      identity: @tim, revision: tim_revision + 1,
       profile: { "username" => "Tim", "message" => "", "icon" => nil },
       ratings: tim_ratings.merge(
         pubkey => { "friend" => true, "reported" => false, "net_votes" => 0, "cleared" => false }
@@ -116,7 +116,7 @@ class BotIntegrationSpec < Minitest::Test
     blob ? JSON.parse(blob["payload"]) : nil
   end
 
-  def tim_version = tim_config&.fetch("version").to_i
+  def tim_revision = tim_config&.fetch("revision").to_i
   def tim_ratings = tim_config&.fetch("ratings") || {}
 
   def run_bot(persona_object, name: "ana", pool: nil, visits: 1, seed: 1)

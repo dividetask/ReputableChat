@@ -6,6 +6,8 @@ import * as seed from "./seed.js";
 import * as identity from "./identity.js";
 import { Reputation, Graph, toNumber, toFixed } from "./reputation.js";
 import { Session } from "./session.js";
+import { initialRatings, genesisProfile } from "./defaults.js";
+import * as vault from "./vault.js";
 
 const ROOM = "general";
 const LOGIN_PATH = "/";
@@ -17,11 +19,12 @@ const PUBKEY = /^[A-Za-z0-9_-]{42,44}$/;
 const $ = (id) => document.getElementById(id);
 
 const state = {
-  config: null, emotes: null, me: null, profile: null, version: 0,
+  config: null, emotes: null, me: null, profile: null, revision: 0,
   ratings: {}, graph: new Graph(), reputation: null, session: null,
-  seq: 0, voted: new Set(), viewing: null, settings: {}, privateVersion: 0,
+  seq: 0, voted: new Set(), viewing: null, settings: {}, vaultRevision: 0,
+  vaultDirty: false,
   reactions: new Map(), recentlyBlocked: new Map(), replyingTo: null,
-  genesis: null, tip: null,
+  genesis: null, tip: null, newFriends: {}, limits: null,
   renderEpoch: 0, renderedKey: null, pendingRegistration: false,
 };
 
@@ -99,41 +102,94 @@ function buildReputation() {
   return new Reputation(deepMerge(state.config, state.settings));
 }
 
-async function loadPrivateConfig() {
-  const { config } = await api("/api/private-config");
+// --- the vault ---------------------------------------------------------
+//
+// Local first. Changes land in memory immediately and reach the server on a
+// timer, when the page is hidden, and at log off. What that costs is bounded
+// and worth naming: a tab that dies between pushes loses whatever happened
+// since the last one.
+
+function vaultContents() {
+  return { settings: state.settings, voted: [...state.voted] };
+}
+
+function applyVault(contents) {
+  state.settings = contents.settings || {};
+  state.voted = new Set(contents.voted || []);
+}
+
+async function loadVault() {
+  const { vault: blob } = await api("/api/vault");
 
   state.settings = {};
   state.voted = new Set();
-  state.privateVersion = 0;
-  if (!config) return;
+  state.vaultRevision = 0;
+  state.vaultDirty = false;
+  if (!blob) return;
 
-  // Verified even though the MVP takes other people's configs on trust --
+  // Verified even though the MVP takes other people's records on trust --
   // detecting tampering is the entire reason this one is signed.
-  if (!(await identity.verifyBlob(state.me.pubkey, config))) {
+  if (!(await identity.verifyBlob(state.me.pubkey, blob))) {
     return status($("chat-status"),
                   "Your saved settings did not verify and were ignored.", "error");
   }
 
-  const payload = JSON.parse(config.payload);
-  state.privateVersion = payload.version || 0;
-  state.settings = payload.settings || {};
-  state.voted = new Set(payload.voted || []);
+  const payload = JSON.parse(blob.payload);
+  state.vaultRevision = payload.revision || 0;
+
+  const contents = await vault.unseal(state.me.vaultKey, payload);
+  if (!contents) {
+    return status($("chat-status"),
+                  "Your saved settings could not be decrypted and were ignored.", "error");
+  }
+  applyVault(contents);
 }
 
-async function publishPrivateConfig() {
-  state.privateVersion += 1;
+// What a change calls. It does not touch the network: a vote should not wait
+// on a request, and a run of them should not make a run of them.
+function vaultChanged() {
+  state.vaultDirty = true;
+}
+
+async function writeVault(revision, contents) {
   const ts = Math.floor(Date.now() / 1000);
-  const voted = [...state.voted];
-  const payload = identity.privateConfigPayload({
-    pubkey: state.me.pubkey, version: state.privateVersion,
-    settings: state.settings, voted, ts,
+  const sealed = await vault.seal(state.me.vaultKey, contents);
+  const payload = identity.vaultPayload({
+    pubkey: state.me.pubkey, revision, ...sealed, ts,
   });
 
-  await send("PUT", "/api/private-config", {
-    version: state.privateVersion, settings: state.settings, voted, ts,
-    signature: await identity.sign(state.me, payload),
+  await send("PUT", "/api/vault", {
+    revision, ...sealed, ts, signature: await identity.sign(state.me, payload),
   });
+  state.vaultRevision = revision;
 }
+
+// A rejection means the other device got there first, so this one merges
+// rather than retrying -- see vault.merge for which direction each list
+// resolves in.
+async function pushVault({ force = false } = {}) {
+  if (!state.me?.vaultKey) return;
+  if (!state.vaultDirty && !force) return;
+
+  state.vaultDirty = false;
+  try {
+    await writeVault(state.vaultRevision + 1, vaultContents());
+  } catch {
+    try {
+      const { vault: blob } = await api("/api/vault");
+      const payload = blob ? JSON.parse(blob.payload) : null;
+      const theirs = payload ? await vault.unseal(state.me.vaultKey, payload) : null;
+
+      applyVault(vault.merge(vaultContents(), theirs));
+      await writeVault(Math.max(state.vaultRevision, payload?.revision || 0) + 1, vaultContents());
+    } catch (error) {
+      // Kept dirty, so the next push tries again rather than dropping it.
+      state.vaultDirty = true;
+      status($("chat-status"), `Could not save your settings: ${error.message}`, "error");
+    }
+  }
+}
+
 
 // Re-sorts everyone from the graph already in hand. In-session reports are
 // replayed so a toggle does not quietly un-block someone.
@@ -170,6 +226,13 @@ function renderRoute() {
   const newAccount = creatingAccount();
   $("new-account").classList.toggle("hidden", !newAccount);
   $("login-intro").classList.toggle("hidden", newAccount);
+
+  // On the new account screen there is one button and it creates the account.
+  // Two buttons there read as two different destinations when only one of them
+  // goes anywhere -- "New Account" would only regenerate the seed already on
+  // screen, and "Login" was what actually created the account.
+  $("unlock").textContent = newAccount ? "Create Account" : "Login";
+  $("generate").classList.toggle("hidden", newAccount);
 }
 const chosenName = () => $("new-name").value.trim();
 
@@ -244,9 +307,104 @@ async function signIn(derived, { restoring = false } = {}) {
   $("new-seed-block").classList.add("hidden");
   $("unregistered-note").classList.remove("hidden");
   $("new-name").value = "";
+  resetNewFriends();
   goTo(NEW_ACCOUNT_PATH);
   $("new-name").focus();
   refreshSeedField();
+}
+
+// --- choosing friends before the account exists -------------------------
+//
+// A friend list is a list of public keys and nothing else, so none of this
+// needs the server: a key that belongs to nobody yet, or to nobody ever, is
+// still a perfectly good thing to write down. That is what makes it possible
+// to choose here, before the account being created has said anything.
+
+// Before login there are no fetched profiles, so the only name available is the
+// genesis account's, out of the declaration already in hand.
+function newAccountName(pubkey) {
+  if (state.genesis && pubkey === state.genesis.pubkey) {
+    return genesisProfile(state.genesis)?.username || "the genesis account";
+  }
+  return "unknown";
+}
+
+function resetNewFriends() {
+  state.newFriends = initialRatings({
+    genesisPubkey: state.genesis?.pubkey,
+    ownPubkey: state.me?.pubkey,
+  });
+  renderNewFriends();
+}
+
+function renderNewFriends() {
+  const box = $("new-friends");
+  box.replaceChildren();
+
+  const keys = Object.keys(state.newFriends);
+  if (!keys.length) {
+    const empty = document.createElement("p");
+    empty.className = "empty";
+    empty.textContent = "nobody — you will not be able to see anyone";
+    return box.append(empty);
+  }
+
+  for (const pubkey of keys) {
+    const row = document.createElement("div");
+    row.className = "row";
+
+    const name = document.createElement("span");
+    name.className = "name";
+    name.textContent = newAccountName(pubkey); // textContent, never innerHTML
+
+    const key = document.createElement("span");
+    key.className = "pubkey";
+    key.textContent = pubkey;
+
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "secondary";
+    remove.textContent = "remove";
+    remove.addEventListener("click", () => removeNewFriend(pubkey));
+
+    row.append(avatarFor(pubkey), name, key, remove);
+    box.append(row);
+  }
+}
+
+// Removing the genesis account here is the one choice on this screen with a
+// consequence somebody might not have in mind, so it is the one that asks.
+// Removing a key pasted in ten seconds ago is not worth a dialog.
+async function removeNewFriend(pubkey) {
+  if (state.genesis && pubkey === state.genesis.pubkey) {
+    const sure = await confirmAction(
+      `Start without ${newAccountName(pubkey)}? Nothing it vouches for will reach ` +
+      "you, and accounts nobody else has vouched for will be invisible. You can " +
+      "add it back later.",
+      "Yes, remove",
+    );
+    if (!sure) return;
+  }
+
+  delete state.newFriends[pubkey];
+  renderNewFriends();
+}
+
+function addNewFriend() {
+  const field = $("new-friend-key");
+  const pubkey = field.value.trim();
+  const say = (message, kind) => status($("new-friend-status"), message, kind);
+
+  if (!PUBKEY.test(pubkey)) return say("That is not a public key.", "error");
+  if (pubkey === state.me?.pubkey) return say("That is your own key.", "error");
+  if (state.newFriends[pubkey]) return say("Already on the list.", "error");
+
+  // The same shape the seeded friendship uses, so nothing downstream can tell
+  // which entries were chosen here and which were the default.
+  state.newFriends[pubkey] = { friend: true, reported: false, net_votes: 0, cleared: false };
+  field.value = "";
+  say("Added.", "ok");
+  renderNewFriends();
 }
 
 // A brand new seed, shown so it can be copied across.
@@ -257,6 +415,7 @@ async function startNewAccount() {
   state.pendingRegistration = false;
   $("new-seed-block").classList.remove("hidden");
   $("unregistered-note").classList.add("hidden");
+  resetNewFriends();
   goTo(NEW_ACCOUNT_PATH);
   refreshSeedField();
   $("new-name").focus();
@@ -265,6 +424,13 @@ async function startNewAccount() {
 async function registerWith(username) {
   await post("/api/register", {});
   state.profile = { username, message: "", icon: null };
+
+  // Whatever was on the new account screen, which started from the seeded
+  // default and is theirs to have edited. Their own key can only have got in
+  // here by being pasted before they had one, so it goes now.
+  state.ratings = { ...state.newFriends };
+  delete state.ratings[state.me.pubkey];
+
   await publishConfig();
   await enterChat();
 }
@@ -272,6 +438,10 @@ async function registerWith(username) {
 
 
 async function logOff() {
+  // Best effort, and the last of several: the timer and the hidden-page push
+  // are what actually keep a vault current, because a tab can close without
+  // ever reaching this line.
+  await pushVault().catch(() => {});
   await identity.forget();
   location.reload();
 }
@@ -279,17 +449,17 @@ async function logOff() {
 // --- config ------------------------------------------------------------
 
 // Every change to friends, reports or emote tallies is re-signed and
-// re-uploaded. The version must climb or the server rejects it as a rollback.
+// re-uploaded. The revision must climb or the server rejects it as a rollback.
 async function publishConfig() {
-  state.version += 1;
+  state.revision += 1;
   const ts = Math.floor(Date.now() / 1000);
   const payload = identity.configPayload({
-    pubkey: state.me.pubkey, version: state.version,
+    pubkey: state.me.pubkey, revision: state.revision,
     profile: state.profile, ratings: state.ratings, ts,
   });
 
   await send("PUT", "/api/config", {
-    version: state.version, profile: state.profile, ratings: state.ratings,
+    revision: state.revision, profile: state.profile, ratings: state.ratings,
     ts, signature: await identity.sign(state.me, payload),
   });
 }
@@ -307,7 +477,7 @@ async function loadOwnConfig() {
   const { config } = await api(`/api/config/${state.me.pubkey}`);
   const payload = parseConfig(config);
 
-  state.version = payload ? payload.version : 0;
+  state.revision = payload ? payload.revision : 0;
   state.ratings = payload?.ratings || {};
   state.profile = payload?.profile || { username: "anonymous", message: "", icon: null };
 }
@@ -320,6 +490,12 @@ async function loadNetwork() {
   state.graph = new Graph();
   state.graph.add(state.me.pubkey, state.ratings);
   state.profiles = new Map([[state.me.pubkey, state.profile]]);
+
+  // The genesis account has no config to fetch, so its name comes from the
+  // declaration already in hand. Seeded before the walk, so a config it has
+  // published since wins over it.
+  const genesis = genesisProfile(state.genesis);
+  if (genesis) state.profiles.set(state.genesis.pubkey, genesis);
 
   let frontier = [state.me.pubkey];
   const seen = new Set(frontier);
@@ -377,7 +553,7 @@ async function enterChat() {
   $("login").classList.add("hidden");
   $("chat").classList.remove("hidden");
 
-  await loadPrivateConfig();
+  await loadVault();
   state.reputation = buildReputation();
   await loadOwnConfig();
   await loadNetwork();
@@ -386,6 +562,10 @@ async function enterChat() {
   $("me").textContent = `${state.profile.username} · ${fingerprint(state.me.pubkey)}`;
   refreshMessages();
   setInterval(refreshMessages, 4000);
+  // Local first, pushed on a timer. The interval is the server's advice, and
+  // it bounds how much a dying tab can lose rather than how often anything is
+  // allowed to happen.
+  setInterval(() => pushVault().catch(() => {}), (state.limits?.vault_sync_seconds || 3600) * 1000);
 }
 
 async function refreshMessages() {
@@ -543,7 +723,7 @@ function blockedStub(message) {
   const undo = document.createElement("button");
   undo.type = "button";
   undo.textContent = "undo report";
-  undo.addEventListener("click", () => undoReport(message.author).catch(
+  undo.addEventListener("click", () => undoReport(message.author, { confirm: false }).catch(
     (e) => status($("chat-status"), e.message, "error"),
   ));
   actions.append(undo);
@@ -554,7 +734,27 @@ function blockedStub(message) {
 
 // Names are not unique, so an avatar derived from the key gives every person a
 // stable look even before they upload one. Same key, same colour, always.
-function avatarFor(pubkey, extra = "", icon = state.profiles?.get(pubkey)?.icon) {
+// Where an icon comes from, in order: a config fetched during the walk, then
+// the genesis declaration the client holds before it has fetched anything.
+//
+// The second is why the genesis account has a face on the account creation
+// screen, where no config has been fetched and none can be -- the account
+// doing the looking does not exist yet.
+function iconFor(pubkey) {
+  const known = state.profiles?.get(pubkey)?.icon;
+  if (known) return known;
+
+  if (state.genesis && pubkey === state.genesis.pubkey) {
+    return genesisProfile(state.genesis)?.icon || null;
+  }
+  return null;
+}
+
+function avatarFor(pubkey, extra = "", icon = iconFor(pubkey)) {
+  // The avatar already on somebody's profile is the end of the journey, so it
+  // enlarges. Everywhere else an avatar is a way to get there.
+  const onProfile = extra.includes("avatar-large");
+
   // An <img> with an empty src resolves to the page URL and renders as a
   // broken image, so anyone without an icon gets the placeholder instead.
   if (icon) {
@@ -562,7 +762,7 @@ function avatarFor(pubkey, extra = "", icon = state.profiles?.get(pubkey)?.icon)
     img.className = `avatar ${extra}`.trim();
     img.src = `/images/${icon}`;
     img.alt = "";
-    img.addEventListener("click", () => showProfile(pubkey));
+    if (onProfile) enlarges(img, `/images/${icon}`); else opensProfile(img, pubkey);
     return img;
   }
 
@@ -573,8 +773,59 @@ function avatarFor(pubkey, extra = "", icon = state.profiles?.get(pubkey)?.icon)
   placeholder.className = `avatar placeholder ${extra}`.trim();
   placeholder.style.background = `hsl(${hash % 360} 42% 30%)`;
   placeholder.textContent = pubkey.slice(0, 2);
-  placeholder.addEventListener("click", () => showProfile(pubkey));
+  // A placeholder is two letters on a colour. There is nothing to enlarge, so
+  // on a profile it does nothing at all.
+  if (!onProfile) opensProfile(placeholder, pubkey);
   return placeholder;
+}
+
+// How long the pointer has to rest on an avatar before it counts as wanting
+// something. Without it, crossing a list of messages would open every profile
+// on the way past, which is worse than no hover at all.
+const HOVER_INTENT_MS = 400;
+
+function opensProfile(element, pubkey) {
+  let waiting = null;
+
+  element.classList.add("enlargeable");
+  element.addEventListener("mouseenter", () => {
+    waiting = setTimeout(() => showProfile(pubkey), HOVER_INTENT_MS);
+  });
+  element.addEventListener("mouseleave", () => clearTimeout(waiting));
+  element.addEventListener("click", (event) => {
+    // A tap fires this without ever hovering, so it must not wait.
+    clearTimeout(waiting);
+    event.stopPropagation();
+    showProfile(pubkey);
+  });
+}
+
+// The overlay does not take pointer events, so what dismisses it is leaving the
+// image rather than reaching the backdrop -- an overlay that swallowed the
+// pointer would cover the thing whose hover is keeping it open, and flicker
+// between the two states forever.
+function enlarges(element, source) {
+  element.addEventListener("mouseenter", () => showLarge(source));
+  element.addEventListener("mouseleave", () => hideLarge());
+  element.addEventListener("click", (event) => {
+    event.stopPropagation();
+    // A tap is not a hover: on a touch screen the overlay is not already up.
+    if ($("lightbox").classList.contains("hidden")) showLarge(source); else hideLarge();
+  });
+}
+
+function showLarge(source) {
+  const box = $("lightbox");
+  $("lightbox-image").src = source;
+  box.classList.remove("hidden");
+  box.setAttribute("aria-hidden", "false");
+}
+
+function hideLarge() {
+  const box = $("lightbox");
+  box.classList.add("hidden");
+  box.setAttribute("aria-hidden", "true");
+  $("lightbox-image").removeAttribute("src");
 }
 
 // Record hashes are hex, so they are already safe as an element id.
@@ -791,7 +1042,7 @@ async function countAsVote(message, polarity) {
   touch();
 
   await publishConfig();
-  await publishPrivateConfig();
+  vaultChanged();
 }
 
 // --- profiles ----------------------------------------------------------
@@ -820,7 +1071,9 @@ function showProfile(pubkey) {
     $("my-avatar").replaceChildren(avatarFor(pubkey, "avatar-large", state.profile.icon));
     renderRelations();
   } else {
-    $("profile-icon").replaceChildren(avatarFor(pubkey, "avatar-large", profile.icon));
+    // iconFor rather than the fetched profile's icon, so an account with no
+    // config to fetch -- the genesis -- still has a face here.
+    $("profile-icon").replaceChildren(avatarFor(pubkey, "avatar-large"));
     $("profile-name").textContent = profile.username || "someone";
     $("profile-fp").textContent = fingerprint(pubkey);
     $("profile-message").textContent = profile.message || "";
@@ -881,7 +1134,18 @@ async function reportUser(pubkey) {
   }
 }
 
-async function undoReport(pubkey) {
+// `confirm` defaults on, so a call site added later asks by default. The undo
+// beside a just-blocked message passes it off: that one exists for a misclick,
+// and a dialog guarding an undo is a dialog guarding the wrong direction.
+async function undoReport(pubkey, { confirm = true } = {}) {
+  if (confirm) {
+    const sure = await confirmAction(
+      `Unblock ${displayName(pubkey)}? Their messages become visible to you again.`,
+      "Yes, unblock",
+    );
+    if (!sure) return;
+  }
+
   const current = state.ratings[pubkey];
   if (current) state.ratings[pubkey] = { ...current, reported: false };
 
@@ -896,6 +1160,13 @@ async function undoReport(pubkey) {
 }
 
 async function unfriend(pubkey) {
+  const sure = await confirmAction(
+    `Remove ${displayName(pubkey)} from your friends? Everything they vouch for ` +
+    "stops reaching you, and anyone only they made visible becomes invisible.",
+    "Yes, unfriend",
+  );
+  if (!sure) return;
+
   const current = state.ratings[pubkey];
   if (current) state.ratings[pubkey] = { ...current, friend: false };
 
@@ -992,10 +1263,16 @@ function fillRelations(box, predicate, verb, action) {
     const name = document.createElement("span");
     name.className = "name";
     name.textContent = displayName(pubkey);
+    // The avatar enlarges now, so the name is what opens a profile -- which is
+    // already how a message row behaves.
+    name.addEventListener("click", () => showProfile(pubkey));
 
-    const fp = document.createElement("span");
-    fp.className = "fp";
-    fp.textContent = fingerprint(pubkey);
+    // The whole key, not a fingerprint. This is the list where somebody
+    // checks that the person they vouched for is the person they meant, and a
+    // prefix is exactly what an impersonator would match.
+    const key = document.createElement("span");
+    key.className = "pubkey";
+    key.textContent = pubkey;
 
     const button = document.createElement("button");
     button.type = "button";
@@ -1005,7 +1282,7 @@ function fillRelations(box, predicate, verb, action) {
       (e) => status($("profile-status"), e.message, "error"),
     ));
 
-    row.append(name, fp, button);
+    row.append(avatarFor(pubkey), name, key, button);
     box.append(row);
   }
 }
@@ -1037,6 +1314,7 @@ async function addByKey() {
   refreshMessages();
 
   $("add-key").value = "";
+  renderRelations();
   status($("profile-status"), `Added. They are now ${state.session.bucketOf(pubkey)}.`, "ok");
 }
 
@@ -1046,7 +1324,7 @@ async function toggleUnrated() {
   state.settings = deepMerge(state.settings, {
     display: { show_unrated: $("show-unrated").checked },
   });
-  await publishPrivateConfig();
+  vaultChanged();
 
   state.reputation = buildReputation();
   rebuildSession();
@@ -1138,8 +1416,8 @@ async function saveProfile() {
 // --- boot ---------------------------------------------------------------
 
 async function boot() {
-  [state.config, state.emotes, state.genesis] = await Promise.all([
-    api("/api/defaults"), api("/api/emotes"), api("/api/genesis"),
+  [state.config, state.emotes, state.genesis, state.limits] = await Promise.all([
+    api("/api/defaults"), api("/api/emotes"), api("/api/genesis"), api("/api/limits"),
   ]);
   state.reputation = buildReputation();
   await seed.loadWordlist();
@@ -1169,7 +1447,24 @@ async function boot() {
   $("new-name").addEventListener("input", refreshSeedField);
 
   $("generate").addEventListener("click", () => startNewAccount());
+  $("new-friend-add").addEventListener("click", () => addNewFriend());
+  $("new-friend-key").addEventListener("keydown", (event) => {
+    // Enter in this field must not submit the login form and create the
+    // account with a key half typed.
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    addNewFriend();
+  });
   window.addEventListener("popstate", renderRoute);
+
+  // Hidden rather than unloading: a phone backgrounding a tab may never fire
+  // an unload event at all, and this one it does fire.
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") pushVault().catch(() => {});
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") hideLarge();
+  });
 
   $("copy-seed").addEventListener("click", async () => {
     try {

@@ -78,7 +78,7 @@ module ReputableChat
       rows.each do |row|
         payload = parse(row[:payload])
         profile = payload["profile"] || {}
-        @out.puts format("  %-20s v%-3d %s", named(row[:pubkey]), row[:version],
+        @out.puts format("  %-20s v%-3d %s", named(row[:pubkey]), row[:revision],
                          profile["icon"] ? "icon #{profile['icon'][0, 12]}…" : "no icon")
         @out.puts "      bio: #{clip(profile['message'])}" unless profile["message"].to_s.empty?
 
@@ -115,6 +115,9 @@ module ReputableChat
         @out.puts format("  #%-4d %-20s %s%s", row[:id], named(row[:author]), at(row[:received_at]), reply)
         @out.puts "        #{clip(payload['body'])}"
         @out.puts "        ack #{ack_label(row[:ack], by_hash)}"
+        # The note exists for a person reading the chain, so the tool for
+        # reading the chain has to show it.
+        @out.puts "        note #{clip(payload['note'])}" if payload["note"]
       end
     end
 
@@ -165,7 +168,7 @@ module ReputableChat
       rows.each do |row|
         payload = parse(row[:payload])
         settings = flatten(payload["settings"] || {})
-        @out.puts format("  %-20s v%-3d voted on %d", named(row[:pubkey]), row[:version],
+        @out.puts format("  %-20s v%-3d voted on %d", named(row[:pubkey]), row[:revision],
                          (payload["voted"] || []).size)
         @out.puts "      #{settings.empty? ? 'no pinned settings' : settings.join('  ')}"
       end

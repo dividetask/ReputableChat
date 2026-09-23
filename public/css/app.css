@@ -139,8 +139,17 @@ h3.section {
   background: var(--line); border-radius: 5px;
 }
 h3.section:first-child { margin-top: 0; }
-.avatar-large { width: 72px; height: 72px; border-radius: 10px; font-size: 24px; margin-bottom: 4px; }
-.avatar-large.avatar { cursor: default; }
+/* A profile is the one place somebody is looking AT a person rather than past
+   them, so the picture gets the room. Capped against the viewport so it stays
+   whole on a phone. */
+.avatar-large {
+  width: min(220px, 62vmin);
+  height: min(220px, 62vmin);
+  border-radius: 16px;
+  font-size: 72px;
+  margin-bottom: 10px;
+}
+.avatar-large.avatar { cursor: zoom-in; }
 
 /* Reply: a quoted line above the message, and a bar above the composer. */
 .reply-quote {
@@ -176,3 +185,36 @@ button.danger { background: var(--danger); color: #fff; }
 .msg .actions .emote-row { display: flex; gap: 2px; align-items: center; }
 .msg .actions .emote-row.negative { border-top: 1px solid var(--line); padding-top: 2px; }
 .msg .actions .divider { width: 1px; height: 14px; background: var(--line); margin: 0 4px; }
+
+/* A public key shown in full, so it can be read and compared rather than
+   trusted. Long, so it wraps rather than pushing the button off the row. */
+.pubkey {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  opacity: 0.7;
+  word-break: break-all;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.enlargeable { cursor: zoom-in; }
+
+/* The enlarged avatar. Pointer events off, so leaving the small image is what
+   dismisses it -- the overlay must never sit between the pointer and the
+   thing it is showing. */
+#lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgb(0 0 0 / 82%);
+  pointer-events: none;
+}
+
+#lightbox-image {
+  max-width: 92vmin;
+  max-height: 92vmin;
+  border-radius: 12px;
+}

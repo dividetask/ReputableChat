@@ -22,7 +22,7 @@ class BotStateSpec < Minitest::Test
       state.recycle!(seed: "a b c", pubkey: "KEY", username: "Ana", retire_after_days: 3)
       state.seq = 7
       state.prev = "SIG"
-      state.version = 4
+      state.revision = 4
       state.vote("MSG")
       state.save
 
@@ -31,7 +31,7 @@ class BotStateSpec < Minitest::Test
       assert_equal "a b c", reloaded.seed
       assert_equal 7, reloaded.seq
       assert_equal "SIG", reloaded.prev
-      assert_equal 4, reloaded.version
+      assert_equal 4, reloaded.revision
       assert reloaded.voted?("MSG"), "one vote per message did not survive the restart"
     end
   end

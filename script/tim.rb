@@ -140,7 +140,7 @@ module Tim
     puts "  Handle       #{config['profile']['username']}"
     puts "  Public key   #{client.pubkey}"
     puts "  Genesis      #{ReputableChat::Genesis.current.hash}"
-    puts "  Config       version #{config['version']}, #{ratings.size} #{ratings.size == 1 ? 'rating' : 'ratings'}"
+    puts "  Config       revision #{config['revision']}, #{ratings.size} #{ratings.size == 1 ? 'rating' : 'ratings'}"
     puts
 
     return puts("  Nobody rated yet.\n\n") if ratings.empty?
@@ -171,13 +171,13 @@ module Tim
     # is not implemented anywhere yet, and a chain that is right within one
     # room and silently skips in another is worse than an absent one.
     payload = Payload.message(author: client.pubkey, room: room, seq: seq, prev: nil,
-                              body: body, ack: ack, issued_at: ts)
+                              body: body, ack: ack, issued_at: ts, note: options[:note])
     canonical = Crypto::Canonical.dump(payload)
     signature = client.sign(payload)
 
     client.post_json("/api/room/#{room}/message",
                      { "seq" => seq, "prev" => nil, "ack" => ack, "body" => body,
-                       "ts" => ts, "signature" => signature })
+                       "note" => options[:note], "ts" => ts, "signature" => signature })
 
     # The same hash the server derived, from the same two strings.
     hash = Crypto::Record.digest(payload: canonical, signature: signature)
@@ -185,6 +185,7 @@ module Tim
     puts "  Posted to ##{room} as ##{seq}."
     puts "  Record  #{hash}"
     puts "  Ack     #{ack}#{ack == ReputableChat::Genesis.current.hash ? '  (genesis)' : ''}"
+    puts "  Note    #{options[:note]}" if options[:note]
     puts
   end
 
@@ -258,23 +259,23 @@ module Tim
     return from_genesis if blob.nil?
 
     payload = JSON.parse(blob["payload"])
-    { "version" => payload["version"].to_i, "profile" => payload["profile"], "ratings" => payload["ratings"] || {} }
+    { "revision" => payload["revision"].to_i, "profile" => payload["profile"], "ratings" => payload["ratings"] || {} }
   end
 
   def from_genesis
     record = JSON.parse(ReputableChat::Genesis.current.payload)
 
-    { "version" => 0, "ratings" => {},
+    { "revision" => 0, "ratings" => {},
       "profile" => { "username" => record["handle"], "message" => record["bio"], "icon" => record["icon"] } }
   end
 
   def publish(client, config)
-    version = config["version"].to_i + 1
+    revision = config["revision"].to_i + 1
     ts = Time.now.to_i
-    payload = Payload.config(pubkey: client.pubkey, version: version, profile: config["profile"],
+    payload = Payload.config(pubkey: client.pubkey, revision: revision, profile: config["profile"],
                              ratings: config["ratings"], issued_at: ts)
 
-    client.put_json("/api/config", { "version" => version, "profile" => config["profile"],
+    client.put_json("/api/config", { "revision" => revision, "profile" => config["profile"],
                                      "ratings" => config["ratings"], "ts" => ts,
                                      "signature" => client.sign(payload) })
   end
@@ -332,7 +333,7 @@ module Tim
   def parse(argv)
     settings = ReputableChat::ServerConfig.load
     options = { command: nil, args: [], room: ROOM, origin: settings.fetch("origin"),
-                url: nil, seed_path: ReputableChat::Operator.seed_path }
+                url: nil, seed_path: ReputableChat::Operator.seed_path, note: nil }
 
     until argv.empty?
       flag = argv.shift
@@ -341,6 +342,7 @@ module Tim
       when "--origin" then options[:origin]    = argv.shift.to_s
       when "--url"    then options[:url]       = argv.shift.to_s
       when "--seed"   then options[:seed_path] = File.expand_path(argv.shift.to_s)
+      when "--note"   then options[:note]      = ReputableChat::Params.note(argv.shift)
       when "--help", "-h" then usage
       else options[:command] ? options[:args] << flag : options[:command] = flag
       end
@@ -366,6 +368,8 @@ module Tim
 
       options:
         --room NAME         room for `post` (default: #{ROOM})
+        --note TEXT         free text signed into the record for anyone reading
+                            the raw chain; the software never reads it
         --url URL           where to reach the server (default: the origin)
         --origin ORIGIN     the origin inside the signature (default: config/server.yml)
         --seed FILE         seed file (default: config/genesis/seed)

@@ -5,6 +5,7 @@ require "json"
 require "yaml"
 require "securerandom"
 require_relative "params"
+require_relative "server_config"
 require_relative "cryptography/signature"
 require_relative "cryptography/canonical"
 require_relative "cryptography/payload"
@@ -64,16 +65,25 @@ module ReputableChat
     # FrozenError on the first real request while passing every unfrozen test.
     DEFAULTS = YAML.safe_load_file(File.join(opts[:root], "config", "reputation.yml")).freeze
     EMOTES   = YAML.safe_load_file(File.join(opts[:root], "config", "emotes.yml")).freeze
+    NOTICES  = YAML.safe_load_file(File.join(opts[:root], "config", "notices.yml")).freeze
+    NOTICE_KINDS = NOTICES.fetch("kinds").freeze
     ALLOWED_EMOTES = EMOTES.values_at("positive", "negative", "neutral").compact.flatten.freeze
 
     class << self
       attr_accessor :store, :images, :origin, :genesis
+      attr_writer :limits
+
+      # Defaulted rather than required, so a test or a script can build the app
+      # without assembling a config first.
+      def limits = @limits || ServerConfig::LIMITS
     end
 
     def store = self.class.store
     def images = self.class.images
     def origin = self.class.origin
     def genesis = self.class.genesis
+    def limits = self.class.limits
+    def limit(name) = limits.fetch(name.to_s)
 
     route do |r|
       r.public
@@ -96,6 +106,15 @@ module ReputableChat
         # default change reach every user who never pinned that setting.
         r.get("defaults") { DEFAULTS }
         r.get("emotes")   { EMOTES }
+        # The kinds a client has to be able to render, served for the same
+        # reason the emotes are: baking them into the JS means a new kind
+        # cannot reach anyone already running an old copy.
+        r.get("notice-kinds") { NOTICES }
+        # Served so a client knows the ceilings before it tries to save,
+        # rather than discovering them by being refused. `seen_entries` is
+        # advice: nothing rejects a vault for exceeding it, but a client that
+        # ignores it will eventually write one too large to store.
+        r.get("limits") { limits }
         # The bottom of the chain. Served so a client can check the hash it
         # was built with against the one this server is running, rather than
         # discovering a mismatch as signatures that will not verify.
@@ -104,9 +123,40 @@ module ReputableChat
         r.post("register")  { register(r) }
         r.post("image")     { upload_image(r) }
 
+        # Takes no pubkey on either verb: it uses the session's, so asking for
+        # somebody else's vault is not expressible through the API.
+        r.on "vault" do
+          r.get { own_vault(r) }
+          r.put { put_vault(r) }
+        end
+
         r.on "private-config" do
           r.get { own_private_config(r) }
           r.put { store_private_config(r) }
+        end
+
+        # The chain records. `config` below is what these replace and is on
+        # its way out; both are served while the client moves across.
+        r.on "identity" do
+          r.post("batch") { batch(r, :identities) }
+          r.put { put_identity(r) }
+          r.get(String) { |pubkey| fetch(:identity, pubkey) }
+        end
+
+        r.on "attestation" do
+          r.post("batch") { batch(r, :attestations) }
+          r.put { put_attestation(r) }
+          r.get(String) { |pubkey| fetch(:attestation, pubkey) }
+        end
+
+        r.on "notice" do
+          r.post { post_notice(r) }
+          r.get(String) { |publisher| fetch_notices(r, publisher) }
+        end
+
+        r.on "adjustment" do
+          r.post { post_adjustment(r) }
+          r.get(String) { |pubkey| fetch_adjustments(r, pubkey) }
         end
 
         r.on "config" do
@@ -173,7 +223,7 @@ module ReputableChat
     # sniffed from them, so nothing a client claims about an upload is trusted.
     def upload_image(r)
       declared = r.env["CONTENT_LENGTH"].to_i
-      r.halt(413, { "error" => "image too large" }) if declared > Store::Images::MAX_BYTES
+      r.halt(413, { "error" => "image too large" }) if declared > images.max_bytes
 
       case (result = images.store(r.body.read))
       when :too_large   then r.halt(413, { "error" => "image too large" })
@@ -205,58 +255,247 @@ module ReputableChat
       { "config" => present_config(store.private_config(current_pubkey(r))) }
     end
 
+    def own_vault(r)
+      row = store.vault(current_pubkey(r))
+      return { "vault" => nil } unless row
+
+      { "vault" => { "revision" => row[:revision], "payload" => row[:payload],
+                     "signature" => row[:signature] } }
+    end
+
+    # The server verifies the signature over the ciphertext and rejects a
+    # rollback, and that is everything it can do. It cannot read the contents,
+    # so it cannot check their shape -- the byte bound on the ciphertext is the
+    # only limit it has.
+    def put_vault(r)
+      pubkey     = current_pubkey(r)
+      revision   = Params.integer(r.params["revision"], min: 1) or bad_request(r, "bad revision")
+      ciphertext = Params.sealed(r.params["ciphertext"], max: limit(:vault_bytes)) or bad_request(r, "bad ciphertext")
+      iv         = Params.iv(r.params["iv"])                     or bad_request(r, "bad iv")
+      sig        = Params.signature(r.params["signature"])       or bad_request(r, "bad signature")
+      ts         = Params.integer(r.params["ts"])                or bad_request(r, "bad timestamp")
+
+      payload = Cryptography::Payload.vault(
+        pubkey: pubkey, revision: revision, ciphertext: ciphertext, iv: iv, issued_at: ts
+      )
+      verify!(r, pubkey, sig, payload)
+
+      result = store.store_vault(
+        pubkey: pubkey, revision: revision,
+        payload: Cryptography::Canonical.dump(payload), signature: sig
+      )
+      r.halt(409, { "error" => "revision is not newer than the stored one" }) if result == :stale
+
+      { "stored" => true, "revision" => revision }
+    end
+
     def store_private_config(r)
       pubkey   = current_pubkey(r)
-      version  = Params.integer(r.params["version"], min: 1) or bad_request(r, "bad version")
+      revision  = Params.integer(r.params["revision"], min: 1) or bad_request(r, "bad revision")
       settings = Params.settings(r.params["settings"])       or bad_request(r, "bad settings")
       voted    = Params.voted(r.params["voted"] || [])       or bad_request(r, "bad voted list")
       sig      = Params.signature(r.params["signature"])     or bad_request(r, "bad signature")
       ts       = Params.integer(r.params["ts"])              or bad_request(r, "bad timestamp")
 
       payload = Cryptography::Payload.private_config(
-        pubkey: pubkey, version: version, settings: settings, voted: voted, issued_at: ts
+        pubkey: pubkey, revision: revision, settings: settings, voted: voted, issued_at: ts
       )
       verify!(r, pubkey, sig, payload)
 
       result = store.store_private_config(
-        pubkey: pubkey, version: version,
+        pubkey: pubkey, revision: revision,
         payload: Cryptography::Canonical.dump(payload), signature: sig
       )
-      r.halt(409, { "error" => "version is not newer than the stored one" }) if result == :stale
+      r.halt(409, { "error" => "revision is not newer than the stored one" }) if result == :stale
 
-      { "stored" => true, "version" => version }
+      { "stored" => true, "revision" => revision }
     end
 
     def store_config(r)
       pubkey  = current_pubkey(r)
-      version = Params.integer(r.params["version"], min: 1) or bad_request(r, "bad version")
+      revision = Params.integer(r.params["revision"], min: 1) or bad_request(r, "bad revision")
       profile = Params.profile(r.params["profile"])         or bad_request(r, "bad profile")
       ratings = Params.ratings(r.params["ratings"])         or bad_request(r, "bad ratings")
       sig     = Params.signature(r.params["signature"])     or bad_request(r, "bad signature")
       ts      = Params.integer(r.params["ts"])              or bad_request(r, "bad timestamp")
 
       payload = Cryptography::Payload.config(
-        pubkey: pubkey, version: version, profile: profile, ratings: ratings, issued_at: ts
+        pubkey: pubkey, revision: revision, profile: profile, ratings: ratings, issued_at: ts
       )
       verify!(r, pubkey, sig, payload)
 
       result = store.store_config(
-        pubkey: pubkey, version: version,
+        pubkey: pubkey, revision: revision,
         payload: Cryptography::Canonical.dump(payload), signature: sig
       )
-      r.halt(409, { "error" => "version is not newer than the stored one" }) if result == :stale
+      r.halt(409, { "error" => "revision is not newer than the stored one" }) if result == :stale
 
-      { "stored" => true, "version" => version }
+      { "stored" => true, "revision" => revision }
     end
 
     # `ack` is the record this message's author had last seen. The server does
     # not check that it was well chosen -- it cannot, since it never computes a
     # reputation and the rule is the author's own. It checks only that it is
     # the right shape, and stores what it is given.
+    # --- chain records -----------------------------------------------------
+
+    # An identity declaration. `master_pubkey` and `previous_pubkey` are placeholders
+    # for key rotation and must still be null: accepting a value for a field
+    # nothing implements would let a client publish a claim the network would
+    # later have to honour or explain away.
+    def put_identity(r)
+      pubkey  = current_pubkey(r)
+      revision = Params.integer(r.params["revision"], min: 1) or bad_request(r, "bad revision")
+      handle  = Params.handle(r.params["handle"])           or bad_request(r, "bad handle")
+      bio     = Params.bio(r.params["bio"])                 or bad_request(r, "bad bio")
+      ack     = Params.record_hash(r.params["ack"])         or bad_request(r, "bad ack")
+      sig     = Params.signature(r.params["signature"])     or bad_request(r, "bad signature")
+      ts      = Params.integer(r.params["ts"])              or bad_request(r, "bad timestamp")
+      icon    = r.params["icon"].nil? ? nil : (Params.icon(r.params["icon"]) or bad_request(r, "bad icon"))
+
+      bad_request(r, "key rotation is not implemented") if r.params["master_pubkey"] || r.params["previous_pubkey"]
+
+      payload = Cryptography::Payload.identity(
+        pubkey: pubkey, revision: revision, handle: handle, bio: bio, icon: icon,
+        ack: ack, issued_at: ts, note: optional_note(r)
+      )
+      store_record(r, :store_identity, pubkey, revision, payload, sig)
+    end
+
+    # What somebody thinks of everyone else. The server checks the shape and
+    # nothing else -- it has no opinion about whether a score is deserved, and
+    # could not form one without computing a reputation.
+    def put_attestation(r)
+      pubkey  = current_pubkey(r)
+      revision = Params.integer(r.params["revision"], min: 1) or bad_request(r, "bad revision")
+      scores  = Params.scores(r.params["scores"])           or bad_request(r, "bad scores")
+      derived = Params.derived(r.params["derived"])         or bad_request(r, "bad derived scores")
+      ack     = Params.record_hash(r.params["ack"])         or bad_request(r, "bad ack")
+      sig     = Params.signature(r.params["signature"])     or bad_request(r, "bad signature")
+      ts      = Params.integer(r.params["ts"])              or bad_request(r, "bad timestamp")
+
+      payload = Cryptography::Payload.attestation(
+        pubkey: pubkey, revision: revision, scores: scores, derived: derived,
+        ack: ack, issued_at: ts, note: optional_note(r)
+      )
+      store_record(r, :store_attestation, pubkey, revision, payload, sig)
+    end
+
+    def store_record(r, method, pubkey, revision, payload, signature)
+      verify!(r, pubkey, signature, payload)
+
+      canonical = Cryptography::Canonical.dump(payload)
+      hash = Cryptography::Record.digest(payload: canonical, signature: signature)
+      result = store.public_send(method, pubkey: pubkey, revision: revision, hash: hash,
+                                         payload: canonical, signature: signature)
+
+      r.halt(409, { "error" => "revision is not newer than the stored one" }) if result == :stale
+
+      { "stored" => true, "revision" => revision, "hash" => hash }
+    end
+
+    # An official statement. The server checks the shape, the signature and the
+    # revision, and has no opinion about the contents -- it does not know what a
+    # policy is, only that this publisher has not used this number before.
+    def post_notice(r)
+      publisher  = current_pubkey(r)
+      revision   = Params.integer(r.params["revision"], min: 1) or bad_request(r, "bad revision")
+      kind       = Params.notice_kind(r.params["kind"], allowed: NOTICE_KINDS) or bad_request(r, "unknown kind")
+      title      = Params.title(r.params["title"])       or bad_request(r, "bad title")
+      body       = Params.notice_body(r.params["body"], max: limit(:notice_bytes)) or bad_request(r, "bad body")
+      ack        = Params.record_hash(r.params["ack"])   or bad_request(r, "bad ack")
+      sig        = Params.signature(r.params["signature"]) or bad_request(r, "bad signature")
+      ts         = Params.integer(r.params["ts"])        or bad_request(r, "bad timestamp")
+      supersedes = optional_hash(r, "supersedes")
+
+      # The founding notice is the one that replaces nothing. Anything else
+      # claiming to be one would give a chain two bottoms.
+      bad_request(r, "a founding notice supersedes nothing") if kind == "founding" && supersedes
+
+      payload = Cryptography::Payload.notice(
+        publisher: publisher, revision: revision, kind: kind, title: title, body: body,
+        ack: ack, issued_at: ts, supersedes: supersedes, note: optional_note(r)
+      )
+      verify!(r, publisher, sig, payload)
+
+      canonical = Cryptography::Canonical.dump(payload)
+      hash = Cryptography::Record.digest(payload: canonical, signature: sig)
+      result = store.store_notice(
+        hash: hash, publisher: publisher, revision: revision, kind: kind, title: title,
+        supersedes: supersedes, ack: ack, payload: canonical, signature: sig
+      )
+      r.halt(409, { "error" => "that revision is already used" }) if result == :duplicate
+
+      { "stored" => true, "revision" => revision, "hash" => hash }
+    end
+
+    def fetch_notices(r, publisher_param)
+      publisher = Params.pubkey(publisher_param) or bad_request(r, "bad publisher")
+
+      { "notices" => store.notices(publisher).map { |row| present_notice(row) } }
+    end
+
+    # One change to an attestation between republishes. `base_revision` names
+    # the snapshot it amends and `seq` its place in that run, both inside the
+    # signature, so the server can neither reorder a run nor replay one against
+    # a later snapshot.
+    def post_adjustment(r)
+      pubkey  = current_pubkey(r)
+      base    = Params.integer(r.params["base_revision"], min: 1) or bad_request(r, "bad base revision")
+      seq     = Params.integer(r.params["seq"], min: 1)          or bad_request(r, "bad seq")
+      target  = Params.pubkey(r.params["target"])                or bad_request(r, "bad target")
+      score   = Params.decimal(r.params["reputation"])           or bad_request(r, "bad reputation")
+      trust   = Params.decimal(r.params["trust"])                or bad_request(r, "bad trust")
+      ack     = Params.record_hash(r.params["ack"])              or bad_request(r, "bad ack")
+      sig     = Params.signature(r.params["signature"])          or bad_request(r, "bad signature")
+      ts      = Params.integer(r.params["ts"])                   or bad_request(r, "bad timestamp")
+
+      bad_request(r, "an adjustment cannot be about its own author") if target == pubkey
+
+      payload = Cryptography::Payload.adjustment(
+        pubkey: pubkey, base_revision: base, seq: seq, target: target,
+        reputation: score, trust: trust, ack: ack, issued_at: ts, note: optional_note(r)
+      )
+      verify!(r, pubkey, sig, payload)
+
+      canonical = Cryptography::Canonical.dump(payload)
+      hash = Cryptography::Record.digest(payload: canonical, signature: sig)
+      result = store.store_adjustment(
+        hash: hash, pubkey: pubkey, base_revision: base, seq: seq, target: target,
+        ack: ack, payload: canonical, signature: sig
+      )
+      r.halt(409, { "error" => "that adjustment already exists" }) if result == :duplicate
+
+      { "stored" => true, "seq" => seq, "hash" => hash }
+    end
+
+    # Only the run amending the snapshot the caller holds. An adjustment
+    # against an older revision was superseded by the republish that followed.
+    def fetch_adjustments(r, pubkey_param)
+      pubkey = Params.pubkey(pubkey_param) or bad_request(r, "bad pubkey")
+      base = Params.integer(r.params["base_revision"], min: 1) or bad_request(r, "bad base revision")
+
+      { "adjustments" => store.adjustments_for(pubkey, base_revision: base).map { |row| present_adjustment(row) } }
+    end
+
+    def fetch(kind, pubkey_param)
+      pubkey = Params.pubkey(pubkey_param)
+      return { kind.to_s => nil } unless pubkey
+
+      { kind.to_s => present_record(store.public_send(kind, pubkey)) }
+    end
+
+    def batch(r, kind)
+      pubkeys = Params.array_of(r.params["pubkeys"], max: MAX_BATCH) { |v| Params.pubkey(v) }
+      bad_request(r, "bad pubkeys") unless pubkeys
+
+      { kind.to_s => store.public_send(kind, pubkeys).map { |row| present_record(row) } }
+    end
+
     def post_message(r, room)
       author = current_pubkey(r)
       seq    = Params.integer(r.params["seq"], min: 1) or bad_request(r, "bad seq")
-      body   = Params.string(r.params["body"], max: MAX_BODY) or bad_request(r, "bad body")
+      body   = Params.string(r.params["body"], max: limit(:message_bytes)) or bad_request(r, "bad body")
       sig    = Params.signature(r.params["signature"]) or bad_request(r, "bad signature")
       ts     = Params.integer(r.params["ts"]) or bad_request(r, "bad timestamp")
       ack    = Params.record_hash(r.params["ack"]) or bad_request(r, "bad ack")
@@ -265,7 +504,7 @@ module ReputableChat
 
       payload = Cryptography::Payload.message(
         author: author, room: room, seq: seq, prev: prev, body: body,
-        ack: ack, issued_at: ts, reply_to: reply
+        ack: ack, issued_at: ts, reply_to: reply, note: optional_note(r)
       )
       verify!(r, author, sig, payload)
 
@@ -290,7 +529,7 @@ module ReputableChat
 
       payload = Cryptography::Payload.emote(
         author: author, room: room, message: message, emote: choice,
-        ack: ack, issued_at: ts
+        ack: ack, issued_at: ts, note: optional_note(r)
       )
       verify!(r, author, sig, payload)
 
@@ -333,14 +572,46 @@ module ReputableChat
       Params.record_hash(r.params[field]) or bad_request(r, "bad #{field}")
     end
 
+    # Same reasoning: a note too long or full of control characters is a
+    # rejection, not something to quietly drop out of a signed payload.
+    def optional_note(r)
+      return nil if r.params["note"].nil? || r.params["note"].to_s.strip.empty?
+
+      Params.note(r.params["note"], max: limit(:note_bytes)) or bad_request(r, "bad note")
+    end
+
     # Signed blobs go out exactly as they came in. The client verifies them
     # against the author's key, so the server re-serializing them would only
     # create a way to break signatures.
     def present_config(row)
       return nil unless row
 
-      { "pubkey" => row[:pubkey], "version" => row[:version],
+      { "pubkey" => row[:pubkey], "revision" => row[:revision],
         "payload" => row[:payload], "signature" => row[:signature] }
+    end
+
+    # Signed blobs go out exactly as they came in, with the record hash the
+    # server derived from them. A reader re-derives it from the same two
+    # strings, so a server that invented one would be caught.
+    def present_record(row)
+      return nil unless row
+
+      { "pubkey" => row[:pubkey], "revision" => row[:revision], "hash" => row[:hash],
+        "payload" => row[:payload], "signature" => row[:signature] }.compact
+    end
+
+    def present_notice(row)
+      { "publisher" => row[:publisher], "revision" => row[:revision], "kind" => row[:kind],
+        "title" => row[:title], "supersedes" => row[:supersedes], "hash" => row[:hash],
+        "payload" => row[:payload], "signature" => row[:signature] }
+    end
+
+    # An adjustment has no revision of its own -- it has the snapshot it amends
+    # and its place in that run, which is what a reader replays it by.
+    def present_adjustment(row)
+      { "pubkey" => row[:pubkey], "base_revision" => row[:base_revision], "seq" => row[:seq],
+        "target" => row[:target], "hash" => row[:hash], "payload" => row[:payload],
+        "signature" => row[:signature] }
     end
 
     def present_message(row)

@@ -103,7 +103,7 @@ module ReputableChat
 
         ratings[target] = introduction(ratings[target], defaults)
         client.publish_config(
-          identity: identity, version: config.fetch("version") + 1,
+          identity: identity, revision: config.fetch("revision") + 1,
           profile: config.fetch("profile"), ratings: ratings
         )
 
@@ -116,9 +116,9 @@ module ReputableChat
       def establish(voucher:, client:, seed_config:)
         identity = sign_in(voucher, client, seed_config)
         config   = own_config(client, identity, voucher)
-        return :ready unless config.fetch("version").zero?
+        return :ready unless config.fetch("revision").zero?
 
-        client.publish_config(identity: identity, version: 1,
+        client.publish_config(identity: identity, revision: 1,
                               profile: config.fetch("profile"), ratings: {})
         :published
       end
@@ -154,10 +154,10 @@ module ReputableChat
 
         if blob
           payload = JSON.parse(blob["payload"])
-          { "version" => payload["version"].to_i, "profile" => payload["profile"],
+          { "revision" => payload["revision"].to_i, "profile" => payload["profile"],
             "ratings" => payload["ratings"] || {} }
         else
-          { "version" => 0, "ratings" => {},
+          { "revision" => 0, "ratings" => {},
             "profile" => { "username" => voucher.username, "icon" => nil,
                            "message" => "introduces new test accounts" } }
         end

@@ -24,7 +24,7 @@ module ReputableChat
                          keyword_init: true)
 
     class View
-      attr_reader :profile, :version, :ratings, :session, :messages, :reactions
+      attr_reader :profile, :revision, :ratings, :session, :messages, :reactions
 
       def initialize(client:, identity:, persona:, defaults:, genesis_hash:)
         @client       = client
@@ -107,19 +107,19 @@ module ReputableChat
         @ratings[pubkey] = updated
       end
 
-      # The version must climb or the server rejects the write as a rollback.
+      # The revision must climb or the server rejects the write as a rollback.
       def publish_config!
-        @version += 1
+        @revision += 1
         @client.publish_config(
-          identity: @identity, version: @version, profile: @profile, ratings: publishable_ratings
+          identity: @identity, revision: @revision, profile: @profile, ratings: publishable_ratings
         )
       rescue Client::Conflict
-        # Somebody wrote a newer version under this key -- another instance of
+        # Somebody wrote a newer revision under this key -- another instance of
         # the same bot, usually. Re-read and try once from where it actually is.
         load_own_config
-        @version += 1
+        @revision += 1
         @client.publish_config(
-          identity: @identity, version: @version, profile: @profile, ratings: publishable_ratings
+          identity: @identity, revision: @revision, profile: @profile, ratings: publishable_ratings
         )
       end
 
@@ -139,7 +139,7 @@ module ReputableChat
 
       def load_own_config
         payload  = parse_payload(@client.config(@identity.pubkey))
-        @version = payload ? payload["version"].to_i : 0
+        @revision = payload ? payload["revision"].to_i : 0
         @ratings = payload ? (payload["ratings"] || {}) : {}
         @profile = payload ? payload["profile"] : nil
         @profile ||= { "username" => @persona.username, "message" => @persona.bio, "icon" => nil }

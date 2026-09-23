@@ -57,9 +57,9 @@
     }
   },
   {
-    "purpose": "reputablechat:user:v1",
+    "purpose": "reputablechat:identity:v1",
     "pubkey": "k",
-    "version": 1,
+    "revision": 1,
     "handle": "Tom",
     "bio": "hi é中",
     "icon": null,
@@ -71,7 +71,7 @@
   {
     "purpose": "reputablechat:attestation:v1",
     "pubkey": "k",
-    "version": 4,
+    "revision": 4,
     "scores": {
       "bbb": {
         "reputation": "0.5",
@@ -95,7 +95,7 @@
   {
     "purpose": "reputablechat:adjustment:v1",
     "pubkey": "k",
-    "base_version": 4,
+    "base_revision": 4,
     "seq": 7,
     "target": "t",
     "reputation": "0.5032",
@@ -106,7 +106,7 @@
   {
     "purpose": "reputablechat:release:v1",
     "publisher": "k",
-    "version": 12,
+    "revision": 12,
     "label": "0.4.0",
     "files": {
       "js/app.js": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
@@ -135,5 +135,29 @@
     "emote": "👍",
     "ack": "2222222222222222222222222222222222222222222222222222222222222222",
     "ts": 9
+  },
+  {
+    "purpose": "reputablechat:message:v1",
+    "author": "k",
+    "room": "general",
+    "seq": 5,
+    "prev": null,
+    "reply_to": null,
+    "ack": "3333333333333333333333333333333333333333333333333333333333333333",
+    "note": "two lines\nand a\ttab, plus é中🚀 and \"quotes\"",
+    "ts": 21,
+    "body": "a message with a note"
+  },
+  {
+    "purpose": "reputablechat:notice:v1",
+    "publisher": "k",
+    "revision": 1,
+    "kind": "founding",
+    "title": "What this is",
+    "body": "A founding statement.\nWith a second line, é中🚀 and \"quotes\".",
+    "supersedes": null,
+    "ack": "4444444444444444444444444444444444444444444444444444444444444444",
+    "note": null,
+    "ts": 23
   }
 ]

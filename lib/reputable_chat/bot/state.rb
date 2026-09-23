@@ -23,7 +23,7 @@ module ReputableChat
       REMEMBERED = 500
 
       attr_reader :path, :name
-      attr_accessor :seed, :pubkey, :seq, :prev, :version, :born_at, :ratings,
+      attr_accessor :seed, :pubkey, :seq, :prev, :revision, :born_at, :ratings,
                     :retire_after_days, :username, :category
 
       def self.load(path, name:)
@@ -38,7 +38,7 @@ module ReputableChat
         @pubkey  = data["pubkey"]
         @seq     = data["seq"] || 0
         @prev    = data["prev"]
-        @version = data["version"] || 0
+        @revision = data["revision"] || 0
         @born_at = data["born_at"]
         @username = data["username"]
         @category = data["category"]
@@ -92,7 +92,7 @@ module ReputableChat
         @pubkey  = pubkey
         @seq     = 0
         @prev    = nil
-        @version = 0
+        @revision = 0
         @born_at = now
         @username = username
         @category = category
@@ -115,7 +115,7 @@ module ReputableChat
         { "name" => @name, "seed" => @seed, "pubkey" => @pubkey, "born_at" => @born_at,
           "username" => @username, "category" => @category,
           "retire_after_days" => @retire_after_days,
-          "seq" => @seq, "prev" => @prev, "version" => @version,
+          "seq" => @seq, "prev" => @prev, "revision" => @revision,
           "ratings" => @ratings, "seen" => @seen, "voted" => @voted, "retired" => @retired }
       end
     end

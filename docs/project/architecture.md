@@ -7,7 +7,7 @@ reputation. What it does:
 
 - hands out single-use login challenges
 - **verifies every signature before storing anything**
-- rejects config rollbacks by version
+- rejects config rollbacks by revision
 - stores signed blobs and serves them back byte-identical
 - validates the shape of everything arriving from a client
 
@@ -31,11 +31,30 @@ Split by **who needs to read it**.
 ```json
 { "purpose": "reputablechat:config:v1",
   "pubkey":  "...",
-  "version": 7,
+  "revision": 7,
   "ts":      1710000000,
   "profile": { "username": "alice", "message": "hi", "icon": "<sha256>.png" },
   "ratings": { "<pubkey>": { "friend": true, "reported": false, "net_votes": 12 } } }
 ```
+
+**Two numbers here count different things**, and they are named apart on
+purpose:
+
+- The `:v1` at the end of `purpose` is the **shape** of the payload — which
+  fields it has. It moves only when the field list changes, which invalidates
+  every signature ever made under the old shape. It is part of the domain
+  separation described under **Signed payloads** below.
+- `revision` is a **counter for this one record**, climbing by one every time
+  its owner republishes. It says nothing about the shape.
+
+So `reputablechat:config:v1` at `revision: 7` is the seventh copy of the first
+shape. They never move together. Every record carries its own counter, so a
+public config at 7 sitting beside a private one at 3 is two independent tallies
+rather than a disagreement — one has been saved seven times and the other
+three.
+
+They were both called `version` until it became clear that nobody could read
+the two lines together and tell them apart.
 
 The profile is signed alongside the ratings, so the server cannot alter a
 display name, bio or icon. Names are not unique — the key is the identity, and
@@ -48,7 +67,7 @@ Actions, not scores — see the end of [reputation.md](reputation.md) for why.
 ```json
 { "purpose":  "reputablechat:private-config:v1",
   "pubkey":   "...",
-  "version":  3,
+  "revision":  3,
   "ts":       1710000000,
   "settings": { "display": { "show_unrated": true } },
   "voted":    ["<message signature>", "..."] }
@@ -70,10 +89,13 @@ check that has to stay correct.
 server operator, who can read it. Making it opaque to the server means
 encrypting under a key derived from the seed — worth doing, not done.
 
-`version` is a monotonic counter **inside the signed payload**. Without it the
-server could serve an old copy of someone's config to hide a report, and the
-signature on it would still verify perfectly. Cheap now, impossible to retrofit
-without invalidating every signature in the network.
+The counter is **inside the signed payload**, which is the whole point of it.
+Without it the server could serve an old copy of someone's config to hide a
+report, and the signature on that old copy would still verify perfectly —
+because it is genuine, just stale. A counter the server cannot alter without
+breaking the signature is what makes serving a stale copy detectable. Cheap
+now, impossible to retrofit without invalidating every signature in the
+network.
 
 Known limit: a public config accumulates an entry per person ever rated, and
 grows without bound. Fine for the MVP, needs chunking later.
@@ -92,20 +114,30 @@ script-bearing document, not an image.
 
 ## Signed payloads
 
-Three shapes, each domain-separated. `lib/reputable_chat/cryptography/payload.rb` and
+Each shape is domain-separated: the `purpose` string is signed along with
+everything else, so a signature made for one kind of record cannot be presented
+as another, and the trailing `:v1` pins which field list was signed. Adding or
+removing a field means a new suffix, because the canonical bytes change and
+every old signature stops verifying against the new shape.
+ `lib/reputable_chat/cryptography/payload.rb` and
 `public/js/identity.js` must agree exactly.
 
 | purpose | fields |
 |---|---|
 | `reputablechat:login:v1` | purpose, pubkey, nonce, origin, ts |
-| `reputablechat:message:v1` | purpose, author, room, seq, prev, reply_to, ack, ts, body |
-| `reputablechat:emote:v1` | purpose, author, room, message, emote, ack, ts |
-| `reputablechat:user:v1` | purpose, pubkey, version, handle, bio, icon, master_pubkey, previous_pubkey, ack, ts |
-| `reputablechat:attestation:v1` | purpose, pubkey, version, scores, derived, ack, ts |
-| `reputablechat:adjustment:v1` | purpose, pubkey, base_version, seq, target, reputation, trust, ack, ts |
-| `reputablechat:release:v1` | purpose, publisher, version, label, files, notes, ack, ts |
-| `reputablechat:config:v1` | superseded by `user` + `attestation` |
-| `reputablechat:private-config:v1` | purpose, pubkey, version, settings, voted, ts |
+| `reputablechat:message:v1` | purpose, author, room, seq, prev, reply_to, ack, note, ts, body |
+| `reputablechat:emote:v1` | purpose, author, room, message, emote, ack, note, ts |
+| `reputablechat:identity:v1` | purpose, pubkey, revision, handle, bio, icon, master_pubkey, previous_pubkey, ack, note, ts |
+| `reputablechat:attestation:v1` | purpose, pubkey, revision, scores, derived, ack, note, ts |
+| `reputablechat:adjustment:v1` | purpose, pubkey, base_revision, seq, target, reputation, trust, ack, note, ts |
+| `reputablechat:release:v1` | purpose, publisher, revision, label, files, notes, ack, note, ts |
+| `reputablechat:notice:v1` | purpose, publisher, revision, kind, title, body, supersedes, ack, note, ts |
+| `reputablechat:config:v1` | superseded by `identity` + `attestation` |
+| `reputablechat:vault:v1` | purpose, pubkey, revision, ciphertext, iv, ts |
+| `reputablechat:private-config:v1` | superseded by `vault` |
+
+Every chain record also carries `note` — free text the software never reads,
+signed for whoever browses the raw chain. See **Notes** in [chain.md](chain.md).
 
 Everything but `login` and `private-config` carries `ack`, the hash of the last
 record its author had seen. That is what makes these a chain rather than a pile
@@ -166,8 +198,8 @@ fixtures and compares the bytes, and is the thing that catches that.
 ## Layout
 
 ```
-config/genesis/tim.json   the genesis user record; the chain hangs off its hash
-config/server.yml         origin, database and image paths (env overrides)
+config/genesis/<env>.json the genesis identity declaration; the chain hangs off its hash
+config/server.yml         origin, database and image paths, size limits (env overrides)
 config/reputation.yml     tunable reputation parameters (the defaults layer)
 config/emotes.yml         which emotes count positive, negative, neutral
 config/bip39-english.txt  wordlist; one source of truth, served at /wordlist.txt

@@ -5,4 +5,13 @@ tmp/
 *.sqlite3
 .bundle/
 vendor/bundle/
-config/genesis/seed
+# Every genesis seed is ignored, and development's is then un-ignored. The
+# accident worth guarding against is committing a seed, so the default is to
+# refuse and the exception is explicit. Development's is public on purpose:
+# anyone who clones the repository owns that identity, which is what makes a
+# fresh clone able to run the genesis account locally.
+config/genesis/*.seed
+!config/genesis/development.seed
+
+# Browser tests only. The application itself ships no JavaScript dependencies.
+node_modules/

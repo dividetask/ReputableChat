@@ -4,6 +4,7 @@ require "json"
 require "open3"
 require "fileutils"
 require_relative "config"
+require_relative "environment"
 require_relative "cryptography/seed"
 require_relative "cryptography/canonical"
 require_relative "cryptography/signature"
@@ -22,15 +23,24 @@ module ReputableChat
   # that it is the same thing a person would type into the UI and there is only
   # one secret to look after rather than two.
   module Operator
-    SEED_PATH = File.expand_path("../../config/genesis/seed", __dir__)
+    DIRECTORY = File.expand_path("../../config/genesis", __dir__)
     HELPER    = File.expand_path("../../script/derive_key.mjs", __dir__)
+
+    # Development's seed is committed on purpose; production's never is. The
+    # .gitignore ignores every seed and then un-ignores development's, so the
+    # accident it guards against is committing a seed, not forgetting to.
+    def self.path_for(environment = Environment.name)
+      File.join(DIRECTORY, "#{environment}.seed")
+    end
+
+    SEED_PATH = path_for(Environment::DEVELOPMENT)
 
     class MissingSeed < StandardError; end
     class HelperFailed < StandardError; end
 
     module_function
 
-    def seed_path = ENV.fetch("GENESIS_SEED", SEED_PATH)
+    def seed_path = ENV.fetch("GENESIS_SEED") { Operator.path_for }
 
     # Read, normalized and checked. A seed file that has picked up a stray edit
     # would otherwise derive a different key in silence and sign as an account

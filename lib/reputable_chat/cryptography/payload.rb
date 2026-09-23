@@ -9,16 +9,29 @@ module ReputableChat
     # Every shape but `login` and `private_config` carries `ack`: the hash of
     # the last record its author had seen. That is what makes the set of
     # signatures a chain rather than a pile. See docs/project/chain.md.
+    #
+    # They also carry `note`: free text the software never reads, for a person
+    # browsing the raw chain. It is signed like everything else, so it cannot be
+    # added or altered after the fact, and it is deliberately inert -- nothing
+    # branches on it, so nothing can be smuggled through it by writing something
+    # that reads like a directive. Anything that renders it treats it as text,
+    # never markup.
+    #
+    # Always present, null when unused. Adding a field later changes the
+    # canonical bytes of every record and invalidates every signature ever made,
+    # so the slot exists from the start.
     module Payload
       LOGIN          = "reputablechat:login:v1"
       MESSAGE        = "reputablechat:message:v1"
       CONFIG         = "reputablechat:config:v1"
       PRIVATE_CONFIG = "reputablechat:private-config:v1"
       EMOTE          = "reputablechat:emote:v1"
-      USER           = "reputablechat:user:v1"
+      IDENTITY       = "reputablechat:identity:v1"
       ATTESTATION    = "reputablechat:attestation:v1"
       ADJUSTMENT     = "reputablechat:adjustment:v1"
       RELEASE        = "reputablechat:release:v1"
+      NOTICE         = "reputablechat:notice:v1"
+      VAULT          = "reputablechat:vault:v1"
 
       module_function
 
@@ -32,25 +45,27 @@ module ReputableChat
         }
       end
 
-      # Who somebody is. The genesis record is one of these with every optional
+      # An identity declaration: who somebody is, in their own words and under
+      # their own signature. The genesis record is one of these with every optional
       # field null -- see config/genesis/tim.json.
       #
       # `master_pubkey` and `previous_pubkey` are placeholders for key rotation
       # and are always null for now. They are in the signed shape from the
       # start because adding a field later changes the canonical bytes of every
       # record, which invalidates every signature ever made.
-      def user(pubkey:, version:, handle:, bio:, icon:, ack:, issued_at:,
-               master_pubkey: nil, previous_pubkey: nil)
+      def identity(pubkey:, revision:, handle:, bio:, icon:, ack:, issued_at:,
+               master_pubkey: nil, previous_pubkey: nil, note: nil)
         {
-          "purpose"         => USER,
+          "purpose"         => IDENTITY,
           "pubkey"          => pubkey,
-          "version"         => version.to_i,
+          "revision"         => revision.to_i,
           "handle"          => handle,
           "bio"             => bio,
           "icon"            => icon,
           "master_pubkey"   => master_pubkey,
           "previous_pubkey" => previous_pubkey,
           "ack"             => ack,
+          "note"            => note,
           "ts"              => issued_at.to_i
         }
       end
@@ -68,14 +83,15 @@ module ReputableChat
       # that hash a reader cannot tell whether the numbers mean anything to
       # them, and taking them anyway would mean silently adopting a stranger's
       # settings.
-      def attestation(pubkey:, version:, scores:, derived:, ack:, issued_at:)
+      def attestation(pubkey:, revision:, scores:, derived:, ack:, issued_at:, note: nil)
         {
           "purpose" => ATTESTATION,
           "pubkey"  => pubkey,
-          "version" => version.to_i,
+          "revision" => revision.to_i,
           "scores"  => scores,
           "derived" => derived,
           "ack"     => ack,
+          "note"    => note,
           "ts"      => issued_at.to_i
         }
       end
@@ -84,40 +100,72 @@ module ReputableChat
       # attestation per emote would mean re-uploading an entry for every person
       # the author has ever rated to change one number in it.
       #
-      # `base_version` names the attestation this amends and `seq` orders it
+      # `base_revision` names the attestation this amends and `seq` orders it
       # within that run, both inside the signature, so the server cannot
       # reorder a run or replay one against a later snapshot.
-      def adjustment(pubkey:, base_version:, seq:, target:, reputation:, trust:, ack:, issued_at:)
+      def adjustment(pubkey:, base_revision:, seq:, target:, reputation:, trust:, ack:,
+                     issued_at:, note: nil)
         {
           "purpose"      => ADJUSTMENT,
           "pubkey"       => pubkey,
-          "base_version" => base_version.to_i,
+          "base_revision" => base_revision.to_i,
           "seq"          => seq.to_i,
           "target"       => target,
           "reputation"   => reputation,
           "trust"        => trust,
           "ack"          => ack,
+          "note"         => note,
           "ts"           => issued_at.to_i
         }
       end
 
-      # A published version of the client: a manifest of path => sha256, not an
+      # A published revision of the client: a manifest of path => sha256, not an
       # archive. A zip's bytes depend on entry order, timestamps and
       # compression level, so the same source tree hashes differently on two
       # machines -- and a hash that depends on who built it proves nothing.
       #
       # `publisher` is carried so a per-user trusted-developer setting can
       # arrive later without re-signing anything. Nothing consults it yet.
-      def release(publisher:, version:, label:, files:, notes:, ack:, issued_at:)
+      def release(publisher:, revision:, label:, files:, notes:, ack:, issued_at:, note: nil)
         {
           "purpose"   => RELEASE,
           "publisher" => publisher,
-          "version"   => version.to_i,
+          "revision"   => revision.to_i,
           "label"     => label,
           "files"     => files,
           "notes"     => notes,
           "ack"       => ack,
+          "note"      => note,
           "ts"        => issued_at.to_i
+        }
+      end
+
+      # An official statement from a publisher: an outage, a policy, a release.
+      #
+      # `kind` comes from a closed list the server publishes, for the same
+      # reason an emote does -- an arbitrary string would be stored and then
+      # rendered back to everyone, and a client cannot present something it has
+      # never heard of.
+      #
+      # `supersedes` is the record hash of the notice this one replaces, or
+      # nil. A correction is a new record pointing at the old one, never an
+      # edit: a mutated record no longer matches its signature, and the point
+      # of a notice is that what was said is still there to be checked.
+      #
+      # The founding notice is the one that supersedes nothing.
+      def notice(publisher:, revision:, kind:, title:, body:, ack:, issued_at:,
+                 supersedes: nil, note: nil)
+        {
+          "purpose"    => NOTICE,
+          "publisher"  => publisher,
+          "revision"   => revision.to_i,
+          "kind"       => kind,
+          "title"      => title,
+          "body"       => body,
+          "supersedes" => supersedes,
+          "ack"        => ack,
+          "note"       => note,
+          "ts"         => issued_at.to_i
         }
       end
 
@@ -132,7 +180,7 @@ module ReputableChat
       # `reply_to` is the record hash of the message being replied to, or nil.
       # Always present so the canonical form does not change shape between a
       # reply and an ordinary message.
-      def message(author:, room:, seq:, prev:, body:, ack:, issued_at:, reply_to: nil)
+      def message(author:, room:, seq:, prev:, body:, ack:, issued_at:, reply_to: nil, note: nil)
         {
           "purpose"  => MESSAGE,
           "author"   => author,
@@ -141,6 +189,7 @@ module ReputableChat
           "prev"     => prev,
           "reply_to" => reply_to,
           "ack"      => ack,
+          "note"     => note,
           "ts"       => issued_at.to_i,
           "body"     => body
         }
@@ -153,7 +202,7 @@ module ReputableChat
       # An emote record is also its own attestation adjustment -- it names the
       # author, the target message and the reaction, which is everything needed
       # to move the author's score for that message's author.
-      def emote(author:, room:, message:, emote:, ack:, issued_at:)
+      def emote(author:, room:, message:, emote:, ack:, issued_at:, note: nil)
         {
           "purpose" => EMOTE,
           "author"  => author,
@@ -161,7 +210,34 @@ module ReputableChat
           "message" => message,
           "emote"   => emote,
           "ack"     => ack,
+          "note"    => note,
           "ts"      => issued_at.to_i
+        }
+      end
+
+      # The owner's private document: settings, which comments have been emoted
+      # on, and the friend and report lists. Encrypted, then signed.
+      #
+      # Encrypted under a key derived from the seed under `seed.kdf.vault_domain`
+      # -- not under the identity key, because Ed25519 cannot encrypt and the
+      # signing key is a non-extractable WebCrypto key whose bytes can never be
+      # read back. See docs/project/identity.md.
+      #
+      # `revision` is OUTSIDE the ciphertext on purpose. The server has to be
+      # able to reject a rollback, and that means reading one number from a
+      # document it can otherwise make nothing of. It leaks roughly how many
+      # times the owner has saved, and nothing else.
+      #
+      # No `ack` and no `note`: nobody else ever sees this, so there is nothing
+      # to anchor it to and nobody to address.
+      def vault(pubkey:, revision:, ciphertext:, iv:, issued_at:)
+        {
+          "purpose"    => VAULT,
+          "pubkey"     => pubkey,
+          "revision"   => revision.to_i,
+          "ciphertext" => ciphertext,
+          "iv"         => iv,
+          "ts"         => issued_at.to_i
         }
       end
 
@@ -172,11 +248,11 @@ module ReputableChat
       # Signed, not encrypted -- this is private from other users, not from the
       # server operator, who can read it. Superseded by the encrypted vault;
       # see docs/project/identity.md.
-      def private_config(pubkey:, version:, settings:, voted:, issued_at:)
+      def private_config(pubkey:, revision:, settings:, voted:, issued_at:)
         {
           "purpose"  => PRIVATE_CONFIG,
           "pubkey"   => pubkey,
-          "version"  => version.to_i,
+          "revision"  => revision.to_i,
           "settings" => settings,
           "voted"    => voted,
           "ts"       => issued_at.to_i
@@ -186,11 +262,11 @@ module ReputableChat
       # Superseded by `user` (identity and presentation) and `attestation`
       # (ratings). Kept until the routes that serve it are replaced, so that
       # the running client does not break mid-migration.
-      def config(pubkey:, version:, profile:, ratings:, issued_at:)
+      def config(pubkey:, revision:, profile:, ratings:, issued_at:)
         {
           "purpose" => CONFIG,
           "pubkey"  => pubkey,
-          "version" => version.to_i,
+          "revision" => revision.to_i,
           "profile" => profile,
           "ratings" => ratings,
           "ts"      => issued_at.to_i

@@ -13,7 +13,7 @@ module ReputableChat
     # challenge, sign it, keep the session cookie, and send signed blobs.
     class Client
       class Error < StandardError; end
-      class Conflict < Error; end    # 409: a used seq, or a stale config version
+      class Conflict < Error; end    # 409: a used seq, or a stale config revision
       class Unauthorized < Error; end
 
       NETWORK_ERRORS = [
@@ -92,15 +92,15 @@ module ReputableChat
       def messages(room) = request(:get, "/api/room/#{room}/messages")["messages"]
       def reactions(room) = request(:get, "/api/room/#{room}/emotes")["emotes"]
 
-      def publish_config(identity:, version:, profile:, ratings:)
+      def publish_config(identity:, revision:, profile:, ratings:)
         issued_at = Time.now.to_i
         payload   = Cryptography::Payload.config(
-          pubkey: identity.pubkey, version: version, profile: profile,
+          pubkey: identity.pubkey, revision: revision, profile: profile,
           ratings: ratings, issued_at: issued_at
         )
 
         request(:put, "/api/config",
-                "version" => version, "profile" => profile, "ratings" => ratings,
+                "revision" => revision, "profile" => profile, "ratings" => ratings,
                 "ts" => issued_at, "signature" => identity.sign(payload))
       end
 
