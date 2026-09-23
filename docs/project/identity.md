@@ -77,8 +77,8 @@ literally. The seed itself is never stored and never transmitted.
 
 ## The vault key
 
-The private vault (settings, the voted list, and the friend and report lists
-that used to be public) is meant to be opaque to the server, not merely signed.
+The private vault (settings, the voted list, and the friend and report lists) is
+meant to be opaque to the server, not merely signed.
 
 It cannot be encrypted to the identity key. Ed25519 is a signature scheme with
 no encryption operation, and the usual workaround — converting to X25519 and
@@ -165,12 +165,10 @@ and so never gets seen in the first place — the seen set is a record of what
 this viewer could actually read. Turning on `show_unrated` widens it, and those
 sightings keep their seniority afterwards, so the setting has a memory.
 
-This is a real change to what [the identity rules](#usernames) promised: a
-fingerprint used to sit beside every name, everywhere, unconditionally. Now it
-appears only where a name is contested. The gain is that a suffix means
-something when you see one; the cost is that a stranger with an unfamiliar
-handle is shown bare, which is exactly when a reader knows least about them.
-That trade was made deliberately.
+A [suffix](#handles) appears only where a handle is contested, never beside
+every name. So a suffix means something when you see one, and the cost is that a
+stranger with an unfamiliar handle is shown bare — which is exactly when a
+reader knows least about them.
 
 ### The seen set
 
@@ -228,7 +226,7 @@ signature harvested by one server could be replayed against another to
 authenticate as that user — which matters enormously once this federates, and
 costs nothing to get right now.
 
-## Usernames
+## Handles
 
 Not unique, and deliberately so. Reputation attaches to the **key**, never the
 name. That makes impersonation trivial unless the UI shows key-derived identity

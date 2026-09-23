@@ -1,8 +1,8 @@
 # Glossary
 
-One name per thing. Where a term has a home, this says which file defines it;
-where it has a history, this says what it used to be called, because half the
-drift comes from sliding back into an older word.
+One name per thing. Each entry says which file defines the term. **Retired
+terms** at the bottom is the single list of words that have been replaced —
+half the drift comes from sliding back into an older one.
 
 ## Records
 
@@ -16,12 +16,11 @@ canonical payload + "\n" + signature)`, hex. What `ack`, `prev`, `reply_to`,
 identifies only the payload. [chain.md](chain.md)
 
 **Identity declaration** (`reputablechat:identity:v1`) — a signed statement
-about yourself: handle, bio, icon, and the key-rotation placeholders. Was
-called a *user record*.
+about yourself: handle, bio, icon, and the key-rotation placeholders.
 
 **Attestation** (`reputablechat:attestation:v1`) — a signed statement about
 everyone else: a reputation and a trust multiplier per person, plus the derived
-cache. The counterpart to an identity declaration. Was called a *vouch list*.
+cache. The counterpart to an identity declaration.
 
 **Adjustment** (`reputablechat:adjustment:v1`) — one change to an attestation
 between republishes, naming the `base_revision` it amends and its `seq` in that

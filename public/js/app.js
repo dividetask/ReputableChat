@@ -515,8 +515,8 @@ async function logOff() {
 
 // --- identity declarations and attestations -----------------------------
 //
-// Two documents where there used to be one. An identity declaration says who
-// you are; an attestation says what you think of everybody else. They are
+// An identity declaration says who you are; an attestation says what you think
+// of everybody else. They are
 // separate so that changing your mind about somebody does not mean re-signing
 // who you are -- and so that the actions behind an opinion can stay private
 // while the opinion itself travels.
