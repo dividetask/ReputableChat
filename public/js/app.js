@@ -6,7 +6,7 @@ import * as seed from "./seed.js";
 import * as identity from "./identity.js";
 import { Reputation, Graph, toNumber, toFixed } from "./reputation.js";
 import { Session } from "./session.js";
-import { initialRatings } from "./defaults.js";
+import { initialRatings, genesisProfile } from "./defaults.js";
 
 const ROOM = "general";
 const LOGIN_PATH = "/";
@@ -330,6 +330,12 @@ async function loadNetwork() {
   state.graph = new Graph();
   state.graph.add(state.me.pubkey, state.ratings);
   state.profiles = new Map([[state.me.pubkey, state.profile]]);
+
+  // The genesis account has no config to fetch, so its name comes from the
+  // declaration already in hand. Seeded before the walk, so a config it has
+  // published since wins over it.
+  const genesis = genesisProfile(state.genesis);
+  if (genesis) state.profiles.set(state.genesis.pubkey, genesis);
 
   let frontier = [state.me.pubkey];
   const seen = new Set(frontier);

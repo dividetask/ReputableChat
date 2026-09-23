@@ -87,7 +87,8 @@ Tim's identity declaration is the genesis. Generate it once with `bundle exec ra
 genesis` and commit it; every client needs the same hash before it has fetched
 anything, so it cannot be downloaded.
 
-Full design: [reputation](docs/project/reputation.md) ·
+Full design: [glossary](docs/project/glossary.md) ·
+[reputation](docs/project/reputation.md) ·
 [identity](docs/project/identity.md) ·
 [chain](docs/project/chain.md) ·
 [architecture](docs/project/architecture.md)

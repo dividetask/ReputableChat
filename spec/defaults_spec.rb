@@ -54,6 +54,38 @@ class DefaultsSpec < Minitest::Test
     assert_empty defaults.fetch("no_genesis")
   end
 
+  # RULE: the genesis account's name is shown, not a placeholder. Every other
+  # name comes from a fetched config and the genesis has none -- it has an
+  # identity declaration. Without reading it, the one account everybody trusts
+  # by default is the one account nobody can see the name of.
+  def test_the_genesis_handle_is_read_from_its_declaration
+    profile = defaults.fetch("genesis_profile")
+
+    assert_equal "Tim", profile.fetch("username")
+    assert_equal "Legally distinct.", profile.fetch("message")
+  end
+
+  # A declaration that cannot be read yields nothing rather than a broken
+  # profile, so a bad genesis shows a fingerprint instead of a wrong name.
+  def test_an_unreadable_declaration_yields_no_profile
+    assert_nil defaults.fetch("genesis_profile_no_handle")
+    assert_nil defaults.fetch("genesis_profile_malformed")
+    assert_nil defaults.fetch("genesis_profile_missing")
+  end
+
+  # RULE: the seeded profile must not beat a config the genesis has since
+  # published. It is a fallback for having nothing, not a pin.
+  def test_the_seeded_profile_is_set_before_the_walk_fetches_configs
+    app = File.read(File.expand_path("../public/js/app.js", __dir__), encoding: "UTF-8")
+    seeded = app.index("genesisProfile(state.genesis)")
+    fetched = app.index("state.profiles.set(blob.pubkey")
+
+    refute_nil seeded, "the genesis profile is never seeded"
+    refute_nil fetched, "configs never populate profiles"
+    assert_operator seeded, :<, fetched,
+                    "seed the genesis profile before fetched configs overwrite it"
+  end
+
   # RULE: seeded at creation and nowhere else. Re-adding it whenever it is
   # missing would mean removing it never took, which is the same thing as not
   # being able to remove it. Asserted against the source, because the failure

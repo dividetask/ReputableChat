@@ -41,6 +41,10 @@ bundle exec ruby script/tim.rb friend <pubkey>
 See [docs/project/reputation.md](docs/project/reputation.md) and
 [docs/project/chain.md](docs/project/chain.md).
 
+**One name per thing:** [docs/project/glossary.md](docs/project/glossary.md) is
+the vocabulary, including the terms that have been retired. Check it before
+inventing a word for something that already has one.
+
 ## Things that break silently
 
 - **Canonical serialization.** `lib/reputable_chat/cryptography/canonical.rb` and
