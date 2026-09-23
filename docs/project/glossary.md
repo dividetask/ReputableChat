@@ -41,7 +41,7 @@ pinning a version of the client. A manifest, never an archive.
 
 **Genesis** — the genesis account's first identity declaration: the only
 record whose `ack` is empty, and the thing every record that has seen nothing
-else acknowledges. Its `note` carries version 1 of the rules.
+else acknowledges. Its `note` carries version 0.001 of the rules.
 Committed as a file because clients must agree on its hash before fetching
 anything. There are two: development's seed is public, production's is not.
 
@@ -64,8 +64,10 @@ valid. Carried in the `note` of the genesis account's identity declaration, one
 revision per version, never edited. A record follows the newest version it
 acknowledges. [chain.md](chain.md)
 
-**Founding notice** — version 1 of the rules, kept as
-`docs/project/rules/v1.md`, from which the genesis record's note is generated.
+**Founding notice** — version 0.001 of the rules, kept as
+`docs/project/rules/v0.001.md`, from which the genesis record's note is
+generated. Versions below 1 are pre-launch; 1 is reserved for the first set
+that goes live.
 As a notice record it is the one kind that supersedes nothing. One per chain.
 
 ## Fields that travel on many records

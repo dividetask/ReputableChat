@@ -235,9 +235,9 @@ account lifts somebody over the line for anyone who rates the genesis account.
 ## Rules
 
 The rules say what every field of every record means and what makes a record
-valid. Version 1 is the `note` of the genesis record. A later version is a new
-revision of the genesis account's identity declaration whose `note` carries the
-whole new text, never a diff. Every version stays on the chain, so anyone can
+valid. The current version is the `note` of the genesis record. A later version
+is a new revision of the genesis account's identity declaration whose `note`
+carries the whole new text, never a diff. Every version stays on the chain, so anyone can
 read the rules any record was made under.
 
 **A record follows the newest rules it acknowledges.** Walk back through its
@@ -262,14 +262,17 @@ software to.
 
 ### The founding notice is the source
 
-Each version's text lives in the repository as `docs/project/rules/v<n>.md`,
-and version 1 is the founding notice. The code that generates the genesis
-record reads its note straight from `docs/project/rules/v1.md` rather than
-from a copy, so the file and the chain cannot disagree. A new version is a new
+Each version's text lives in the repository as
+`docs/project/rules/v<version>.md`, and the first one is the founding notice.
+The generator is to read the note straight from that file rather than from a
+copy, so the file and the chain cannot disagree. A new version is a new
 file; an existing one is never edited once published, because its bytes are
 signed into the chain.
 
-Version 1 is 7 KB, which is why a note may hold 16,000 bytes.
+Version 0.001 is 7 KB, which is why a note may hold 16,000 bytes.
+
+Versions below 1 are pre-launch and cost nothing to change, since nothing is
+published. Version 1 is reserved for the first rules that go live.
 
 ### Not built
 
