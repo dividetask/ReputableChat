@@ -63,9 +63,23 @@ attestation:
   # readers, never an input to their own scores; see docs/project/chain.md.
   published_hops: 3
   # Republish the whole attestation after either limit, whichever comes first,
-  # superseding every adjustment against the previous version. Only score-
-  # changing events count toward the tally -- posting a comment cannot move a
-  # number in the file, so counting it would republish for no reason.
+  # superseding every adjustment against the previous revision.
+  #
+  # Both are floors on when pending changes get published, not schedules. With
+  # nothing pending, nothing is published: a second document stating exactly
+  # what the first one said is noise, and an account that was created and never
+  # used leaves nothing behind but its identity declaration. The clock is also
+  # only ever read while somebody is signed in, so it cannot fire for a dormant
+  # account anyway.
+  #
+  # Only score-changing events count toward the tally -- posting a comment
+  # cannot move a number in the file, so counting it would republish for no
+  # reason.
+  #
+  # Neither limit is a rate limit on vouching. Ten friendships in a row meet
+  # the threshold immediately, which is fine: the point is to keep one
+  # attestation from being re-signed and re-uploaded per emote, not to slow
+  # anybody down.
   resubmit_after_changes: 10
   resubmit_after_seconds: 604800
   # The multiplier on what somebody recommends. Stored per user only when

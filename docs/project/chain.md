@@ -15,7 +15,7 @@ the gap being visible.
 
 ## Records
 
-A record is a signed payload. Five kinds so far:
+A record is a signed payload. Seven kinds so far:
 
 | purpose | what it is |
 |---|---|
@@ -24,6 +24,7 @@ A record is a signed payload. Five kinds so far:
 | `reputablechat:adjustment:v1` | one change to an attestation, between republishes |
 | `reputablechat:message:v1` | a comment in a room |
 | `reputablechat:emote:v1` | a reaction to a comment |
+| `reputablechat:notice:v1` | an official statement from a publisher |
 | `reputablechat:release:v1` | a published version of the client |
 
 Every one of them carries `ack`. The private vault does not, because nobody
@@ -375,6 +376,22 @@ supersedes every adjustment against the previous revision. Only score-changing
 events count toward the tally. Posting a comment is not one — it cannot move a
 number in the file, so counting it would republish for a reason that could not
 have changed anything.
+
+**Nothing is published without something to say.** Both limits are floors on
+when pending changes go out, not schedules: an account with no pending changes
+publishes nothing, and one that was created and never used leaves nothing behind
+but its identity declaration. The clock is only ever read while somebody is
+signed in, so it cannot fire for a dormant account in any case.
+
+Neither limit slows down vouching, and it would be a mistake to read them that
+way. Ten friendships in a row meet the threshold on the spot. The cadence exists
+to stop one attestation being re-signed and re-uploaded per emote — it is not a
+rate limit, and a new account can publish a full set of vouches within a minute
+of being created.
+
+There is no attestation at all until the first one is published, so there is
+nothing for an adjustment to amend until then. Changes before that accumulate in
+the vault, and revision 1 publishes the accumulated set.
 
 ## Notices
 
