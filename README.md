@@ -86,8 +86,8 @@ Full design — and the numbers, which live in config rather than in prose:
   never stored or transmitted.
 - The private vault is encrypted under a separate key derived from the same
   seed, so the server holds it without being able to read it.
-- Every signature names the kind of record it was made for (`purpose`), so a
-  signature for one kind cannot be presented as another.
+- A record's type is part of what is signed, so a signature cannot be reused
+  on a different kind of record.
 - **MVP: the client does not verify other people's attestation signatures**
   (`session.verify_signatures`). Until that is on, a malicious server can
   fabricate ratings.
