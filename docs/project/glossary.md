@@ -32,7 +32,7 @@ pinning a version of the client. A manifest, never an archive.
 
 **Genesis** — the genesis account's first identity declaration: the only
 record whose `ack` is empty, and the thing every record that has seen nothing
-else acknowledges. Its `note` carries version 0.001 of the rules.
+else acknowledges. Its `note` is the founding notice.
 Committed as a file because clients must agree on its hash before fetching
 anything. There are two: development's seed is public, production's is not.
 
@@ -49,6 +49,12 @@ beside the genesis under `config/host/`. Where a server has one, a new account
 starts with it as a second friend. By convention it signs what concerns one
 server, such as an outage message. Nothing enforces either convention.
 [chain.md](chain.md)
+
+**Founding notice** — the first rules, `docs/project/rules/v0.001.md`, placed
+in the genesis record as its `note`. Not a record of its own: it is inside the
+genesis, so it sits at the bottom of the chain with it. The generator reads it
+straight from the file. Later rules versions are not founding notices; there is
+one per chain. [chain.md](chain.md)
 
 **Rules** — what every field of every record means and what makes a record
 valid. Carried in the `note` of the genesis account's identity declaration, one
@@ -182,7 +188,6 @@ Do not reintroduce these; they each have a current name above.
 | reaction | emote |
 | announcement, notice (`notice:v1`) | message |
 | adjustment (`adjustment:v1`) | nothing on the chain; a change waits in the vault for the next attestation |
-| founding notice | the rules, in the genesis record's note |
 | `author`, `publisher` (as a field name) | `pubkey` |
 | `supersedes`, `seq`, `prev`, `room`, `derived.hops`, `derived.params` | (removed; no replacement) |
 | parameter fingerprint | (removed; nothing published says what parameters it was computed under) |

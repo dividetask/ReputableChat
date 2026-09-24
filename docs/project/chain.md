@@ -99,8 +99,8 @@ system, which addresses image and asset bytes directly.
 
 The genesis account's first identity declaration is the bottom of the chain.
 It is the only record whose `ack` is empty; every record that has seen nothing
-else acknowledges it. Its `note` carries the first version of the rules — see
-**Rules** below.
+else acknowledges it. Its `note` is the founding notice, the first version of
+the rules — see **The founding notice** below.
 
 The genesis account is the developer's, and it is the same on every server:
 there is one network and one chain. Its handle is Tim by default, but the docs
@@ -256,13 +256,22 @@ The rules text is for people. Like every note it is never read by code; the
 software implements the rules, and the note is what anyone can hold the
 software to.
 
+### The founding notice
+
+The first rules, `docs/project/rules/v0.001.md`, are the **founding notice**:
+the note of the genesis record. It is not a record of its own. It sits inside
+the genesis, so it is at the bottom of the chain with it and every record that
+reaches the genesis reaches it too. There is one per chain; later versions of
+the rules are revisions of the genesis account's declaration, not founding
+notices.
+
 ### The rules file is the source
 
 Each version's text lives in the repository as
-`docs/project/rules/v<version>.md`. The generator is to read the note straight
-from that file rather than from a copy, so the file and the chain cannot
-disagree. A new version is a new file; an existing one is never edited once
-published, because its bytes are signed into the chain.
+`docs/project/rules/v<version>.md`, the founding notice included. The generator
+is to read the note straight from that file rather than from a copy, so the file
+and the chain cannot disagree. A new version is a new file; an existing one is
+never edited once published, because its bytes are signed into the chain.
 
 Version 0.001 is about 5.4 KB, well over the 2,000 bytes a note used to be
 allowed, which is why a note may hold 16,000.
