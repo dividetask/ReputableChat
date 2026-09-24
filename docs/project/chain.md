@@ -2,16 +2,16 @@
 
 Every signed record in ReputableChat names the most recent records its author
 had seen when they signed it. That one field turns a pile of independent
-signatures into a single tangled history: if you can see a record, you can walk back from it
-through everything its author had already seen, and everything *those* authors
-had seen, until you reach the genesis.
+signatures into a single tangled history: if you can see a record, you can walk
+back from it through everything its author had already seen, and everything
+*those* authors had seen, until you reach the genesis.
 
 There is no proof of work and no mining. The chain is not there to put records
 in one agreed order or to stop double spends — it is there so that a record
-cannot be quietly removed, back-dated, or shown to one person and not another. A server
-that drops a message has to drop everything that acknowledged it, and everything
-that acknowledged *those*, which is not something it can do selectively without
-the gap being visible.
+cannot be quietly removed, back-dated, or shown to one person and not another. A
+server that drops a message has to drop everything that acknowledged it, and
+everything that acknowledged *those*, which is not something it can do
+selectively without the gap being visible.
 
 ## Records
 
@@ -56,9 +56,9 @@ Three properties make it safe to have:
 - **Nothing branches on it.** No code reads it, so nothing can be smuggled
   through it by writing something that reads like a directive. It is inert by
   construction rather than by policy.
-- **It is bounded** (16,000 bytes, room for the rules) and **normalized**: an absent note and an
-  empty one produce identical bytes, so two records a reader would call the
-  same cannot carry different signatures.
+- **It is bounded** (16,000 bytes, room for the rules) and **normalized**: an
+  absent note and an empty one produce identical bytes, so two records a reader
+  would call the same cannot carry different signatures.
 
 Anything that renders a note treats it as text and never as markup, like every
 other string somebody else wrote. That rule is not special to notes — see the
@@ -235,8 +235,8 @@ account lifts somebody over the line for anyone who rates the genesis account.
 The rules say what every field of every record means and what makes a record
 valid. The current version is the `note` of the genesis record. A later version
 is a new revision of the genesis account's identity declaration whose `note`
-carries the whole new text, never a diff. Every version stays on the chain, so anyone can
-read the rules any record was made under.
+carries the whole new text, never a diff. Every version stays on the chain, so
+anyone can read the rules any record was made under.
 
 **A record follows the newest rules it acknowledges.** Walk back through its
 `ack`s; the newest revision of the genesis account's declaration found there is
@@ -259,12 +259,13 @@ software to.
 ### The rules file is the source
 
 Each version's text lives in the repository as
-`docs/project/rules/v<version>.md`. The generator is to read the note straight from that file rather than from a
-copy, so the file and the chain cannot disagree. A new version is a new
-file; an existing one is never edited once published, because its bytes are
-signed into the chain.
+`docs/project/rules/v<version>.md`. The generator is to read the note straight
+from that file rather than from a copy, so the file and the chain cannot
+disagree. A new version is a new file; an existing one is never edited once
+published, because its bytes are signed into the chain.
 
-Version 0.001 is 7 KB, which is why a note may hold 16,000 bytes.
+Version 0.001 is about 5.4 KB, well over the 2,000 bytes a note used to be
+allowed, which is why a note may hold 16,000.
 
 Versions below 1 are pre-launch and cost nothing to change, since nothing is
 published. Version 1 is reserved for the first rules that go live.
@@ -339,9 +340,9 @@ acknowledging is B's business, and A disagreeing about it is precisely the
 disagreement the system exists to hold open rather than resolve.
 
 Refusing to acknowledge B over what B acknowledged would also be ruinous
-mechanically. It means walking B's ancestry before every message, and it fragments
-the DAG along each viewer's visibility, so a shared history stops being
-shared — for the sake of enforcing a judgement that was never meant to be
+mechanically. It means walking B's ancestry before every message, and it
+fragments the DAG along each viewer's visibility, so a shared history stops
+being shared — for the sake of enforcing a judgement that was never meant to be
 shared in the first place.
 
 ### Walking the chain is reputation-blind
@@ -459,9 +460,9 @@ is the whole point; the version history is a pleasant side effect.
 Releases are cut when one is published, not per commit. The chain is not the
 repository.
 
-**The genesis account is the only publisher for now.** The record carries `pubkey` so that a
-per-user trusted-developer setting can arrive later without re-signing
-anything, but nothing today consults it.
+**Only the genesis account publishes releases for now.** A client could later
+let each person choose which accounts' releases they trust, by `pubkey`,
+without anything being re-signed; nothing today does.
 
 ### Not built: fetching a record by hash
 

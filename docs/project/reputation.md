@@ -2,8 +2,9 @@
 
 Reputation is **subjective**. There is no global reputation. Every number here
 is one viewer's view of the network, calculated on that viewer's own machine
-from their own ratings and other people's published ones. Two clients may differ in the last decimal place and
-that is not a bug — it is what "your view of the network" means.
+from their own ratings and other people's published ones. Two clients may differ
+in the last decimal place and that is not a bug — it is what "your view of the
+network" means.
 
 Implementation: `lib/reputable_chat/reputation/` (Ruby, reference) and
 `public/js/reputation.js` (JavaScript, what actually runs). Parameters live in
@@ -66,11 +67,11 @@ weight(d) = (1 - k) * k^d          k = 0.1, hops 0..7
 |---|---|---|---|---|---|---|---|---|
 | weight | 0.9 | 0.09 | 0.009 | 0.0009 | 9e-5 | 9e-6 | 9e-7 | 9e-8 |
 
-These sum to 1, so a reputation is always inside −1..+1 with no
-clamping. Depth 0 takes `1-k` of the total, which means **the ceiling for anyone
-you have never personally rated is exactly `k`** — 0.1. That is intended:
-strangers are meant to sit in the Tolerated band, and the pressure that creates to
-friend people or like their messages is the point of the app.
+These sum to 1, so a reputation is always inside −1..+1 with no clamping. Depth
+0 takes `1-k` of the total, which means **the ceiling for anyone you have never
+personally rated is exactly `k`** — 0.1. That is intended: strangers are meant
+to sit in the Tolerated band, and the pressure that creates to friend people or
+like their messages is the point of the app.
 
 A reputation is the weighted sum over depths of the mean rating at that
 depth. The mean is taken over **the people who actually rated the target** at
@@ -134,25 +135,25 @@ on a hair's-breadth reputation.
 
 ### What it costs, and what it does not buy
 
-The derived reputation is reached through its author's own configuration, so it carries a
-fingerprint of the parameters it was computed under (see
-[chain.md](chain.md)). That fingerprint is **advisory and incomplete**: a
-derived reputation averages ratings that each came from a different author's
-curve, and no single hash can describe all of them. It says "this came from a
-different setup", never "this is safe to use".
+A derived reputation is reached through its author's own configuration, and
+nothing published says what that configuration was. A reader reaching for the
+cache has run out of its own reach, so it either takes the number or leaves it;
+knowing the author's parameters would give it nothing it could act on, and
+publishing them would tell everyone the settings a particular reader scores
+under.
 
 There is also mild double counting. A hop-2 person's derived reputation for the
-target is 90% their own rating of it, which the third term already counted at 0.009. So
-the fourth term re-counts their direct opinion at 0.00081, and only the
-remainder is genuinely news from further out.
+target is 90% their own rating of it, which the third term already counted at
+0.009. So the fourth term re-counts their direct opinion at 0.00081, and only
+the remainder is genuinely news from further out.
 
-And the cache is not free to publish. An attestation carrying derived reputations for
-everyone within three hops is thousands of entries, and a viewer fetches
-hundreds of attestations. That is the cost of not walking hop 3 directly, and
-it only stays reasonable while the published set does. It will need bounding —
-Merkle proofs over the derived map, so a reader can fetch the few entries it
-wants and verify them against the signed root, are the known way to do it
-without asking the server to be trusted about what it left out.
+And the cache is not free to publish. An attestation carrying derived
+reputations for everyone within three hops is thousands of entries, and a viewer
+fetches hundreds of attestations. That is the cost of not walking hop 3
+directly, and it only stays reasonable while the published set does. It will
+need bounding — Merkle proofs over the derived map, so a reader can fetch the
+few entries it wants and verify them against the signed root, are the known way
+to do it without asking the server to be trusted about what it left out.
 
 ### Sampling
 
@@ -163,7 +164,8 @@ Deterministic selection — nearest first, then by pubkey — at least makes two
 clients with the same view agree.
 
 Each person is counted once, at their **shortest** distance. Someone reachable
-by two paths does not get to vote twice. Nobody contributes to their own reputation.
+by two paths does not get to vote twice. Nobody contributes to their own
+reputation.
 
 Your rating of someone is a **gate, not a multiplier**. A contact you rated
 +0.001 carries exactly the same weight in judging strangers as one you friended
@@ -193,15 +195,16 @@ only the unrated, never the net-negative.
 
 That rule exists because of a real bug in an earlier design. When visibility was
 purely threshold-based, an unrated spammer sat at 0 and was hidden — but the
-same spammer *reported* from two hops out came to −0.009, which is above any sane
-hide threshold, so reporting them made them **more** visible. The further away
-the reporter, the stronger the effect. Sign-based visibility removes the whole
-class of problem.
+same spammer *reported* from two hops out came to −0.009, which is above any
+sane hide threshold, so reporting them made them **more** visible. The further
+away the reporter, the stronger the effect. Sign-based visibility removes the
+whole class of problem.
 
 ## Sessions
 
-Reputations are calculated once at login, everyone is sorted into a bucket,
-and the numbers are discarded. For the rest of the session the buckets are what matter.
+Reputations are calculated once at login, everyone is sorted into a bucket, and
+the numbers are discarded. For the rest of the session the buckets are what
+matter.
 
 The session holds a **snapshot** of the graph, not a live view. Freezing only
 the walk is not enough: a rating published later by someone already inside it
@@ -219,14 +222,15 @@ distance are needed:
 | 2 hops away | 2 |
 | 3+ hops | no immediate effect |
 
-Because the reputation is gone by then, this is a flat count rather than a weighing.
-That makes it **stricter than the login-time maths**, so someone blocked this
-way may reappear at the next login once the report is averaged against
-everything else. That is expected, not a bug.
+Because the reputation is gone by then, this is a flat count rather than a
+weighing. That makes it **stricter than the login-time maths**, so someone
+blocked this way may reappear at the next login once the report is averaged
+against everything else. That is expected, not a bug.
 
-`Session#explain` re-derives the reputation and itemises it — which hop, who rated,
-what each contributed. It is defined in terms of the same `breakdown` that
-produces the reputation, so what the UI explains cannot drift from what it acts on.
+`Session#explain` re-derives the reputation and itemises it — which hop, who
+rated, what each contributed. It is defined in terms of the same `breakdown`
+that produces the reputation, so what the UI explains cannot drift from what it
+acts on.
 
 ## The coupling — read before retuning anything
 
@@ -242,9 +246,9 @@ which pins `A` to the window **(0.00025, 0.001)**. The arithmetic is unchanged
 now that depth 3 is the derived term rather than a walked hop, but it means
 something different: one like of yours is outweighed by your two-hop
 neighbourhood collectively estimating someone at −1, and two likes outweigh it.
-It is a statement about a summary rather than about a single distant reporter. At `A = 0.0004` the margins
-are symmetric: one like lands 0.00054 below the line and two likes 0.00054
-above it, each 60% of the report's weight.
+It is a statement about a summary rather than about a single distant reporter.
+At `A = 0.0004` the margins are symmetric: one like lands 0.00054 below the line
+and two likes 0.00054 above it, each 60% of the report's weight.
 
 This means **`k`, `max_hops`, `A`, `B` and `cap` are no longer independent**.
 Changing any one of them can silently flip a distant report from hiding someone
@@ -284,7 +288,5 @@ through. The author runs their own curve once and publishes the rating, so the
 curve is an authoring parameter rather than a reading one.
 
 The cost is that a published rating goes stale when its author retunes, where
-an action count never would. That is why `derived` carries a **parameter
-fingerprint** — a reader whose parameters differ can see that the cache is not
-theirs to use, rather than silently adopting a stranger's settings. See
-**Derived cache** in [glossary.md](glossary.md).
+an action count never would. The author's next attestation carries the retuned
+ratings. See **Derived cache** in [glossary.md](glossary.md).

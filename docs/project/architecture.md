@@ -209,10 +209,10 @@ The browser signs bytes and the server verifies bytes, so both must produce
 byte-identical output: sorted keys, no whitespace, UTF-8, floats refused
 outright (they have no single textual form across languages).
 
-`lib/reputable_chat/cryptography/canonical.rb` and `public/js/canonical.js` are the
-two halves. **If they ever disagree by one character, every signature silently
-stops verifying** — `spec/canonical_parity_spec.rb` runs both over shared
-fixtures and compares the bytes, and is the thing that catches that.
+`lib/reputable_chat/cryptography/canonical.rb` and `public/js/canonical.js` are
+the two halves. **If they ever disagree by one character, every signature
+silently stops verifying** — `spec/canonical_parity_spec.rb` runs both over
+shared fixtures and compares the bytes, and is the thing that catches that.
 
 ## Layout
 
@@ -235,13 +235,12 @@ lib/reputable_chat/
   dump.rb                 readable view of the database for an operator
   operator.rb             the genesis and host accounts' seed files, and signing from a terminal
   cryptography/           canonical, payload, record, signature, seed, vault
-  reputation/             curve, ladder, rating, score, engine, session, fingerprint
+  reputation/             curve, ladder, rating, score, decimals, engine, session
   store/                  database (Sequel), images (content-addressed), memory
 
 public/js/
   canonical.js            must match cryptography/canonical.rb byte for byte
   record.js               must match cryptography/record.rb
-  fingerprint.js          must match reputation/fingerprint.rb
   seed.js                 must match cryptography/seed.rb
   identity.js             Argon2id, non-extractable keys, signing
   vault.js                must match cryptography/vault.rb -- seal, unseal, merge

@@ -90,4 +90,4 @@ Full design — and the numbers, which live in config rather than in prose:
   against another server or presented as another kind of record.
 - **MVP: the client does not verify other people's attestation signatures**
   (`session.verify_signatures`). Until that is on, a malicious server can
-  fabricate scores.
+  fabricate ratings.

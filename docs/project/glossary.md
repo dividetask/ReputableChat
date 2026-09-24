@@ -19,7 +19,7 @@ payload. [chain.md](chain.md)
 about yourself: handle, bio, icon, and the key-rotation placeholders.
 
 **Attestation** (`reputablechat:attestation:v1`) — a signed statement about
-everyone else: a reputation and a trust multiplier per person, plus the derived
+everyone else: a rating and a trust multiplier per person, plus the derived
 cache. The counterpart to an identity declaration.
 
 **Message** (`reputablechat:message:v1`) — text one person sends.
@@ -159,8 +159,7 @@ recovery. [identity.md](identity.md)
 key fingerprint beside every name.
 
 **Fingerprint** (of a key) — the short rendering of a public key shown next to
-a handle. Unrelated to a parameter fingerprint, which is the one collision this
-vocabulary has not resolved.
+a handle.
 
 **Canonical serialization** — sorted keys, no whitespace, UTF-8, floats
 refused. Ruby and JavaScript must produce identical bytes.
@@ -186,6 +185,7 @@ Do not reintroduce these; they each have a current name above.
 | founding notice | the rules, in the genesis record's note |
 | `author`, `publisher` (as a field name) | `pubkey` |
 | `supersedes`, `seq`, `prev`, `room`, `derived.hops`, `derived.params` | (removed; no replacement) |
+| parameter fingerprint | (removed; nothing published says what parameters it was computed under) |
 | Tim (as the general term) | genesis account |
 | server's Tim, server account | host account |
 | score | rating (given) or reputation (calculated) |
