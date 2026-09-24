@@ -45,7 +45,6 @@ require "reputable_chat/store/memory"
 module Tim
   Crypto   = ReputableChat::Cryptography
   Payload  = Crypto::Payload
-  ROOM     = "general"
   MAX_BODY = 4_000
 
   class Failed < StandardError; end
@@ -175,25 +174,24 @@ module Tim
     abort "  too long: #{body.bytesize} bytes, the limit is #{MAX_BODY}" if body.bytesize > MAX_BODY
 
     client = connect(options)
-    room = options[:room]
-    messages = client.get_json("/api/room/#{room}/messages").fetch("messages")
+    messages = client.get_json("/api/messages").fetch("messages")
 
     ack = choose_ack(client, messages)
     ts = Time.now.to_i
 
-    payload = Payload.message(pubkey: client.pubkey, room: room, body: body,
+    payload = Payload.message(pubkey: client.pubkey, body: body,
                               ack: ack, issued_at: ts, note: options[:note])
     canonical = Crypto::Canonical.dump(payload)
     signature = client.sign(payload)
 
-    client.post_json("/api/room/#{room}/message",
+    client.post_json("/api/message",
                      { "ack" => ack, "body" => body, "note" => options[:note],
                        "ts" => ts, "signature" => signature })
 
     # The same hash the server derived, from the same two strings.
     hash = Crypto::Record.digest(payload: canonical, signature: signature)
     puts
-    puts "  Posted to ##{room}."
+    puts "  Posted."
     puts "  Record  #{hash}"
     puts "  Ack     #{ack}#{ack == ReputableChat::Genesis.current.hash ? '  (genesis)' : ''}"
     puts "  Note    #{options[:note]}" if options[:note]
@@ -440,13 +438,12 @@ module Tim
 
   def parse(argv)
     settings = ReputableChat::ServerConfig.load
-    options = { command: nil, args: [], room: ROOM, origin: settings.fetch("origin"),
+    options = { command: nil, args: [], origin: settings.fetch("origin"),
                 url: nil, seed_path: nil, note: nil, account: :genesis }
 
     until argv.empty?
       flag = argv.shift
       case flag
-      when "--room"   then options[:room]      = argv.shift.to_s
       when "--origin" then options[:origin]    = argv.shift.to_s
       when "--url"    then options[:url]       = argv.shift.to_s
       when "--seed"   then options[:seed_path] = File.expand_path(argv.shift.to_s)
@@ -471,7 +468,7 @@ module Tim
       usage: bundle exec ruby script/tim.rb <command> [options]
 
         status              who the account is, and everyone it has rated
-        post <text>         send a message to a room
+        post <text>         send a message
         friend <pubkey>     friend somebody
         visible <pubkey>    lift somebody to the least rating that makes them
                             visible, without claiming to know them
@@ -479,7 +476,6 @@ module Tim
       options:
         --host              sign as this server's host account rather than the
                             genesis account
-        --room NAME         room for `post` (default: #{ROOM})
         --note TEXT         free text signed into the record for anyone reading
                             the raw chain; the software never reads it
         --url URL           where to reach the server (default: the origin)

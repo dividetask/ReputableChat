@@ -10,7 +10,6 @@ import { initialRatings, declarationProfile } from "./defaults.js";
 import * as vault from "./vault.js";
 import * as names from "./names.js";
 
-const ROOM = "general";
 const LOGIN_PATH = "/";
 const NEW_ACCOUNT_PATH = "/new-account";
 // A quick picker, not the whole set: sixteen emotes make a toolbar wider than
@@ -766,8 +765,8 @@ async function refreshMessages() {
   let emotes;
   try {
     [{ messages }, { emotes }] = await Promise.all([
-      api(`/api/room/${ROOM}/messages`),
-      api(`/api/room/${ROOM}/emotes`),
+      api("/api/messages"),
+      api("/api/emotes"),
     ]);
   } catch (error) {
     return status($("chat-status"), error.message, "error");
@@ -1254,11 +1253,11 @@ async function react(message, emote) {
   const ts = Math.floor(Date.now() / 1000);
   const ack = currentAck();
   const payload = identity.emotePayload({
-    pubkey: state.me.pubkey, room: ROOM, message: message.hash, emote, ack, ts,
+    pubkey: state.me.pubkey, message: message.hash, emote, ack, ts,
   });
 
   try {
-    await post(`/api/room/${ROOM}/emote`, {
+    await post("/api/emote", {
       message: message.hash, emote, ack, ts,
       signature: await identity.sign(state.me, payload),
     });
@@ -1282,11 +1281,11 @@ async function compose(event) {
   const replyTo = replyingTo ? replyingTo.hash : null;
   const ack = currentAck();
   const payload = identity.messagePayload({
-    pubkey: state.me.pubkey, room: ROOM, body, ack, ts, replyTo,
+    pubkey: state.me.pubkey, body, ack, ts, replyTo,
   });
 
   try {
-    await post(`/api/room/${ROOM}/message`, {
+    await post("/api/message", {
       body, ack, ts, reply_to: replyTo,
       signature: await identity.sign(state.me, payload),
     });
@@ -1710,7 +1709,7 @@ async function saveProfile() {
 async function boot() {
   let host;
   [state.config, state.emotes, state.genesis, host, state.limits] = await Promise.all([
-    api("/api/defaults"), api("/api/emotes"), api("/api/genesis"), api("/api/host"),
+    api("/api/defaults"), api("/api/emote-kinds"), api("/api/genesis"), api("/api/host"),
     api("/api/limits"),
   ]);
   state.host = host.host;

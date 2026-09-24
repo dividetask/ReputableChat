@@ -32,13 +32,6 @@ class ParamsSpec < Minitest::Test
     assert_nil P.string(255.chr.dup.force_encoding("UTF-8"), max: 50)
   end
 
-  def test_room_names_cannot_traverse_paths
-    assert_equal "general", P.room("general")
-    assert_nil P.room("../etc/passwd")
-    assert_nil P.room("Has Caps")
-    assert_nil P.room("")
-  end
-
   def test_integers_are_range_checked
     assert_equal 42, P.integer("42", max: 100)
     assert_nil P.integer("4200", max: 100)

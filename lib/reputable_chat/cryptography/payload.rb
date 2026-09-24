@@ -183,11 +183,10 @@ module ReputableChat
       # `reply_to` is the record hash of the message being replied to, or nil.
       # Always present so the canonical form does not change shape between a
       # reply and an ordinary message.
-      def message(pubkey:, room:, body:, ack:, issued_at:, reply_to: nil, note: nil)
+      def message(pubkey:, body:, ack:, issued_at:, reply_to: nil, note: nil)
         {
           "purpose"  => MESSAGE,
           "pubkey"   => pubkey,
-          "room"     => room,
           "reply_to" => reply_to,
           "ack"      => ack,
           "note"     => note,
@@ -196,14 +195,13 @@ module ReputableChat
         }
       end
 
-      # One person's emote on one message. `message` is that message's
-      # record hash. `room` is carried for the same reason a message carries
-      # it: so an emote cannot be transplanted elsewhere.
-      def emote(pubkey:, room:, message:, emote:, ack:, issued_at:, note: nil)
+      # One person's emote on one message. `message` is that message's record
+      # hash, which is what makes it unmovable: the hash covers the whole record
+      # it points at, so there is nothing left for a room to pin down.
+      def emote(pubkey:, message:, emote:, ack:, issued_at:, note: nil)
         {
           "purpose" => EMOTE,
           "pubkey"  => pubkey,
-          "room"    => room,
           "message" => message,
           "emote"   => emote,
           "ack"     => ack,

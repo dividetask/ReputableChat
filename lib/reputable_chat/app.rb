@@ -108,7 +108,7 @@ module ReputableChat
         # Serving them (rather than baking them into the JS) is what lets a
         # default change reach every user who never pinned that setting.
         r.get("defaults") { DEFAULTS }
-        r.get("emotes")   { EMOTES }
+        r.get("emote-kinds") { EMOTES }
         # The kinds a client has to be able to render, served for the same
         # reason the emotes are: baking them into the JS means a new kind
         # cannot reach anyone already running an old copy.
@@ -159,14 +159,13 @@ module ReputableChat
           r.get(String) { |pubkey| fetch_adjustments(r, pubkey) }
         end
 
-        r.on "room", String do |room_name|
-          room = Params.room(room_name) or bad_request(r, "bad room")
-
-          r.get("messages") { { "messages" => store.room_messages(room).map { |m| present_message(m) } } }
-          r.get("emotes")   { { "emotes" => store.room_emotes(room) } }
-          r.post("message") { post_message(r, room) }
-          r.post("emote")   { post_emote(r, room) }
-        end
+        # No room segment: there are no rooms. When they arrive they will be
+        # their own records, named by hash rather than by a name anybody can
+        # claim, so a path built out of a name would have to go anyway.
+        r.get("messages") { { "messages" => store.messages.map { |m| present_message(m) } } }
+        r.get("emotes")   { { "emotes" => store.emotes } }
+        r.post("message") { post_message(r) }
+        r.post("emote")   { post_emote(r) }
       end
     end
 
@@ -428,7 +427,7 @@ module ReputableChat
       { kind.to_s => store.public_send(kind, pubkeys).map { |row| present_record(row) } }
     end
 
-    def post_message(r, room)
+    def post_message(r)
       pubkey = current_pubkey(r)
       body   = Params.string(r.params["body"], max: limit(:message_bytes)) or bad_request(r, "bad body")
       sig    = Params.signature(r.params["signature"]) or bad_request(r, "bad signature")
@@ -437,7 +436,7 @@ module ReputableChat
       reply  = optional_hash(r, "reply_to")
 
       payload = Cryptography::Payload.message(
-        pubkey: pubkey, room: room, body: body,
+        pubkey: pubkey, body: body,
         ack: ack, issued_at: ts, reply_to: reply, note: optional_note(r)
       )
       verify!(r, pubkey, sig, payload)
@@ -445,7 +444,7 @@ module ReputableChat
       canonical = Cryptography::Canonical.dump(payload)
       hash = Cryptography::Record.digest(payload: canonical, signature: sig)
       result = store.store_message(
-        hash: hash, pubkey: pubkey, room: room, ack: ack,
+        hash: hash, pubkey: pubkey, ack: ack,
         reply_to: reply, payload: canonical, signature: sig
       )
       # The record hash is what catches a repeat now that there is no sequence
@@ -455,7 +454,7 @@ module ReputableChat
       { "stored" => true, "hash" => hash }
     end
 
-    def post_emote(r, room)
+    def post_emote(r)
       pubkey  = current_pubkey(r)
       message = Params.record_hash(r.params["message"]) or bad_request(r, "bad message")
       choice  = Params.emote(r.params["emote"], allowed: ALLOWED_EMOTES) or bad_request(r, "unknown emote")
@@ -464,7 +463,7 @@ module ReputableChat
       ack     = Params.record_hash(r.params["ack"]) or bad_request(r, "bad ack")
 
       payload = Cryptography::Payload.emote(
-        pubkey: pubkey, room: room, message: message, emote: choice,
+        pubkey: pubkey, message: message, emote: choice,
         ack: ack, issued_at: ts, note: optional_note(r)
       )
       verify!(r, pubkey, sig, payload)
@@ -472,7 +471,7 @@ module ReputableChat
       canonical = Cryptography::Canonical.dump(payload)
       result = store.store_emote(
         hash: Cryptography::Record.digest(payload: canonical, signature: sig),
-        pubkey: pubkey, room: room, message: message, emote: choice,
+        pubkey: pubkey, message: message, emote: choice,
         ack: ack, payload: canonical, signature: sig
       )
       r.halt(409, { "error" => "you have already reacted to that message" }) if result == :duplicate

@@ -54,12 +54,6 @@ module ReputableChat
       value.match?(RECORD_HASH) ? value : nil
     end
 
-    def room(value)
-      return nil unless value.is_a?(String)
-
-      value.match?(/\A[a-z0-9][a-z0-9-]{0,63}\z/) ? value : nil
-    end
-
     def array_of(value, max:, &block)
       return nil unless value.is_a?(Array)
       return nil if value.empty? || value.size > max

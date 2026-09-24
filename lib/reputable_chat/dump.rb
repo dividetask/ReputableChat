@@ -176,7 +176,7 @@ module ReputableChat
       @db[:messages].select(:id, :hash).to_h { |r| [r[:hash], r[:id]] }
     end
 
-    # An ack naming a message in this room reads as that message; anything else
+    # An ack naming a message this dump is showing reads as that message; anything else
     # is the genesis or a record this dump is not showing, so the hash itself
     # is the only honest thing to print.
     def ack_label(hash, by_hash)

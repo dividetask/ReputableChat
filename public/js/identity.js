@@ -161,12 +161,12 @@ export function loginPayload({ pubkey, nonce, origin, ts }) {
   return { purpose: PURPOSE.LOGIN, pubkey, nonce, origin, ts };
 }
 
-export function messagePayload({ pubkey, room, body, ack, ts, replyTo = null, note = null }) {
-  return { purpose: PURPOSE.MESSAGE, pubkey, room, reply_to: replyTo, ack, note, ts, body };
+export function messagePayload({ pubkey, body, ack, ts, replyTo = null, note = null }) {
+  return { purpose: PURPOSE.MESSAGE, pubkey, reply_to: replyTo, ack, note, ts, body };
 }
 
-export function emotePayload({ pubkey, room, message, emote, ack, ts, note = null }) {
-  return { purpose: PURPOSE.EMOTE, pubkey, room, message, emote, ack, note, ts };
+export function emotePayload({ pubkey, message, emote, ack, ts, note = null }) {
+  return { purpose: PURPOSE.EMOTE, pubkey, message, emote, ack, note, ts };
 }
 
 // `revision` sits outside the ciphertext so the server can reject a rollback

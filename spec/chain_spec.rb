@@ -230,9 +230,9 @@ class ChainSpec < Minitest::Test
                                            ack: "a", issued_at: 1),
       "adjustment" => Payload.adjustment(pubkey: "k", base_revision: 1, seq: 1, target: "t",
                                          reputation: "0.5", trust: "1", ack: "a", issued_at: 1),
-      "message" => Payload.message(pubkey: "k", room: "r", body: "b",
+      "message" => Payload.message(pubkey: "k", body: "b",
                                    ack: "a", issued_at: 1),
-      "emote" => Payload.emote(pubkey: "k", room: "r", message: "m", emote: "+",
+      "emote" => Payload.emote(pubkey: "k", message: "m", emote: "+",
                                ack: "a", issued_at: 1),
       "release" => Payload.release(pubkey: "k", revision: 1, label: "0.1.0", files: {},
                                    notes: "", ack: "a", issued_at: 1)
@@ -254,9 +254,9 @@ class ChainSpec < Minitest::Test
   # RULE: an absent note and an empty one are the same record. Otherwise two
   # records a reader would call identical would carry different signatures.
   def test_an_empty_note_is_the_same_record_as_no_note
-    absent = Payload.message(pubkey: "k", room: "r", body: "b",
+    absent = Payload.message(pubkey: "k", body: "b",
                              ack: "a", issued_at: 1)
-    empty = Payload.message(pubkey: "k", room: "r", body: "b",
+    empty = Payload.message(pubkey: "k", body: "b",
                             ack: "a", issued_at: 1, note: ReputableChat::Params.note("   "))
 
     assert_equal Canonical.dump(absent), Canonical.dump(empty)
@@ -265,9 +265,9 @@ class ChainSpec < Minitest::Test
   # RULE: the note is inside the signed payload, so it cannot be attached to
   # somebody else's record or edited after the fact.
   def test_a_note_changes_the_record
-    without = Payload.message(pubkey: "k", room: "r", body: "b",
+    without = Payload.message(pubkey: "k", body: "b",
                               ack: "a", issued_at: 1)
-    with = Payload.message(pubkey: "k", room: "r", body: "b",
+    with = Payload.message(pubkey: "k", body: "b",
                            ack: "a", issued_at: 1, note: "for whoever reads this")
 
     refute_equal Record.digest(payload: without, signature: "AAAA"),
@@ -296,9 +296,9 @@ class ChainSpec < Minitest::Test
                                            ack: "a", issued_at: 1),
       "adjustment" => Payload.adjustment(pubkey: "k", base_revision: 1, seq: 1, target: "t",
                                          reputation: "0.5", trust: "1", ack: "a", issued_at: 1),
-      "message" => Payload.message(pubkey: "k", room: "r", body: "b",
+      "message" => Payload.message(pubkey: "k", body: "b",
                                    ack: "a", issued_at: 1),
-      "emote" => Payload.emote(pubkey: "k", room: "r", message: "m", emote: "+",
+      "emote" => Payload.emote(pubkey: "k", message: "m", emote: "+",
                                ack: "a", issued_at: 1),
       "release" => Payload.release(pubkey: "k", revision: 1, label: "0.1.0", files: {},
                                    notes: "", ack: "a", issued_at: 1)

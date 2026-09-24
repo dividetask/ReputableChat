@@ -115,8 +115,10 @@ inventing a word for something that already has one.
   should say what behaviour broke.
 - Reputation records carry **ratings**, not the actions behind them. `friend`,
   `reported` and `net_votes` live in the author's vault; the curve runs once,
-  where it is authored. Anything published carries the parameter fingerprint it
-  was computed under.
+  where it is authored. Nothing published says what parameters it was computed
+  under -- a reader reaching for a derived cache either takes the number or
+  leaves it, and publishing the parameters would tell everyone the settings a
+  particular reader scores under.
 - The server reads as little of a signed blob as it can, and serves blobs back
   byte-identical.
 - Render user text with `textContent`, never `innerHTML`.

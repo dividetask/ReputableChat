@@ -284,7 +284,7 @@ the history that grew side by side.
 
 That threshold is your own, it uses your own attestation and your own config,
 and so the rule is subjective in exactly the way everything else here is. Two
-people looking at the same room will disagree about which references were
+people reading the same history will disagree about which references were
 legitimate, and there is no view from nowhere that settles it.
 
 This has a consequence worth stating plainly rather than discovering later:

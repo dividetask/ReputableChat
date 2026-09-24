@@ -119,7 +119,6 @@ module ReputableChat
           primary_key :id
           String   :hash, null: false, unique: true
           String   :pubkey, null: false, index: true
-          String   :room, null: false, index: true
           String   :reply_to
           String   :ack, null: false
           String   :payload, text: true, null: false
@@ -133,7 +132,6 @@ module ReputableChat
           primary_key :id
           String   :hash, null: false, unique: true
           String   :pubkey, null: false
-          String   :room, null: false, index: true
           String   :message, null: false, index: true
           String   :emote, null: false
           String   :ack, null: false
@@ -270,9 +268,9 @@ module ReputableChat
 
       # --- emotes -------------------------------------------------------------
 
-      def store_emote(hash:, pubkey:, room:, message:, emote:, ack:, payload:, signature:)
+      def store_emote(hash:, pubkey:, message:, emote:, ack:, payload:, signature:)
         @db[:emotes].insert(
-          hash: hash, pubkey: pubkey, room: room, message: message, emote: emote,
+          hash: hash, pubkey: pubkey, message: message, emote: emote,
           ack: ack, payload: payload, signature: signature, received_at: now
         )
         :ok
@@ -280,9 +278,8 @@ module ReputableChat
         :duplicate
       end
 
-      def room_emotes(room, limit: 5_000)
-        @db[:emotes].where(room: room).order(:id).limit(limit)
-                    .select(:pubkey, :message, :emote).all
+      def emotes(limit: 5_000)
+        @db[:emotes].order(:id).limit(limit).select(:pubkey, :message, :emote).all
       end
 
       # --- vaults -------------------------------------------------------------
@@ -310,9 +307,9 @@ module ReputableChat
         @db[:messages].where(pubkey: pubkey).order(Sequel.desc(:id)).first
       end
 
-      def store_message(hash:, pubkey:, room:, ack:, payload:, signature:, reply_to: nil)
+      def store_message(hash:, pubkey:, ack:, payload:, signature:, reply_to: nil)
         @db[:messages].insert(
-          hash: hash, pubkey: pubkey, room: room, ack: ack,
+          hash: hash, pubkey: pubkey, ack: ack,
           reply_to: reply_to, payload: payload, signature: signature, received_at: now
         )
         :ok
@@ -322,8 +319,8 @@ module ReputableChat
 
       def message_by_hash(hash) = @db[:messages].where(hash: hash).first
 
-      def room_messages(room, limit: 100)
-        @db[:messages].where(room: room).order(Sequel.desc(:id)).limit(limit).reverse.all
+      def messages(limit: 100)
+        @db[:messages].order(Sequel.desc(:id)).limit(limit).reverse.all
       end
 
       # The account that signed a record is `pubkey` everywhere now; it was
@@ -339,7 +336,7 @@ module ReputableChat
       # columns that are going. That is a lot of machinery whose only job is to
       # preserve a development database, and machinery in here is what breaks
       # quietly. A person deletes the file; the code stays simple.
-      LEGACY_COLUMNS = { messages: %i[author seq prev], emotes: %i[author],
+      LEGACY_COLUMNS = { messages: %i[author seq prev room], emotes: %i[author room],
                          notices: %i[publisher] }.freeze
 
       class LegacySchema < StandardError; end
@@ -354,7 +351,8 @@ module ReputableChat
         return if found.empty?
 
         raise LegacySchema,
-              "this database predates one name for the signing account " \
+              "this database predates one name for the signing account, or has " \
+              "columns for fields that no longer exist " \
               "(#{found.join('; ')}). Nothing is published yet, so delete the " \
               "database file and let it be created again."
       end
