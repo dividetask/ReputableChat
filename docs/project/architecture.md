@@ -195,7 +195,7 @@ private until their next attestation carries the number it came to.
 `ack`, `reply_to` and an emote's target all name a record by its hash:
 
 ```
-SHA256("reputablechat:record:v1\n" + canonical_payload + "\n" + signature)
+SHA256(canonical_payload + "\n" + signature)
 ```
 
 A signature identifies a payload; a record hash identifies the record, signature

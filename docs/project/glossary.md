@@ -10,8 +10,8 @@ half the drift comes from sliding back into an older one.
 than stored as files, which is only safe because canonical serialization is
 deterministic. [chain.md](chain.md)
 
-**Record hash** — a record's identity: `SHA256("reputablechat:record:v1\n" +
-canonical payload + "\n" + signature)`, hex. What `ack`, `reply_to` and an
+**Record hash** — a record's identity: `SHA256(canonical payload + "\n" +
+signature)`, hex. What `ack`, `reply_to` and an
 emote's target all name. Not the same as a signature, which identifies only the
 payload. [chain.md](chain.md)
 

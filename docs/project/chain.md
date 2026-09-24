@@ -76,12 +76,12 @@ included, which is what you want when the thing you are linking to needs to be
 tamper-evident as a whole.
 
 ```
-record_hash = SHA256("reputablechat:record:v1\n" + canonical_payload + "\n" + signature)
+record_hash = SHA256(canonical_payload + "\n" + signature)
 ```
 
 Hex, 64 characters, the same shape as a content-addressed image name.
 
-The two newlines are unambiguous separators rather than a convention, because
+The newline is an unambiguous separator rather than a convention, because
 canonical JSON can never contain a raw `0x0A` — JSON escapes a newline inside a
 string to the two characters `\n`, and there is no whitespace between tokens.
 Base64url contains no newline either. So there is exactly one pair of strings
@@ -91,9 +91,6 @@ Hashing the stored `payload` **string** rather than a re-serialized object is
 deliberate. The server holds the canonical bytes exactly as they arrived and
 never parses them back into an object; re-serializing server-side is the one
 thing guaranteed to break a signature eventually.
-
-The domain prefix keeps this hash from colliding with the other SHA-256 in the
-system, which addresses image and asset bytes directly.
 
 ## Genesis
 
