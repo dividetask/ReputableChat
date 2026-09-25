@@ -1,12 +1,12 @@
 # Reputation
 
-Reputation is **subjective**. There is no global reputation. Every number here is one viewer's view of the network, calculated on that viewer's own machine from their own ratings and other people's published ones. Two clients may differ in the last decimal place and that is not a bug — it is what "your view of the network" means.
+Reputation is **subjective**. There is no global reputation. Reputation is always based upon the viewer's perspective, calculated from their own ratings and other people's published ones.
 
-Implementation: `lib/reputable_chat/reputation/` (Ruby, reference) and `public/js/reputation.js` (JavaScript, what actually runs). Parameters live in `config/reputation.yml`.
+Implementation: `lib/reputable_chat/reputation/` (Ruby) and `public/js/reputation.js` (JavaScript). Parameters live in `config/reputation.yml`.
 
 ## Direct ratings
 
-A **rating** is what one person gives another; a **reputation** is what a viewer calculates from their own rating and everybody else's. Three actions move a rating:
+**Rating** is what one person gives another; **reputation** is what a viewer calculates from their own rating and everybody else's. Three actions move a rating:
 
 | action | effect |
 |---|---|
@@ -34,10 +34,6 @@ Defaults: `A = 0.0004`, `B = 0`, `cap = 0.5`.
 |---|---|---|---|---|---|---|---|
 | value | 0.0004 | 0.0016 | 0.0036 | 0.04 | 0.16 | 0.36 | cap |
 
-`B` exists but defaults to 0. `curve(2)/curve(1)` is `(4A+2B)/(A+B)`, which is 4 at `B = 0` and falls toward 2 as `B` grows — and that ratio is the safety margin on the report rule below, so raising `B` eats it.
-
-The sign must be applied to the magnitude, not fed through the polynomial: `A*x²` is positive for negative `x`, so a negative count would otherwise read as a positive one.
-
 ## The ladder
 
 ```
@@ -48,9 +44,9 @@ weight(d) = (1 - k) * k^d          k = 0.1, hops 0..7
 |---|---|---|---|---|---|---|---|---|
 | weight | 0.9 | 0.09 | 0.009 | 0.0009 | 9e-5 | 9e-6 | 9e-7 | 9e-8 |
 
-These sum to 1, so a reputation is always inside −1..+1 with no clamping. Depth 0 takes `1-k` of the total, which means **the ceiling for anyone you have never personally rated is exactly `k`** — 0.1. That is intended: strangers are meant to sit in the Tolerated band, and the pressure that creates to friend people or like their messages is the point of the app.
+These sum to 1, so a reputation is always inside −1..+1 with no clamping. Depth 0 takes `1-k` of the total, which means the ceiling for anyone you have never personally rated is exactly `k` — 0.1.
 
-A reputation is the weighted sum over depths of the mean rating at that depth. The mean is taken over **the people who actually rated the target** at that depth, not over everyone at that depth with non-raters counted as zero.
+Reputation is the weighted sum over depths of the mean rating at that depth. The mean is taken over the people who actually rated the target at that depth, not over everyone at that depth with non-raters counted as zero.
 
 ## Traversal
 
@@ -74,22 +70,6 @@ reputation = 0.9    * your own rating
 The first three terms read ratings. The fourth reads a summary, and trusts the people at hop 2 to have done their own arithmetic honestly — which is the same thing the third term already trusts them for.
 
 Those weights sum to 0.9999 rather than 1. Under-summing is harmless: a reputation is still inside −1..+1 with no clamping. The old hops 4 to 7 are simply gone, and their 0.0001 with them.
-
-### What the fourth term is for
-
-Almost nothing, most of the time — and that is the point. It is bounded by 0.0009, while `trusted_at` is 0.01, so **the fourth term can never make anyone Trusted on its own.** Eleven times its maximum would be needed.
-
-What it can do is move someone from exactly 0 to slightly above it. An account nobody within two hops has rated sits at precisely zero and is therefore Blocked — that is the sybil defense — and this is the one thing that can lift them into Tolerated without anyone nearby vouching for them. It exists to rescue the well-regarded stranger, and it is deliberately too weak to do anything else.
-
-It cuts the other way too, though only just. Someone whose first three terms come to between 0 and 0.0009 can be pushed back under the line by a negative fourth term. That is a real bucket change, from Tolerated to Blocked, on a hair's-breadth reputation.
-
-### What it costs, and what it does not buy
-
-A derived reputation is reached through its author's own configuration, and nothing published says what that configuration was. A reader reaching for the cache has run out of its own reach, so it either takes the number or leaves it; knowing the author's parameters would give it nothing it could act on, and publishing them would tell everyone the settings a particular reader scores under.
-
-There is also mild double counting. A hop-2 person's derived reputation for the target is 90% their own rating of it, which the third term already counted at 0.009. So the fourth term re-counts their direct opinion at 0.00081, and only the remainder is genuinely news from further out.
-
-And the cache is not free to publish. An attestation carrying derived reputations for everyone within three hops is thousands of entries, and a viewer fetches hundreds of attestations. That is the cost of not walking hop 3 directly, and it only stays reasonable while the published set does. It will need bounding — Merkle proofs over the derived map, so a reader can fetch the few entries it wants and verify them against the signed root, are the known way to do it without asking the server to be trusted about what it left out.
 
 ### Sampling
 
