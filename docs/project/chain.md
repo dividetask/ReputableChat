@@ -6,54 +6,21 @@ There is no proof of work and no mining. The chain is not there to put records i
 
 ## Records
 
-A record is a payload and a signature over it. Six kinds:
+What each kind of record is, what its fields mean and what makes it valid is set out in [rules/v0.001.md](rules/v0.001.md), with signed examples in [rules/v0.001-examples.md](rules/v0.001-examples.md). This page explains why the chain works the way it does, and does not repeat the rules.
 
-| type | what it is |
-|---|---|
-| `reputablechat:identity:v0.001` | an **identity declaration**: who someone is, in their own words |
-| `reputablechat:attestation:v0.001` | what someone thinks of everyone else |
-| `reputablechat:message:v0.001` | text one account sends |
-| `reputablechat:reaction:v0.001` | a response to one or more records |
-| `reputablechat:notice:v0.001` | a statement to the network, such as a key change |
-| `reputablechat:release:v0.001` | a published version of the client, and of the rules |
-
-The third part of `type` is the rules version the record conforms to. Every field of every kind is defined in [rules/v0.001.md](rules/v0.001.md), and [rules/v0.001-examples.md](rules/v0.001-examples.md) has three signed examples of each. This page explains why the chain works the way it does; the rules say exactly what it is.
-
-Every record carries `ack`: a list of record hashes, sorted, with no duplicates, at most 16. Sorted and unique so that the same set of records always produces the same bytes; the server refuses any other ordering rather than fixing it, because fixing it would change what was signed. The private vault is not a record on the chain and has no `ack`, because nobody else ever sees it — see [identity.md](identity.md).
+The server refuses an `ack` that is out of order rather than sorting it, because sorting it would change what was signed. The private vault is not a record on the chain — see [identity.md](identity.md).
 
 Records are **generated, not stored as files.** The server keeps database rows and builds the record when someone asks for it. That is only safe because the canonical form is deterministic: the same row produces the same bytes and therefore the same hash and the same signature, every time, on any machine. The moment that stops being true the whole structure stops verifying, which is why `spec/canonical_parity_spec.rb` exists and why floats are refused outright.
 
-## Body and note
-
-Every record carries a `body`, up to 16,000 bytes: the text of a message, the reaction in a reaction, a new key in a key-change notice, or a whole rules document in the genesis record and in a release.
-
-A record may also carry a `note`, up to 280 bytes. On an identity declaration it is the bio; on a key-change notice, a note of exactly "compromised" says the old key was compromised; elsewhere it is whatever the author wants to add.
-
-Both are signed, so nobody can attach one to somebody else's record, strip one, or edit one afterwards, and both are permanent: they are signed into a record other records will acknowledge. Anything that renders either treats it as text and never as markup, like every other string somebody else wrote — see the `textContent` line in CLAUDE.md.
-
 ## Record hashes
 
-`ack` and `target` point at record hashes. A signature identifies a payload; a hash identifies the *record*, signature included, which is what you want when the thing you are linking to needs to be tamper-evident as a whole.
-
-```
-record_hash = SHA256(canonical_payload + "\n" + signature)
-```
-
-Hex, 64 characters, the same shape as a content-addressed image name.
-
-The newline is an unambiguous separator rather than a convention, because canonical JSON can never contain a raw `0x0A` — JSON escapes a newline inside a string to the two characters `\n`, and there is no whitespace between tokens. Base64url contains no newline either. So there is exactly one pair of strings that produces any given hash input.
+`ack` and `target` point at record hashes rather than signatures. A signature identifies a payload; a hash identifies the *record*, signature included, which is what you want when the thing you are linking to needs to be tamper-evident as a whole.
 
 Hashing the stored `payload` **string** rather than a re-serialized object is deliberate. The server holds the canonical bytes exactly as they arrived and never parses them back into an object; re-serializing server-side is the one thing guaranteed to break a signature eventually.
 
-## Accounts and keys
-
-An account is identified by its **account ID**: the record hash of its first identity declaration. Every later record from the account carries it in `id`. It never changes, whatever key the account signs with, which is why attestations are keyed by it and why the few characters shown beside a handle come from it.
-
-An account has a working key for everyday use and, optionally, a master key kept offline. A record is signed with one of them and carries the one it was signed with. A key-change notice moves the account to a new working key; a master-key-change notice moves it to a new master key. Which keys are current is judged by what each record acknowledges, so a record signed before a key change stays valid after it.
-
 ## Genesis
 
-The genesis account's first identity declaration is the bottom of the chain. It is the only record whose `ack` is empty; every record that has seen nothing else acknowledges it. Its body is the founding notice, the first version of the rules — see **The founding notice** below.
+The genesis account's first identity declaration is the bottom of the chain. Its body is the founding notice — see **The founding notice** below.
 
 The genesis account is the developer's, and it is the same on every server: there is one network and one chain. Its handle is Tim by default, but the docs say *genesis account* because the handle is only a handle.
 
@@ -109,17 +76,9 @@ The command that matters on a new network is `visible`. An unrated account sits 
 
 ## Rules
 
-The rules say what every field of every record means and what makes a record valid. They distinguish rules, which are enforced, from guidelines, which are not: a record that ignores a guideline is accepted, and clients will likely ignore the values that do not conform.
+The rules, and how they change, are in [rules/v0.001.md](rules/v0.001.md). Nobody owns the chain: anyone can publish a release, and everyone decides which rules they follow.
 
-The first version is the body of the genesis record. A later version is published in a **release** record, whose type carries the new version and whose body carries the whole new text, never a diff. Every version stays on the chain, so anyone can read the rules any record was made under.
-
-Nobody owns the chain. Anyone can publish a release, and everyone decides which rules they follow.
-
-**A record follows the newest rules it acknowledges.** Walk back through its `ack`s; the newest release found there is the version it has to conform to, and its type must carry that version. Order means acknowledgement and nothing else. `ts` is the author's own claim and plays no part.
-
-- **A record written for new rules waits for them.** It cannot be valid until those rules are published, because until then there is nothing for it to acknowledge them through.
-- **A record written for old rules that arrives after new ones is refused.** The browser notices the refusal and signs it again under the new rules, along with anything of its own that acknowledged it.
-- **Records made under old rules stay valid under them for good.** A change of rules is never retroactive.
+When a record is refused because newer rules have been published, the browser signs it again under the new rules, along with anything of its own that acknowledged it.
 
 ### The founding notice
 
@@ -137,7 +96,7 @@ The code still signs the shapes that came before these rules: a single `ack` has
 
 ## What gets acknowledged
 
-You acknowledge the most recent records you have seen, up to 16, **whose authors you rate above `chain.min_reputation_to_acknowledge`**. Not the most recent records, full stop. More than one is what lets a record join branches of the history that grew side by side.
+You acknowledge the most recent records you have seen **whose authors you rate above `chain.min_reputation_to_acknowledge`**. Not the most recent records, full stop. More than one is what lets a record join branches of the history that grew side by side.
 
 That threshold is your own, it uses your own attestation and your own config, and so the rule is subjective in exactly the way everything else here is. Two people reading the same history will disagree about which references were legitimate, and there is no view from nowhere that settles it.
 
@@ -179,21 +138,19 @@ The server does not check any of this. It cannot: it never computes a reputation
 
 ## Attestations
 
-An attestation is what one author thinks of everyone else: for each account ID, a **rating** (the field is named `reputation`) and a **trust** multiplier, both decimals from -1 to 1.
+Most people never set a rating by hand — friending and reacting move it, and the curve runs once, in the author. Advanced users can set it directly.
 
-The rating is what the author thinks of that person. Most people never set it by hand — friending and reacting move it, and the curve runs once, in the author. Advanced users can set it directly.
-
-`trust` is the multiplier on everything that person recommends. It is expected to be 0 or 1 in most cases, and exists for the case where a friend is worth reading but has terrible taste in who *else* to vouch for: set them to 0 and their messages stay visible while their recommendations stop carrying anyone in.
+A trust multiplier exists for the case where a friend is worth reading but has terrible taste in who *else* to vouch for: set them to 0 and their messages stay visible while their recommendations stop carrying anyone in.
 
 **Multipliers compound along the path.** A 0.5 at hop one and a 0.5 at hop two means everything past the second is worth a quarter. A 0 prunes the branch there — the traversal stops rather than carrying a zero through the remaining hops, which is both correct and cheaper. A negative inverts, which is what "I trust this person to be reliably wrong" means, and it compounds like any other factor, so two negatives in a chain do multiply back to positive.
 
-The friend and report lists are not here. They are in the private vault: what the network sees is the rating that resulted, never the act that caused it.
+The friend and report lists are not in an attestation. They are in the private vault: what the network sees is the rating that resulted, never the act that caused it.
 
 ### The derived cache
 
-`derived` has the same form as `scores`: the reputation and trust the author has calculated for accounts further out, to `attestation.published_hops` (3 by default). It is not a convenience: it is the **fourth term** of everyone else's reputation calculation, because the walk stops at hop 2 and depth 3 is filled in from these summaries rather than reached. See **Why the walk stops at two** in [reputation.md](reputation.md).
+`derived` reaches out to `attestation.published_hops` (3 by default). It is not a convenience: it is the **fourth term** of everyone else's reputation calculation, because the walk stops at hop 2 and depth 3 is filled in from these summaries rather than reached. See **Why the walk stops at two** in [reputation.md](reputation.md).
 
-Trust is carried as well as reputation because somebody at the far end of the walk may be honest while their attestations are not reliable, and a reader who has run out of reach cannot find that out for themselves.
+It carries trust as well as reputation because somebody at the far end of the walk may be honest while their attestations are not reliable, and a reader who has run out of reach cannot find that out for themselves.
 
 It is still never an input to a reader's own opinion at depths 0 to 2, which are read from ratings. It carries 0.0009 of the total, cannot make anyone Trusted on its own, and exists mainly to lift a well-regarded stranger from Blocked to Tolerated.
 
@@ -201,11 +158,7 @@ A reader reaching for it has run out of its own reach: it either takes the numbe
 
 ## Releases
 
-A release is a published version of the client, and it is how the rules change. Its type carries the new rules version, its body carries the new rules, and it is the only record whose `ack` may name records of the previous version. Every record that acknowledges it must be of its version.
-
-Publishing every release to the chain means the operator cannot serve one person different rules from everyone else without it being visible.
-
-Anyone may publish a release. Nobody owns the chain: each person chooses which releases to follow, and a client can let them choose by account.
+Publishing every release to the chain means the operator cannot serve one person different rules from everyone else without it being visible. Each person chooses which releases to follow, and a client can let them choose by account.
 
 ### Not built: fetching a record by hash
 

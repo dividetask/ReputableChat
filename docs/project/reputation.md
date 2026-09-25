@@ -14,7 +14,7 @@ A **rating** is what one person gives another; a **reputation** is what a viewer
 | positive reaction to a message | net count of positive and negative reactions, through the curve below |
 | report | −1, absolute |
 
-A rating is clamped to −1..+1. Friending plus a maxed-out curve reaches exactly +1.
+Friending plus a maxed-out curve reaches exactly +1, the most a rating can be.
 
 **A report is absolute within one rater.** Reporting someone makes that rater's rating −1 regardless of how many of the target's messages they previously liked.
 

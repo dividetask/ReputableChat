@@ -17,17 +17,7 @@ Reputation is subjective, so it belongs on the client, which fetches signed reco
 
 ## Records
 
-Every record on the chain is defined in [rules/v0.001.md](rules/v0.001.md), with signed examples in [rules/v0.001-examples.md](rules/v0.001-examples.md). The rules are the reference; this page does not repeat them. Why the chain is built the way it is lives in [chain.md](chain.md).
-
-What each account publishes, and what it keeps private, is split by **who needs to read it**:
-
-- **The identity declaration** — who somebody is, in their own words: handle, avatar, bio, and keys (working and master).
-- **The attestation** — what they think of everybody else, as ratings and trust multipliers keyed by account ID. Ratings rather than the actions behind them: the curve runs once, in the author, instead of in every reader. See the end of [reputation.md](reputation.md).
-- **The vault** — everything private, sealed before it leaves the browser. The server holds it but keeps it private; it is not a record on the chain, and the rules do not govern it.
-
-Decimals are stored as strings rather than numbers; see [rules/v0.001.md](rules/v0.001.md).
-
-The third part of every record's `type` is the rules version it conforms to. A record's identity is its record hash, which covers the payload and the signature; an account's identity is its account ID, the record hash of its first identity declaration.
+Every record on the chain is defined in [rules/v0.001.md](rules/v0.001.md), with signed examples in [rules/v0.001-examples.md](rules/v0.001-examples.md); why the chain is built the way it is lives in [chain.md](chain.md). The one thing an account keeps private is its vault, below, which is not a record.
 
 ## The vault
 
@@ -47,7 +37,7 @@ Known limit: an attestation accumulates an entry per person ever rated, and grow
 
 Content-addressed: a file's name is the SHA-256 of its bytes plus an extension **sniffed from those bytes**, never from a claimed content type or filename. The server derives the name rather than trusting one, so a reader can re-hash what they fetched to confirm it is what the author signed. Names are 64 hex characters plus a known extension, which is also the only path check the serving route needs.
 
-This server stores PNG, JPEG, GIF and WebP only, up to 256 KB. **SVG is deliberately excluded** — it is a script-bearing document, not an image. The rules accept any avatar name; this is what this server is willing to store and serve.
+This server stores PNG, JPEG, GIF and WebP only, up to 256 KB. **SVG is deliberately excluded** — it is a script-bearing document, not an image.
 
 ## Login
 
@@ -55,27 +45,19 @@ Logging in signs a challenge from the server. It is not a record and never reach
 
 ## Reactions
 
-A reaction is its own signed record naming the records it reacts to in `target`, with the reaction itself — an emoji, a word — in its body. An account may react to the same record any number of times, and each client decides which reactions count as positive, negative or neutral.
-
 The client tallies them per message and **drops reactions from blocked accounts**, so a pile of spam accounts cannot inflate a count. Counts are therefore per-viewer, like everything else here.
 
 A reaction also moves its author's rating of the person reacted to. That rating is private until their next attestation carries the number it came to.
 
 ## Record hashes
 
-`ack` and `target` name records by their hash:
-
-```
-SHA256(canonical_payload + "\n" + signature)
-```
-
-A signature identifies a payload; a record hash identifies the record, signature included, which is what a link has to cover to be tamper-evident as a whole. `cryptography/record.rb` and `public/js/record.js` are the two halves, and `spec/record_parity_spec.rb` checks they agree.
+`cryptography/record.rb` and `public/js/record.js` are the two halves, and `spec/record_parity_spec.rb` checks they agree. Why links name records by hash is in [chain.md](chain.md).
 
 Edits and deletes will be new signed records targeting the original, never mutations — a mutated record no longer matches its signature.
 
 ## Canonical serialization
 
-The browser signs bytes and the server verifies bytes, so both must produce byte-identical output: sorted keys, no whitespace, UTF-8, floats refused outright (they have no single textual form across languages).
+The browser signs bytes and the server verifies bytes, so both must produce the canonical form the rules define, byte for byte.
 
 `lib/reputable_chat/cryptography/canonical.rb` and `public/js/canonical.js` are the two halves. **If they ever disagree by one character, every signature silently stops verifying** — `spec/canonical_parity_spec.rb` runs both over shared fixtures and compares the bytes, and is the thing that catches that.
 

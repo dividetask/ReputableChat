@@ -1,6 +1,6 @@
 # Identity
 
-There is no username at login and no password in the usual sense. A seed phrase derives the account's keypair, and its public half is the working key that signs the account's records. The account itself is identified by its account ID, the record hash of its first identity declaration, so it outlives any one key.
+There is no username at login and no password in the usual sense. A seed phrase derives the account's keypair, and its public half is the working key that signs the account's records. The account itself is identified by its account ID, which outlives any one key.
 
 ## Seed phrases
 
@@ -34,7 +34,7 @@ The cliff is steep because each word is 11 bits. Seven words was the original ta
 
 ### Recovery
 
-Losing the seed loses the account and all of its reputation, unless the account declared a master key and its holder still has it: the master key can move the account to a new working key with a key-change notice. Without one there is no recovery, and the UI says so at generation time. How a master key is made and kept is not built yet.
+Losing the seed loses the account and all of its reputation, unless the account declared a master key and its holder still has it: see the rules on key changes. Without one there is no recovery, and the UI says so at generation time. How a master key is made and kept is not built yet.
 
 ## Keys
 
