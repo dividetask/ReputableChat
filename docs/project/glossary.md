@@ -44,9 +44,9 @@ record, payload, signature, record hash, text, decimal, record type (`type`), ac
 
 **Trust multiplier** — what someone's *recommendations* are worth, as distinct from what they are worth. Compounds along a path; a zero prunes the branch while leaving that person visible.
 
-**Derived cache** — an attestation's `derived` field, in its role as the fourth term of everybody else's reputation. A reader reaching for it has run out of its own reach, and either takes the number or leaves it. [reputation.md](reputation.md)
+**Derived cache** — an attestation's `derived` field, for accounts a reader's walk did not reach. Not read yet. A reader reaching for it has run out of its own reach, and either takes the number or leaves it. [reputation.md](reputation.md)
 
-**Hop** / **depth** — distance from the viewer. The walk stops at hop 2 and fills depth 3 from derived caches.
+**Hop** / **depth** — distance from the viewer. The walk goes out to `max_hops`, or until it has reached `max_accounts`.
 
 **Ladder** — the per-hop weights, `(1 - k) * k^d`: 0.9, 0.09, 0.009, 0.0009.
 

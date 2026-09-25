@@ -52,32 +52,19 @@ Reputation is the weighted sum over depths of the mean rating at that depth. The
 
 Breadth-first from the viewer, gated at every hop by `gate.min_rating`. Reaching hop `d` means every link on the path was rated above the gate by the person one step closer in; a single non-positive link and the whole branch beyond it goes unread.
 
-The walk stops at **hop 2**, and the fourth term comes from other people's arithmetic rather than from walking further. `max_accounts` still bounds it, and still has to: a positive-only graph branches, so even two hops is 900 people at 30 ratings each and 22,500 at 150.
+The walk goes out to `ladder.max_hops` (7) and stops early once it has reached `ladder.max_accounts` (5,000), whichever comes first. On a small network it may reach every hop; on a large one `max_accounts` is the limit that bites.
 
-### Why the walk stops at two
+### When the walk is cut short
 
-A forward walk is quadratic in ratings-per-person, so hop 3 is where it stops being something a phone can do. At 30 ratings each that is 27,000 people; at a more realistic 150 it is 3.4 million. There is no version of "fetch all of them" that works.
-
-So depth 3 is filled in rather than walked. Every attestation publishes its author's own calculated reputations out to `attestation.published_hops`, and a viewer takes the mean of those derived reputations from the people at hop 2:
-
-```
-reputation = 0.9    * your own rating
-           + 0.09   * mean rating published by the people you rated
-           + 0.009  * mean rating published by the people they rated
-           + 0.0009 * mean REPUTATION published by the people they rated
-```
-
-The first three terms read ratings. The fourth reads a summary, and trusts the people at hop 2 to have done their own arithmetic honestly — which is the same thing the third term already trusts them for.
-
-Those weights sum to 0.9999 rather than 1. Under-summing is harmless: a reputation is still inside −1..+1 with no clamping. The old hops 4 to 7 are simply gone, and their 0.0001 with them.
-
-### Sampling
-
-`max_accounts` truncates the walk. On a large graph that means the mean at depth 2 is taken over whichever people breadth-first order happened to reach first, which is arbitrary and differs between clients for no principled reason. Deterministic selection — nearest first, then by account ID — at least makes two clients with the same view agree.
+If `max_accounts` is reached partway through a hop, the accounts reached so far in that hop are kept and the rest are not read. Which ones make it depends on traversal order: nearest first, then the order raters and their ratings are visited.
 
 Each person is counted once, at their **shortest** distance. Someone reachable by two paths does not get to vote twice. Nobody contributes to their own reputation.
 
 Your rating of someone is a **gate, not a multiplier**. A contact you rated +0.001 carries exactly the same weight in judging strangers as one you friended and maxed out.
+
+### The derived cache
+
+Attestations may carry `derived`, the author's own calculated reputations. Nothing reads it yet. It is meant for accounts the walk did not reach.
 
 ## The three buckets
 
@@ -125,7 +112,7 @@ curve(1)  <  k³  <  curve(2)
    A      < 0.000729 <  4A
 ```
 
-which pins `A` to the window **(0.00025, 0.001)**. The arithmetic is unchanged now that depth 3 is the derived term rather than a walked hop, but it means something different: one like of yours is outweighed by your two-hop neighbourhood collectively estimating someone at −1, and two likes outweigh it. It is a statement about a summary rather than about a single distant reporter. At `A = 0.0004` the margins are symmetric: one like lands 0.00054 below the line and two likes 0.00054 above it, each 60% of the report's weight.
+which pins `A` to the window **(0.00025, 0.001)**. At `A = 0.0004` the margins are symmetric: one like lands 0.00054 below the line and two likes 0.00054 above it, each 60% of the report's weight.
 
 This means **`k`, `max_hops`, `A`, `B` and `cap` are no longer independent**. Changing any one of them can silently flip a distant report from hiding someone to not. `spec/reputation_rules_spec.rb` asserts the rule directly and fails the build if a retune breaks it — if that test goes red after a config change, the config change is the thing to reconsider.
 

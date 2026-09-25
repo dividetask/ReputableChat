@@ -33,7 +33,7 @@ The genesis account has to exist before the server will start. `bundle exec rake
 
 ## How it fits together
 
-**Reputation** is a weighted opinion, not a score. Your own judgement dominates; the rest of the network contributes by distance, and the walk stops early and fills the last of it in from what your contacts have already worked out. Everyone lands in one of three buckets — Trusted, Tolerated, Blocked — and an account nobody has vouched for sits at exactly zero, which is to say invisible. That is the sybil defense, and the reason a new account starts out trusting the genesis: somebody has to be visible first.
+**Reputation** is a weighted opinion, not a score. Your own judgement dominates; the rest of the network contributes by distance. Everyone lands in one of three buckets — Trusted, Tolerated, Blocked — and an account nobody has vouched for sits at exactly zero, which is to say invisible. That is the sybil defense, and the reason a new account starts out trusting the genesis: somebody has to be visible first.
 
 **Identity** is a seed phrase. It derives the keypair, and the account is identified by the hash of its first identity declaration. Without a master key there is no recovery — losing the seed loses everything. Private keys are non-extractable and never leave the browser.
 

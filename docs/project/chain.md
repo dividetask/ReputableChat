@@ -148,11 +148,9 @@ The friend and report lists are not in an attestation. They are in the private v
 
 ### The derived cache
 
-`derived` reaches out to `attestation.published_hops` (3 by default). It is not a convenience: it is the **fourth term** of everyone else's reputation calculation, because the walk stops at hop 2 and depth 3 is filled in from these summaries rather than reached. See **Why the walk stops at two** in [reputation.md](reputation.md).
+`derived` reaches out to `attestation.published_hops` (3 by default), for readers whose walk did not reach that far. Nothing reads it yet; see **The derived cache** in [reputation.md](reputation.md).
 
 It carries trust as well as reputation because somebody at the far end of the walk may be honest while their attestations are not reliable, and a reader who has run out of reach cannot find that out for themselves.
-
-It is still never an input to a reader's own opinion at depths 0 to 2, which are read from ratings. It carries 0.0009 of the total, cannot make anyone Trusted on its own, and exists mainly to lift a well-regarded stranger from Blocked to Tolerated.
 
 A reader reaching for it has run out of its own reach: it either takes the number or leaves it. Nothing about the parameters it was computed under is published, which would tell everyone how a particular reader scores.
 
