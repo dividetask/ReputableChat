@@ -25,7 +25,7 @@ What each account publishes, and what it keeps private, is split by **who needs 
 - **The attestation** — what they think of everybody else, as ratings and trust multipliers keyed by account ID. Ratings rather than the actions behind them: the curve runs once, in the author, instead of in every reader. See the end of [reputation.md](reputation.md).
 - **The vault** — everything private, sealed before it leaves the browser. The server holds it but keeps it private; it is not a record on the chain, and the rules do not govern it.
 
-Decimals are strings rather than numbers, because canonical serialization refuses a float outright — it has no single textual form across languages — and the Blocked line is `effective > 0`, which float drift flips people across.
+Decimals are stored as strings rather than numbers; see [rules/v0.001.md](rules/v0.001.md).
 
 The third part of every record's `type` is the rules version it conforms to. A record's identity is its record hash, which covers the payload and the signature; an account's identity is its account ID, the record hash of its first identity declaration.
 
