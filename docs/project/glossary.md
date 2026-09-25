@@ -40,11 +40,11 @@ One name per thing. Each entry says which file defines the term. **Retired terms
 
 **Account ID** (`id`) — the record hash of an account's first identity declaration. It identifies the account for good, whatever key it signs with. Every record but that first declaration carries it. Attestations are keyed by it, and the characters shown beside a handle come from it.
 
-**Public key** (`pubkey`) — the account's current signing key. It signs the account's records unless the master key does, and the account's first identity declaration declares it.
+**Working key** (`pubkey`) — the key an account uses day to day, as opposed to its master key. It signs the account's records unless the master key does, and the account's first identity declaration declares it.
 
 **Master public key** (`mpubkey`) — optional; a key kept offline for changing keys and recovering from a compromised one. A record signed with the master key carries it.
 
-**Current keys** — the public key and master public key set by an account's first identity declaration, as replaced by the latest key-change and master-key-change notices a given record acknowledges. A record is checked against the account's current keys as seen by that record, so a record signed before a key change stays valid after it.
+**Current keys** — the working key and master public key set by an account's first identity declaration, as replaced by the latest key-change and master-key-change notices a given record acknowledges. A record is checked against the account's current keys as seen by that record, so a record signed before a key change stays valid after it.
 
 **Fingerprint** (of an account) — the short rendering of an account ID shown next to a handle.
 
@@ -125,6 +125,7 @@ Do not reintroduce these; they each have a current name above.
 | adjustment (`adjustment:v1`) | nothing on the chain; a change waits in the vault for the next attestation |
 | `author`, `publisher` (as a field name) | `pubkey` |
 | public key (as the account's identity) | account ID |
+| public key (as the key that is not the master key) | working key |
 | `reply_to`, an emote's `message` | `target` |
 | `icon` | `avatar` |
 | `bio` (as a field) | `note` |

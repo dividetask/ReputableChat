@@ -19,11 +19,11 @@ Reputation is subjective, so it belongs on the client, which fetches signed reco
 
 Every record on the chain is defined in [rules/v0.001.md](rules/v0.001.md), with signed examples in [rules/v0.001-examples.md](rules/v0.001-examples.md). The rules are the reference; this page does not repeat them. Why the chain is built the way it is lives in [chain.md](chain.md).
 
-What each account publishes, and what it keeps, is split by **who needs to read it**:
+What each account publishes, and what it keeps private, is split by **who needs to read it**:
 
-- **The identity declaration** — who somebody is, in their own words: handle, avatar and bio.
+- **The identity declaration** — who somebody is, in their own words: handle, avatar, bio, and keys (working and master).
 - **The attestation** — what they think of everybody else, as ratings and trust multipliers keyed by account ID. Ratings rather than the actions behind them: the curve runs once, in the author, instead of in every reader. See the end of [reputation.md](reputation.md).
-- **The vault** — everything private, sealed before it leaves the browser. It is not a record on the chain, and the rules do not govern it.
+- **The vault** — everything private, sealed before it leaves the browser. The server holds it but keeps it private; it is not a record on the chain, and the rules do not govern it.
 
 Decimals are strings rather than numbers, because canonical serialization refuses a float outright — it has no single textual form across languages — and the Blocked line is `effective > 0`, which float drift flips people across.
 

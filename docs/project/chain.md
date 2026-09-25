@@ -49,7 +49,7 @@ Hashing the stored `payload` **string** rather than a re-serialized object is de
 
 An account is identified by its **account ID**: the record hash of its first identity declaration. Every later record from the account carries it in `id`. It never changes, whatever key the account signs with, which is why attestations are keyed by it and why the few characters shown beside a handle come from it.
 
-An account has a public key and, optionally, a master key kept offline. A record is signed with one of them and carries the one it was signed with. A key-change notice moves the account to a new public key; a master-key-change notice moves it to a new master key. Which keys are current is judged by what each record acknowledges, so a record signed before a key change stays valid after it.
+An account has a working key for everyday use and, optionally, a master key kept offline. A record is signed with one of them and carries the one it was signed with. A key-change notice moves the account to a new working key; a master-key-change notice moves it to a new master key. Which keys are current is judged by what each record acknowledges, so a record signed before a key change stays valid after it.
 
 ## Genesis
 
