@@ -2,217 +2,82 @@
 
 ## The server does as little as possible
 
-It never sees a seed, never holds a private key, and never computes a
-reputation. What it does:
+It never sees a seed, never holds a private key, and never computes a reputation. What it does:
 
 - hands out single-use login challenges
 - **verifies every signature before storing anything**
-- rejects revision rollbacks
 - stores signed blobs and serves them back byte-identical
-- validates the shape of everything arriving from a client
+- validates everything arriving from a client against the rules
 
-Signed blobs go out exactly as they came in. Re-serializing them server-side
-would only create a way to break signatures.
+Signed blobs go out exactly as they came in. Re-serializing them server-side would only create a way to break signatures.
 
-Reputation is subjective, so it belongs on the client, which fetches signed
-records and does the maths itself.
+Reputation is subjective, so it belongs on the client, which fetches signed records and does the maths itself.
 
-**MVP caveat:** `session.verify_signatures` is `false`, so the client currently
-takes other people's attestations on trust. Until it is flipped on, a malicious
-server can fabricate ratings and put anyone in any bucket. The verification path
-is written and tested; enabling it is one config key.
+**MVP caveat:** `session.verify_signatures` is `false`, so the client currently takes other people's attestations on trust. Until it is flipped on, a malicious server can fabricate ratings and put anyone in any bucket. The verification path is written and tested; enabling it is one config key.
 
-## What each account publishes, and what it keeps
+## Records
 
-Three records, split by **who needs to read it**.
+Every record on the chain is defined in [rules/v0.001.md](rules/v0.001.md), with signed examples in [rules/v0.001-examples.md](rules/v0.001-examples.md). The rules are the reference; this page does not repeat them. Why the chain is built the way it is lives in [chain.md](chain.md).
 
-**The identity declaration** — who somebody is, in their own words:
+What each account publishes, and what it keeps, is split by **who needs to read it**:
 
-```json
-{ "purpose": "reputablechat:identity:v1",
-  "pubkey":  "...",
-  "revision": 7,
-  "ts":      1710000000,
-  "handle":  "alice",
-  "bio":     "hi",
-  "icon":    "<sha256>.png",
-  "master_pubkey": null, "previous_pubkey": null,
-  "ack":     ["<record hash>"], "note": null }
-```
+- **The identity declaration** — who somebody is, in their own words: handle, avatar and bio.
+- **The attestation** — what they think of everybody else, as ratings and trust multipliers keyed by account ID. Ratings rather than the actions behind them: the curve runs once, in the author, instead of in every reader. See the end of [reputation.md](reputation.md).
+- **The vault** — everything private, sealed before it leaves the browser. It is not a record on the chain, and the rules do not govern it.
 
-**The attestation** — what they think of everybody else, as **ratings** in a
-field named `scores`:
+Decimals are strings rather than numbers, because canonical serialization refuses a float outright — it has no single textual form across languages — and the Blocked line is `effective > 0`, which float drift flips people across.
 
-```json
-{ "purpose": "reputablechat:attestation:v1",
-  "pubkey":  "...",
-  "revision": 4,
-  "ts":      1710000000,
-  "scores":  { "<pubkey>": { "reputation": "0.5", "trust": "1" } },
-  "derived": { "scores": { "<pubkey>": "0.045" } },
-  "ack":     ["<record hash>"], "note": null }
-```
+The third part of every record's `type` is the rules version it conforms to. A record's identity is its record hash, which covers the payload and the signature; an account's identity is its account ID, the record hash of its first identity declaration.
 
-Ratings rather than the actions behind them: the curve runs once, in the author,
-instead of in every reader. See the end of [reputation.md](reputation.md).
+## The vault
 
-Decimal strings rather than numbers, because canonical serialization refuses a
-float outright — it has no single textual form across languages — and the
-Blocked line is `effective > 0`, which float drift flips people across.
+Inside it: `settings` (a sparse override tree mirroring `config/reputation.yml` — the user layer of the three described under **Configuration layering** in [reputation.md](reputation.md)), `voted` (which messages have already been reacted to, so one vote per message survives moving to another device), `friends` in the order they were added, the `seen` set, and `ratings` — the friending, reporting and voting every published rating was computed from.
 
-**The vault** — everything private, sealed before it leaves the browser:
+The friend order is in there because it exists nowhere else: canonical serialization sorts keys, so a ratings map read back from the server is in key order and cannot say who was added first.
 
-```json
-{ "purpose":   "reputablechat:vault:v1",
-  "pubkey":    "...",
-  "revision":   3,
-  "ts":        1710000000,
-  "ciphertext": "<AES-256-GCM>",
-  "iv":        "<96-bit nonce>" }
-```
+The server holds the vault so it cannot be lost, and **cannot read it**. The key is derived from the same Argon2id output the identity key comes from, run through HKDF under `seed.kdf.vault_domain` — one expensive derivation, two keys. The signature covers the ciphertext, so the server cannot swap one vault for another or alter one it cannot read. It carries a `revision`, outside the ciphertext, so the server can refuse a rollback, and the only other limit it can enforce is a byte bound, because it cannot see the shape of what it is holding.
 
-Inside it: `settings` (a sparse override tree mirroring `config/reputation.yml`
-— the user layer of the three described under **Config layering** in
-[reputation.md](reputation.md)), `voted` (which messages have already been
-emoted on, so one-vote-per-message survives moving to another device), `friends`
-in the order they were added, the `seen` set, and `ratings` — the friending,
-reporting and voting every published rating was computed from.
+`public/js/vault.js` and `lib/reputable_chat/cryptography/vault.rb` are the two halves — the browser writes a vault and, for the genesis account, so does a terminal. `spec/vault_parity_spec.rb` seals in each language and opens in the other, which is the only arrangement that catches a drift: each half opens its own vaults perfectly.
 
-The friend order is in there because it exists nowhere else: canonical
-serialization sorts keys, so a ratings map read back from the server is in
-public-key order and cannot say who was added first.
+The read route takes **no pubkey**: it uses the session's. Serving someone else's vault is not expressible through the API rather than being a check that has to stay correct.
 
-The server holds the vault so it cannot be lost, and **cannot read it**. The key
-is derived from the same Argon2id output the identity key comes from, run
-through HKDF under `seed.kdf.vault_domain` — one expensive derivation, two keys.
-The signature covers the ciphertext, so the server cannot swap one vault for
-another or alter one it cannot read. The only limit it can enforce is a byte
-bound, because it cannot see the shape of what it is holding.
-
-`public/js/vault.js` and `lib/reputable_chat/cryptography/vault.rb` are the two
-halves — the browser writes a vault and, for the genesis account, so does a
-terminal. `spec/vault_parity_spec.rb` seals in each language and opens in the
-other, which is the only arrangement that catches a drift: each half opens its
-own vaults perfectly.
-
-The read route takes **no pubkey**: it uses the session's. Serving someone
-else's vault is not expressible through the API rather than being a check that
-has to stay correct.
-
-### Two numbers, named apart
-
-- The `:v1` at the end of `purpose` is the **shape** of the payload — which
-  fields it has. It moves only when the field list changes. Records signed
-  under the old shape stay valid and stay on the chain; the old shape has to
-  stay understood so they can still be checked. It is part of the domain
-  separation described under **Signed payloads** below.
-- `revision` is a **counter for this one record**, climbing by one every time
-  its owner republishes. It says nothing about the shape.
-
-So `reputablechat:identity:v1` at `revision: 7` is the seventh copy of the first
-shape. They never move together. Every record carries its own counter, so a
-declaration at 7 beside a vault at 3 is two independent tallies rather than a
-disagreement — one has been saved seven times and the other three.
-
-The counter is **inside the signed payload**, which is the whole point of it.
-Without it the server could serve an old copy of somebody's attestation to hide
-a report, and the signature on that old copy would still verify perfectly —
-because it is genuine, just stale. A counter the server cannot alter without
-breaking the signature is what makes serving a stale copy detectable. Cheap
-now, impossible to retrofit without invalidating every signature in the network.
-
-Known limit: an attestation accumulates an entry per person ever rated, and
-grows without bound. Fine for the MVP, needs chunking later.
+Known limit: an attestation accumulates an entry per person ever rated, and grows without bound. Fine for the MVP, needs chunking later.
 
 ## Images
 
-Content-addressed: a file's name is the SHA-256 of its bytes plus an extension
-**sniffed from those bytes**, never from a claimed content type or filename.
-The server derives the name rather than trusting one, so a reader can re-hash
-what they fetched to confirm it is what the author signed. Names are 64 hex
-characters plus a known extension, which is also the only path check the
-serving route needs.
+Content-addressed: a file's name is the SHA-256 of its bytes plus an extension **sniffed from those bytes**, never from a claimed content type or filename. The server derives the name rather than trusting one, so a reader can re-hash what they fetched to confirm it is what the author signed. Names are 64 hex characters plus a known extension, which is also the only path check the serving route needs.
 
-PNG, JPEG, GIF and WebP only, 256 KB. **SVG is deliberately excluded** — it is a
-script-bearing document, not an image.
+This server stores PNG, JPEG, GIF and WebP only, up to 256 KB. **SVG is deliberately excluded** — it is a script-bearing document, not an image. The rules accept any avatar name; this is what this server is willing to store and serve.
 
-## Signed payloads
+## Login
 
-Each shape is domain-separated: the `purpose` string is signed along with
-everything else, so a signature made for one kind of record cannot be presented
-as another, and the trailing `:v1` pins which field list was signed. Adding or
-removing a field means a new suffix, because the canonical bytes change and
-every old signature stops verifying against the new shape.
- `lib/reputable_chat/cryptography/payload.rb` and
-`public/js/identity.js` must agree exactly.
+Logging in signs a challenge from the server. It is not a record and never reaches the chain; see **Login** in [identity.md](identity.md).
 
-| purpose | fields |
-|---|---|
-| `reputablechat:login:v1` | purpose, pubkey, nonce, origin, ts |
-| `reputablechat:message:v1` | purpose, pubkey, reply_to, ack, note, ts, body |
-| `reputablechat:emote:v1` | purpose, pubkey, message, emote, ack, note, ts |
-| `reputablechat:identity:v1` | purpose, pubkey, revision, handle, bio, icon, master_pubkey, previous_pubkey, ack, note, ts |
-| `reputablechat:attestation:v1` | purpose, pubkey, revision, scores, derived, ack, note, ts |
-| `reputablechat:release:v1` | purpose, pubkey, revision, label, files, notes, ack, note, ts |
-| `reputablechat:vault:v1` | purpose, pubkey, revision, ciphertext, iv, ts |
+## Reactions
 
-`config:v1` and `private-config:v1` were the two shapes these replaced. They are
-gone rather than deprecated — see **Retired terms** in
-[glossary.md](glossary.md).
+A reaction is its own signed record naming the records it reacts to in `target`, with the reaction itself — an emoji, a word — in its body. An account may react to the same record any number of times, and each client decides which reactions count as positive, negative or neutral.
 
-Every chain record also carries `note` — free text the software never reads,
-signed for whoever browses the raw chain. See **Notes** in [chain.md](chain.md).
+The client tallies them per message and **drops reactions from blocked accounts**, so a pile of spam accounts cannot inflate a count. Counts are therefore per-viewer, like everything else here.
 
-Everything but `login` and `vault` carries `ack`, the record hashes of the most
-recent records its author had seen. That is what makes these a chain rather than
-a pile — see [chain.md](chain.md). The vault has none because nobody else ever
-sees it, so there is nothing to anchor it to and nobody to prove anything to.
-
-`ack` chains a record to everybody else's. `ts` is the client's
-clock and is attacker-controlled; the server records its own receipt time
-separately and unsigned.
-
-Edits and deletes will be new signed records referencing the original, never
-mutations — a mutated record no longer matches its signature.
-
-## Emotes
-
-An emote is its own signed record naming the message it reacts to (by that
-message's record hash), so it cannot be transplanted. One per person
-per message, enforced by a unique constraint rather than trusted from the
-client, and the emote must be one the server publishes in `config/emotes.yml` —
-an arbitrary string would otherwise be stored and rendered back to everyone.
-
-The client tallies them per message and **drops emotes from blocked
-accounts**, so a pile of spam accounts cannot inflate a count. Counts are
-therefore per-viewer, like everything else here.
-
-An emote also moves its author's rating of the person emoted. That rating is
-private until their next attestation carries the number it came to.
+A reaction also moves its author's rating of the person reacted to. That rating is private until their next attestation carries the number it came to.
 
 ## Record hashes
 
-`ack`, `reply_to` and an emote's target all name a record by its hash:
+`ack` and `target` name records by their hash:
 
 ```
 SHA256(canonical_payload + "\n" + signature)
 ```
 
-A signature identifies a payload; a record hash identifies the record, signature
-included, which is what a link has to cover to be tamper-evident as a whole.
-`cryptography/record.rb` and `public/js/record.js` are the two halves, and
-`spec/record_parity_spec.rb` checks they agree.
+A signature identifies a payload; a record hash identifies the record, signature included, which is what a link has to cover to be tamper-evident as a whole. `cryptography/record.rb` and `public/js/record.js` are the two halves, and `spec/record_parity_spec.rb` checks they agree.
+
+Edits and deletes will be new signed records targeting the original, never mutations — a mutated record no longer matches its signature.
 
 ## Canonical serialization
 
-The browser signs bytes and the server verifies bytes, so both must produce
-byte-identical output: sorted keys, no whitespace, UTF-8, floats refused
-outright (they have no single textual form across languages).
+The browser signs bytes and the server verifies bytes, so both must produce byte-identical output: sorted keys, no whitespace, UTF-8, floats refused outright (they have no single textual form across languages).
 
-`lib/reputable_chat/cryptography/canonical.rb` and `public/js/canonical.js` are
-the two halves. **If they ever disagree by one character, every signature
-silently stops verifying** — `spec/canonical_parity_spec.rb` runs both over
-shared fixtures and compares the bytes, and is the thing that catches that.
+`lib/reputable_chat/cryptography/canonical.rb` and `public/js/canonical.js` are the two halves. **If they ever disagree by one character, every signature silently stops verifying** — `spec/canonical_parity_spec.rb` runs both over shared fixtures and compares the bytes, and is the thing that catches that.
 
 ## Layout
 
@@ -221,8 +86,10 @@ config/genesis/<env>.json the genesis identity declaration; the chain hangs off 
 config/host/<env>.json    this server's host account, acknowledging the genesis (optional)
 config/server.yml         origin, database and image paths, size limits (env overrides)
 config/reputation.yml     tunable reputation parameters (the defaults layer)
-config/emotes.yml         which emotes count positive, negative, neutral
+config/emotes.yml         which reactions count positive, negative, neutral
 config/bip39-english.txt  wordlist; one source of truth, served at /wordlist.txt
+
+docs/project/rules/       the rules, one file per version, and signed examples
 
 lib/reputable_chat/
   app.rb                  Roda routes, CSP, sessions
@@ -246,25 +113,16 @@ public/js/
   vault.js                must match cryptography/vault.rb -- seal, unseal, merge
   reputation.js           mirrors reputation/ in BigInt fixed-point
   session.js              mirrors reputation/session.rb
-  names.js                which handle is shown bare and which gets a key suffix
+  names.js                which handle is shown bare and which gets a suffix
   app.js                  UI wiring
 ```
 
 ## Not built yet
 
-- Loading a published release off the chain. Release records are published and
-  verifiable; nothing executes off the chain, because every version would run
-  on the same origin as the private key. See the end of [chain.md](chain.md).
-- Client-side verification of *other people's* attestations
-  (`session.verify_signatures`). Your own vault is already verified, since
-  detecting tampering is why it is signed.
-- Key rotation. `master_pubkey` and `previous_pubkey` are in the signed shape
-  and must still be null; nothing implements them.
-- Removing an emote; currently an emote is final
+- The code still signs the shapes that came before the rules — see **Not built** under **Rules** in [chain.md](chain.md).
+- Loading the client from a release. See the end of [chain.md](chain.md).
+- Client-side verification of *other people's* attestations (`session.verify_signatures`). Your own vault is already verified, since detecting tampering is why it is signed.
+- Master keys and key-change notices. The rules define them; nothing implements them.
 - WebSocket delivery — messages currently poll every 4s
 - Chunking an attestation, which currently grows an entry per person ever rated
-- Federation between servers. The payload domain separation is already in place
-  for it, but nothing else is. The principle it has to keep: a person sees
-  messages whatever server they came from, and is largely unaware which server
-  anyone else uses. What they see is decided by their friend list, never by
-  where somebody's account lives.
+- Federation between servers. The principle it has to keep: a person sees messages whatever server they came from, and is largely unaware which server anyone else uses. What they see is decided by their friend list, never by where somebody's account lives.

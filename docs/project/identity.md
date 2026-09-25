@@ -1,29 +1,19 @@
 # Identity
 
-There is no username at login and no password in the usual sense. A seed phrase
-*is* the account: it derives a keypair, and the public half is the identity.
+There is no username at login and no password in the usual sense. A seed phrase derives the account's keypair, and the public key signs the account's records. The account itself is identified by its account ID, the record hash of its first identity declaration, so it outlives any one key.
 
 ## Seed phrases
 
-- **BIP39 English wordlist**, 2048 words, 11 bits each. Chosen because it is
-  well tested, has vetted translations, and guarantees the first four letters
-  identify a word — which makes type-ahead reliable and removes spelling as a
-  failure mode.
+- **BIP39 English wordlist**, 2048 words, 11 bits each. Chosen because it is well tested, has vetted translations, and guarantees the first four letters identify a word — which makes type-ahead reliable and removes spelling as a failure mode.
 - **Minimum 8 words.** 88 bits total: 80 entropy plus an 8-bit checksum.
 - Longer seeds are accepted; each extra word adds 11 bits.
-- The word count is hashed alongside the entropy, so seeds of different lengths
-  cannot collide.
+- The word count is hashed alongside the entropy, so seeds of different lengths cannot collide.
 
 ### Why 8 and not 6
 
-Public keys are public and the derivation is public, so an attacker does not
-attack one account — they grind candidate seeds and check each against **every
-registered key at once**. The expected cost of breaking *someone* is `2^E / N`,
-not `2^E`.
+Public keys are public and the derivation is public, so an attacker does not attack one account — they grind candidate seeds and check each against **every registered key at once**. The expected cost of breaking *someone* is `2^E / N`, not `2^E`.
 
-Normally a per-user salt defeats this, but a usernameless login has nothing to
-salt with. The seed is the only input. That leaves entropy and KDF cost as the
-only levers.
+Normally a per-user salt defeats this, but a usernameless login has nothing to salt with. The seed is the only input. That leaves entropy and KDF cost as the only levers.
 
 At 10M users, against an attacker sustaining 10⁷ Argon2id guesses/sec:
 
@@ -34,181 +24,95 @@ At 10M users, against an attacker sustaining 10⁷ Argon2id guesses/sec:
 | **8** | **80** | **~457 years** |
 | 9 | 91 | ~900,000 years |
 
-The cliff is steep because each word is 11 bits. Seven words was the original
-target and is too thin — 81 days shrinks every year as hardware improves and the
-user count grows.
+The cliff is steep because each word is 11 bits. Seven words was the original target and is too thin — 81 days shrinks every year as hardware improves and the user count grows.
 
-**Argon2id is mandatory at every length.** Without a memory-hard KDF, even 8
-words falls in days. Raising the work factor cannot substitute for entropy:
-doubling it takes 7 words from 81 days to 162.
+**Argon2id is mandatory at every length.** Without a memory-hard KDF, even 8 words falls in days. Raising the work factor cannot substitute for entropy: doubling it takes 7 words from 81 days to 162.
 
 ### Checksum
 
-8 bits, so roughly 1 typo in 256 still validates. Because a valid-but-
-unregistered seed leads to account creation, a mistyped login that happens to
-pass the checksum would otherwise silently make a new empty account and leave
-the user thinking they had lost everything. The UI therefore warns explicitly
-before creating an account and makes it a second deliberate action.
+8 bits, so roughly 1 typo in 256 still validates. Because a valid-but- unregistered seed leads to account creation, a mistyped login that happens to pass the checksum would otherwise silently make a new empty account and leave the user thinking they had lost everything. The UI therefore warns explicitly before creating an account and makes it a second deliberate action.
 
 ### Recovery
 
-There is none. Losing the seed loses the account and all of its reputation,
-permanently. The UI says so at generation time.
+Losing the seed loses the account and all of its reputation, unless the account declared a master key and its holder still has it: the master key can move the account to a new public key with a key-change notice. Without one there is no recovery, and the UI says so at generation time. How a master key is made and kept is not built yet.
 
 ## Keys
 
 `Argon2id(seed) → 32 bytes → Ed25519 keypair`.
 
-The private key is a **non-extractable WebCrypto key**. This is the reason for
-using WebCrypto over a pure-JS Ed25519 library: a non-extractable key can sign
-but its bytes cannot be read back out, by the page or by anything injected into
-it.
+The private key is a **non-extractable WebCrypto key**. This is the reason for using WebCrypto over a pure-JS Ed25519 library: a non-extractable key can sign but its bytes cannot be read back out, by the page or by anything injected into it.
 
 Two layers keep it away from other sites:
 
 - **Origin isolation** — no other site can reach this origin's IndexedDB.
-- **A strict CSP** (`lib/reputable_chat/app.rb`) — keeps injected script inside
-  this origin from using the key while a session is live.
+- **A strict CSP** (`lib/reputable_chat/app.rb`) — keeps injected script inside this origin from using the key while a session is live.
 
-It is stored in IndexedDB rather than held in memory only. Memory-only dies on
-every page refresh, and a refresh is not a log off; IndexedDB survives refresh
-and is cleared on explicit logout, which matches "stays until you log off" more
-literally. The seed itself is never stored and never transmitted.
+It is stored in IndexedDB rather than held in memory only. Memory-only dies on every page refresh, and a refresh is not a log off; IndexedDB survives refresh and is cleared on explicit logout, which matches "stays until you log off" more literally. The seed itself is never stored and never transmitted.
 
 ## The vault key
 
-The private vault (settings, the voted list, and the friend and report lists) is
-meant to be opaque to the server, not merely signed.
+The private vault (settings, the voted list, and the friend and report lists) is meant to be opaque to the server, not merely signed.
 
-It cannot be encrypted to the identity key. Ed25519 is a signature scheme with
-no encryption operation, and the usual workaround — converting to X25519 and
-doing ECDH — needs the private scalar, which for a non-extractable WebCrypto
-key can never be read back. That is not a limitation to route around; it is the
-property the whole key storage design is built on.
+It cannot be encrypted to the identity key. Ed25519 is a signature scheme with no encryption operation, and the usual workaround — converting to X25519 and doing ECDH — needs the private scalar, which for a non-extractable WebCrypto key can never be read back. That is not a limitation to route around; it is the property the whole key storage design is built on.
 
-So the vault key comes from the seed independently: the same Argon2id under a
-second domain, `seed.kdf.vault_domain`, giving a symmetric key the vault is
-encrypted under. The ciphertext is then signed with the identity key, so the
-server can neither read it nor alter it undetected.
+So the vault key comes from the seed independently: the same Argon2id under a second domain, `seed.kdf.vault_domain`, giving a symmetric key the vault is encrypted under. The ciphertext is then signed with the identity key, so the server can neither read it nor alter it undetected.
 
-Versioned for the same reason `seed.kdf.domain` is: changing it strands every
-existing vault.
+Versioned for the same reason `seed.kdf.domain` is: changing it strands every existing vault.
 
-It is one Argon2id pass, not two. The vault key is taken off the same output
-the identity key comes from, separated by domain through HKDF. A second
-memory-hard pass would double the wait at every login and buy nothing a
-domain-separated HKDF does not already give — and re-deriving the identity key
-differently is off the table entirely, since that strands every account that
-exists.
+It is one Argon2id pass, not two. The vault key is taken off the same output the identity key comes from, separated by domain through HKDF. A second memory-hard pass would double the wait at every login and buy nothing a domain-separated HKDF does not already give — and re-deriving the identity key differently is off the table entirely, since that strands every account that exists.
 
 ## What the server can still do with a vault it cannot read
 
 Three things, and only three.
 
-It can **verify the signature** over the ciphertext, which is what proves the
-blob came back the way it went in. It can **reject a rollback**, because
-`revision` sits outside the ciphertext — the one number it reads from a document
-it can otherwise make nothing of, leaking roughly how many times you have saved
-and nothing else. And it can **refuse an oversized blob**, which is the only
-limit left once shape checking is impossible: it cannot count your friends, so
-it counts your bytes.
+It can **verify the signature** over the ciphertext, which is what proves the blob came back the way it went in. It can **reject a rollback**, because `revision` sits outside the ciphertext — the one number it reads from a document it can otherwise make nothing of, leaking roughly how many times you have saved and nothing else. And it can **refuse an oversized blob**, which is the only limit left once shape checking is impossible: it cannot count your friends, so it counts your bytes.
 
-What it gives up is real. The signed-but-readable record this replaced let the
-server check that `settings` was a bounded tree of scalars; an encrypted one
-cannot be checked at all, so the client has to be as careful about what it
-decrypts as it would be about anything else arriving over the wire.
+What it gives up is real. The signed-but-readable record this replaced let the server check that `settings` was a bounded tree of scalars; an encrypted one cannot be checked at all, so the client has to be as careful about what it decrypts as it would be about anything else arriving over the wire.
 
-The read route takes **no pubkey** — it uses the session's — so serving somebody
-else's vault is not expressible through the API rather than being a check that
-has to stay correct.
+The read route takes **no pubkey** — it uses the session's — so serving somebody else's vault is not expressible through the API rather than being a check that has to stay correct.
 
 ## Who is called what
 
-Handles are not unique and never will be, so something has to decide which Joe
-is "Joe" and which is "Joe a4f2c1de". The rule is seniority, in this order:
+Handles are not unique and never will be, so something has to decide which Joe is "Joe" and which is "Joe a4f2c1de". The rule is seniority, in this order:
 
 1. **friends**, longest-held handle first
 2. **accounts you have seen**, earliest sighting first
 3. everybody else
 
-Whoever comes first holds the handle bare; everyone else carries a suffix,
-which is the same eight characters the fingerprint has always been. A handle
-nobody is competing for is always shown bare, because there is nobody to tell
-apart.
+Whoever comes first holds the handle bare; everyone else carries a suffix, which is the first eight characters of their account ID, the same as their fingerprint. A handle nobody is competing for is always shown bare, because there is nobody to tell apart.
 
-The ordering is what makes this worth anything. An impersonator arrives *after*
-the person they are copying, so they are always the one wearing the suffix, and
-the person being copied never has to do anything to keep their name.
+The ordering is what makes this worth anything. An impersonator arrives *after* the person they are copying, so they are always the one wearing the suffix, and the person being copied never has to do anything to keep their name.
 
 Three details carry real weight:
 
-**A rename forfeits seniority, for friends as much as for sightings.** An
-account could otherwise rename onto somebody else's handle and outrank them on
-time it never served under that name — and being a long-standing friend would
-make that worse rather than better. So both records store the handle they were
-made under, and seeing that account under a different one restarts its clock.
+**A rename forfeits seniority, for friends as much as for sightings.** An account could otherwise rename onto somebody else's handle and outrank them on time it never served under that name — and being a long-standing friend would make that worse rather than better. So both records store the handle they were made under, and seeing that account under a different one restarts its clock.
 
-That means a friend carries two clocks. The **friend list** is ordered by when
-each was added and a rename never moves anybody; the **name claim** is dated
-from when they took the handle they are using now. Only the second one resets.
+That means a friend carries two clocks. The **friend list** is ordered by when each was added and a rename never moves anybody; the **name claim** is dated from when they took the handle they are using now. Only the second one resets.
 
-**Friend order comes from the vault, not from the ratings.** Canonical
-serialization sorts keys, so a ratings map comes back from the server in
-public-key order and cannot say who was added first. Taking the order from
-there would make "first friend wins" mean "lowest key wins" — and a key is
-something an impersonator can grind until it sorts above yours.
+**Friend order comes from the vault, not from the ratings.** Canonical serialization sorts keys, so a ratings map comes back from the server in account-ID order and cannot say who was added first. Taking the order from there would make "first friend wins" mean "lowest ID wins" — and an account ID is something an impersonator can grind until it sorts above yours.
 
-**A stranger sorts last.** Somebody neither chosen nor previously seen never
-takes a contested name from an account the viewer has a record of. In practice
-this is a narrow case, because an account nobody has vouched for is invisible
-and so never gets seen in the first place — the seen set is a record of what
-this viewer could actually read. Turning on `show_unrated` widens it, and those
-sightings keep their seniority afterwards, so the setting has a memory.
+**A stranger sorts last.** Somebody neither chosen nor previously seen never takes a contested name from an account the viewer has a record of. In practice this is a narrow case, because an account nobody has vouched for is invisible and so never gets seen in the first place — the seen set is a record of what this viewer could actually read. Turning on `show_unrated` widens it, and those sightings keep their seniority afterwards, so the setting has a memory.
 
-A [suffix](#handles) appears only where a handle is contested, never beside
-every name. So a suffix means something when you see one, and the cost is that a
-stranger with an unfamiliar handle is shown bare — which is exactly when a
-reader knows least about them.
+A [suffix](#handles) appears only where a handle is contested, never beside every name. So a suffix means something when you see one, and the cost is that a stranger with an unfamiliar handle is shown bare — which is exactly when a reader knows least about them.
 
 ### The seen set
 
-The accounts a message has been seen from that are neither friends nor blocked,
-held in the vault. It records seniority and nothing else.
+The accounts a message has been seen from that are neither friends nor blocked, held in the vault. It records seniority and nothing else.
 
-Friends and blocked accounts leave it: one ranks above it, the other is never
-shown, so a record of either is one nothing reads.
+Friends and blocked accounts leave it: one ranks above it, the other is never shown, so a record of either is one nothing reads.
 
-It is bounded by `seen_entries`, and over budget the **newest** sightings are
-dropped. Seniority is the entire content of the set, so discarding the oldest
-would throw away the only thing it holds — and dropping the newest leaves the
-conservative bias in place, where an account with no sighting on file loses a
-contested name to one that has.
+It is bounded by `seen_entries`, and over budget the **newest** sightings are dropped. Seniority is the entire content of the set, so discarding the oldest would throw away the only thing it holds — and dropping the newest leaves the conservative bias in place, where an account with no sighting on file loses a contested name to one that has.
 
 ## Two devices editing one vault
 
-A vault is a single encrypted blob with a monotonic revision, so two signed-in
-devices both pushing will have one of them refused. The refusal is the useful
-part: it means *merge*, never *retry*. A client that reacts to a rejection by
-taking the server's copy silently drops everything it did since its last push;
-one that reacts by bumping the revision and overwriting silently drops what the
-other device did. Both are easy to write by accident, because a conflict looks
-like something to retry.
+A vault is a single encrypted blob with a monotonic revision, so two signed-in devices both pushing will have one of them refused. The refusal is the useful part: it means *merge*, never *retry*. A client that reacts to a rejection by taking the server's copy silently drops everything it did since its last push; one that reacts by bumping the revision and overwriting silently drops what the other device did. Both are easy to write by accident, because a conflict looks like something to retry.
 
 The merge is per-list, and the two lists resolve in opposite directions:
 
-- **First-seen entries: earliest wins.** The whole point of a sighting is when
-  it happened, so the older record of having seen somebody is the true one.
-  Union by public key, keep the earlier sighting.
-- **Friends and blocks: latest wins.** Here the newest statement is the one the
-  person meant. Union the entries, and where both devices touched the same
-  person, take the later vault's version.
+- **First-seen entries: earliest wins.** The whole point of a sighting is when it happened, so the older record of having seen somebody is the true one. Union by public key, keep the earlier sighting.
+- **Friends and blocks: latest wins.** Here the newest statement is the one the person meant. Union the entries, and where both devices touched the same person, take the later vault's version.
 
-There are no per-entry timestamps, so "later" means the vault that was written
-later, not the individual change. That is a deliberate limit rather than an
-oversight: friending and blocking the same person from two devices inside one
-sync window is not a thing people do by accident, and paying for it on every
-entry of every vault forever is a worse trade than living with an odd result in
-a case that barely happens.
+There are no per-entry timestamps, so "later" means the vault that was written later, not the individual change. That is a deliberate limit rather than an oversight: friending and blocking the same person from two devices inside one sync window is not a thing people do by accident, and paying for it on every entry of every vault forever is a worse trade than living with an odd result in a case that barely happens.
 
 ## Login
 
@@ -218,17 +122,10 @@ Challenge–response:
 2. Client signs `{purpose, pubkey, nonce, origin, ts}`.
 3. Server verifies the signature, the freshness of `ts`, and claims the nonce.
 
-The nonce is claimed **after** signature verification, so a failed signature
-does not burn the challenge.
+The nonce is claimed **after** signature verification, so a failed signature does not burn the challenge.
 
-`purpose` and `origin` are in the signed payload deliberately. Without them a
-signature harvested by one server could be replayed against another to
-authenticate as that user — which matters enormously once this federates, and
-costs nothing to get right now.
+Logging in is not a record and never reaches the chain, so the rules do not govern it.
 
 ## Handles
 
-Not unique, and deliberately so. Reputation attaches to the **key**, never the
-name. That makes impersonation trivial unless the UI shows key-derived identity
-everywhere, so a fingerprint is rendered next to every name from the first
-screen onward.
+Not unique, and deliberately so. Reputation attaches to the **account ID**, never the name. That makes impersonation trivial unless the UI shows the account's identity everywhere, so a fingerprint is rendered next to every name from the first screen onward.
