@@ -1,6 +1,6 @@
 # Identity
 
-There is no username at login and no password in the usual sense. A seed phrase derives the account's keypair, and its public half is the working key that signs the account's records. The account itself is identified by its account ID, which outlives any one key.
+There is no username at login and no password in the usual sense. A seed phrase derives the account's working keypair: the private half signs the account's records, and the public half, the working key, is what others check the signatures against. The account itself is identified by its account ID, which outlives any one key.
 
 ## Seed phrases
 
