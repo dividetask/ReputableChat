@@ -84,19 +84,19 @@ Because hop 2 tops out at 0.009, just under `trusted_at`, **Trusted means you ra
 
 `show_unrated` lets a user opt into seeing users nobody has rated — necessary for anyone willing to wade through the muck and vouch for newcomers. It surfaces only the unrated, never the net-negative.
 
-That rule exists for those willing to do the work of wading through the spam to find honest users and give them a chance to join the network. We will also allow other ways to join the network such as having a automated user request email verification and/or captcha completion and give a small rating to those who complete it. Users may choose to set the trust value for the automated user to zero if they find the verification method too prone to abuse.
+That rule exists for those willing to do the work of wading through the spam to find honest users and give them a chance to join the network. We will also allow other ways to join the network such as having an automated user request email verification and/or captcha completion and give a small rating to those who complete it. Users may choose to set the trust value for the automated user to zero if they find the verification method too prone to abuse.
 
 ## Sessions
 
 Reputations are calculated by the client once at login, everyone is sorted into a bucket, and the numbers are discarded. For the rest of the session the buckets are what matter.
 
-The session holds a **snapshot** of the graph, not a live view. Freezing only the walk is not enough: a rating published later by someone already inside it would still leak through. So further likes and dislikes — yours or anyone else's — move nobody until the next login or recalculation is requested (the later is not yet implemented).
+The session holds a **snapshot** of the graph, not a live view. Freezing only the walk is not enough: a rating published later by someone already inside it would still leak through. So further likes and dislikes — yours or anyone else's — move nobody until the next login or recalculation is requested (the latter is not yet implemented).
 
-Reports are the exception, since waiting a whole session to act on one defeats the point. The server, after detecting an influx of reports against a single user, will send an alert to all users indicating this. This report will include the offending user and a list of users reporting them. A second report will be issued if the offender hits a second threshold. The client will need to decide whether to listen to the report depending upon which bucket the reporters fall into. The reason for the second threshold is in case the first report was ignored due to not trusting the initial reporters.
+Reports are the exception, since waiting a whole session to act on one defeats the point. A report stays private in the reporter's vault, but the client also tells the server who it is reporting. When enough accounts have reported the same user, the server sends every user an alert naming that user and the accounts that reported them. A second alert follows at a second threshold, in case the first was ignored because its reporters were not trusted. Each client decides whether to act on an alert depending on which bucket the reporters fall into.
 
 `session.report_blocks` maps hops to how many tolerated or trusted reporters are needed to tentatively block a user. Tentatively blocking a user simply means blocking them for the remainder of the session. It is likely they will remain blocked next session, but until their reputation is recalculated we cannot know for certain whether or not the block will remain.
 
-`daily.report_blocks.initial` and `daily.report_blocks.secondary` are used by the server to determine whether or not to issue a report warning of poor behavior. Future versions will need additional safeguards to prevent malicious users from repeatedly reporting themselves with new unknown accounts and prematurely trigger the report feature before engaging in malicious behavior.
+The two alert thresholds will be server settings; none of this is built yet. Future versions will need safeguards against someone reporting themselves from new, unknown accounts to trigger alerts early, before behaving badly.
 
 ## Precision
 

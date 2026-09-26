@@ -6,7 +6,7 @@ One name per thing. **Retired terms** at the bottom is the single list of words 
 
 These are defined in [rules/v0.001.md](rules/v0.001.md), and only there, so that no second definition can drift from it:
 
-record, payload, signature, record hash, text, decimal, record type (`type`), account ID (`id`), working key (`pubkey`), master public key (`mpubkey`), current keys, `ack`, `body`, message timestamp (`ts`), `target`, `note`, identity declaration, avatar, bio, handle, attestation, scores, derived, message, reaction, notice, key change, master key change, release, rules version, guideline.
+record, payload, signature, record hash, text, decimal, record type (`type`), account ID (`id`), working key (`pubkey`), master public key (`mpubkey`), current keys, `ack`, `body`, record timestamp (`ts`), `target`, `note`, identity declaration, avatar, bio, handle, attestation, scores, derived, message, reaction, notice, key change, master key change, release, rules version, guideline.
 
 ## The chain
 
@@ -74,7 +74,7 @@ Do not reintroduce these; they each have a current name above.
 | version (as a per-record counter), `revision` on a chain record | (removed; order is acknowledgement) |
 | `tim.json` | `<environment>.json` |
 | transaction | record |
-| transaction timestamp | message timestamp (`ts`) |
+| transaction timestamp, message timestamp | record timestamp (`ts`) |
 | comment, post (as a noun) | message |
 | emote (as a record), `emote:v1` | reaction |
 | announcement | message or notice |
@@ -83,7 +83,7 @@ Do not reintroduce these; they each have a current name above.
 | public key (as the account's identity) | account ID |
 | public key (as the key that is not the master key) | working key |
 | `reply_to`, an emote's `message` | `target` |
-| `icon` | `avatar` |
+| `icon`, `avatar` (as a field) | `file`, which on an identity declaration is the avatar |
 | `bio` (as a field) | `note` |
 | `master_pubkey` | `mpubkey` |
 | `note` (as free text up to 16,000 bytes) | `body` |

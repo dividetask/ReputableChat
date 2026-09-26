@@ -142,7 +142,7 @@ The friend and report lists are not in an attestation. They are in the private v
 
 `derived` reaches out to `attestation.published_hops` (3 by default), for readers whose walk did not reach that far. See **The derived cache** in [reputation.md](reputation.md).
 
-A reader reaching for it has run out of its own reach and uses it to cheaply extending their reach. 
+A reader reaching for it has run out of its own reach and uses it to cheaply extend their reach. 
 
 ### Not built: fetching a record by hash
 

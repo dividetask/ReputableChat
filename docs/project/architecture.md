@@ -25,7 +25,7 @@ Inside it: `settings` (a sparse override tree mirroring `config/reputation.yml` 
 
 The friend order is in there because it exists nowhere else: canonical serialization sorts keys, so a ratings map read back from the server is in key order and cannot say who was added first.
 
-The server holds the vault so it cannot be lost, and **cannot read it**. The key is derived from the same Argon2id output the identity key comes from, run through HKDF under `seed.kdf.vault_domain` — one expensive derivation, two keys. The signature covers the ciphertext, so the server cannot swap one vault for another or alter one it cannot read. It carries a `revision`, outside the ciphertext, so the server can refuse a rollback, and the only other limit it can enforce is a byte bound, because it cannot see the shape of what it is holding.
+The server holds the vault so it cannot be lost, and **cannot read it**. The key is derived from the same Argon2id output the identity key comes from, run through HKDF under `seed.kdf.vault_domain` — one expensive derivation, two keys. The signature covers the ciphertext, so the server cannot swap one vault for another or alter one it cannot read. The server keeps only the latest copy, and the only limit it can enforce is a byte bound, because it cannot see the shape of what it is holding.
 
 `public/js/vault.js` and `lib/reputable_chat/cryptography/vault.rb` are the two halves — the browser writes a vault and, for the genesis account, so does a terminal. `spec/vault_parity_spec.rb` seals in each language and opens in the other, which is the only arrangement that catches a drift: each half opens its own vaults perfectly.
 

@@ -59,9 +59,9 @@ It is one Argon2id pass, not two. The vault key is taken off the same output the
 
 ## What the server can still do with a vault it cannot read
 
-Three things, and only three.
+Two things, and only two.
 
-It can **verify the signature** over the ciphertext, which is what proves the blob came back the way it went in. It can **reject a update**. And it can **refuse an oversized blob**, which is the only limit left once shape checking is impossible: it cannot count your friends, so it counts your bytes.
+It can **verify the signature** over the ciphertext, which is what proves the blob came back the way it went in. And it can **refuse an oversized blob**, which is the only limit left once shape checking is impossible: it cannot count your friends, so it counts your bytes.
 
 What it gives up is real. The signed-but-readable record this replaced let the server check that `settings` was a bounded tree of scalars; an encrypted one cannot be checked at all, so the client has to be as careful about what it decrypts as it would be about anything else arriving over the wire.
 
@@ -71,14 +71,13 @@ The read route takes **no pubkey** — it uses the session's — so serving some
 
 Handles are not unique and never will be, so something has to decide which Joe is "Joe" and which is "Joe a4f2c1de". The rule is seniority, in this order:
 
-1. **friends**, longest-held handle first
-2. **accounts you have seen**, earliest sighting first
+1. **friends**, in the order of the friend list
+2. **accounts you have seen**, in the order of the seen set
+3. **everybody else**: accounts whose name is on screen before any of their messages has been, such as a name in a reaction. They join the seen set as soon as one of their messages is shown.
 
-Whoever comes first holds the handle bare; everyone else carries a suffix, which is the first eight characters of their account ID, the same as their fingerprint. A handle nobody is competing for is always shown bare, because there is nobody to tell apart.
+Whoever comes first holds the handle bare; everyone else carries a suffix: the first four characters of their account ID, extended up to eight where four do not tell them apart. A handle nobody is competing for is always shown bare, because there is nobody to tell apart.
 
 The ordering is what makes this worth anything. An impersonator arrives *after* the person they are copying, so they are always the one wearing the suffix, and the person being copied never has to do anything to keep their name.
-
-Three details carry real weight:
 
 **A rename forfeits seniority, for friends as much as for sightings.** Whenever an account is first seen it is placed on the end of the **seen set** and whenever an account is added as a friend they are put at the bottom of the friend list. Whenever any account, friend or otherwise, changes their name they are moved to the bottom of their respective list. Any account whose reputation dips below 0 is automatically removed from the **seen set**. Both lists are stored in the vault and are not public.
 
@@ -94,11 +93,11 @@ It is bounded by `seen_entries`, and over budget the last entries are dropped.
 
 ## Two devices editing one vault
 
-A vault is a single encrypted blob with a monotonic revision. Before pushing a new revision the client will first request a fingerprint of the current version to check to see if another device has added changes not reflected in the current version. If the fingerprint does not match the last pushed local copy then a merge will happen before pushing the updated revision.
+A vault is a single encrypted blob, and the server keeps only the latest copy. Before pushing, the client asks the server for a fingerprint of the stored copy. If it does not match the copy this device last pushed, another device has saved since, and the client merges before pushing.
 
 The merge is per-list, and the two lists resolve in opposite directions:
 
-- **First-seen entries: earliest wins.** The whole point of a sighting is when it happened, so the older record of having seen somebody is the true one. Union by public key, keep the earlier sighting.
+- **First-seen entries: earliest wins.** The whole point of a sighting is when it happened, so the older record of having seen somebody is the true one. Union by account ID, keep the earlier sighting.
 - **Friends and blocks: latest wins.** Here the newest statement is the one the person meant. Union the entries, and where both devices touched the same person, take the later vault's version.
 
 There are no per-entry timestamps, so "later" means the vault that was written later, not the individual change. That is a deliberate limit rather than an oversight: friending and blocking the same person from two devices inside one sync window is not a thing people do by accident, and paying for it on every entry of every vault forever is a worse trade than living with an odd result in a case that barely happens.
