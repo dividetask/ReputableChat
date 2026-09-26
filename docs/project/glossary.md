@@ -10,11 +10,11 @@ record, payload, signature, record hash, text, decimal, record type (`type`), ac
 
 ## The chain
 
-**Genesis** — the genesis account's first identity declaration, committed as a file because clients must agree on its hash before fetching anything. There are two: development's seed is public, production's is not. [chain.md](chain.md)
+**Genesis** — the genesis account's first identity declaration, committed as a file because clients must agree on its hash before fetching anything. [chain.md](chain.md)
 
-**Genesis account** — the developer's account, which signs the genesis. The same on every server, because there is one network and one chain. Every new account starts with it as a friend. By convention it signs what covers the whole network: releases and the rules. Tim by default, but the handle is only a handle.
+**Genesis account** — the developer's account, which signs the genesis. The same on every server, because there is one network and one chain. Every new account starts with it as a friend. By convention it signs what covers the whole network: releases and the rules. Tim by default, but the handle is only a handle. The development's seed is public on github, production's is not. 
 
-**Host account** — a server's own account, optional. Its first identity declaration acknowledges the genesis, so it hangs off the one chain. Committed beside the genesis under `config/host/`. Where a server has one, a new account starts with it as a second friend. By convention it signs what concerns one server, such as an outage notice. Nothing enforces either convention. [chain.md](chain.md)
+**Host account** — a server's own account, optional. Its first identity declaration acknowledges the genesis, so it hangs off the one chain. Committed beside the genesis under `config/host/`. Where a server has one, a new account starts with it as a second friend. By convention it signs what concerns one server, such as an outage notice, as well as provides initial trust through a verification method for new users. Nothing enforces either convention. [chain.md](chain.md)
 
 **Founding notice** — the first rules, `docs/project/rules/v0.001.md`, as the body of the genesis record. Not a record of its own. There is one per chain. [chain.md](chain.md)
 
@@ -22,17 +22,15 @@ record, payload, signature, record hash, text, decimal, record type (`type`), ac
 
 **Fingerprint** (of an account) — the short rendering of an account ID shown next to a handle.
 
-**Suffix** — the eight account-ID characters appended to a handle somebody else holds ahead of them. The same string as the fingerprint, shown only where a handle is contested. [identity.md](identity.md)
+**Suffix** — the four account-ID characters appended to a handle somebody else holds ahead of them. The same string as the fingerprint, shown only where a handle is contested. This may be extended up to eight digits when neccesary. [identity.md](identity.md)
 
 ## Off the chain
 
 **Vault** — the owner's encrypted private document: settings, the voted list, the friend order, the seen set, and the private actions every published rating is computed from. Encrypted under a key derived from the seed under `seed.kdf.vault_domain`, then signed over the ciphertext. Not a record on the chain, and not governed by the rules. [identity.md](identity.md)
 
-**`revision`** — the vault's save counter, which lets the server refuse a rollback. No record on the chain has one.
-
 **Seen set** — the accounts you have seen a message from that are neither friends nor blocked, held in the vault. It records seniority, which is what decides whose handle shows bare and whose carries a suffix.
 
-**Friend order** — the order friends were added, kept in the vault because a ratings map comes back sorted by key and cannot carry it. Distinct from a **name claim**, which is dated from when that account took the handle it is using now and resets when they change it.
+**Friend set** — the accounts added as friends. This is initially sorted by the order they were added but friends will be moved to the end of the list whenever they change their handle.
 
 **Sealed** — the vault's ciphertext, as the server sees it. Named apart from "encrypted" because the server never handles a key, only a blob.
 
@@ -44,7 +42,7 @@ record, payload, signature, record hash, text, decimal, record type (`type`), ac
 
 **Trust multiplier** — what someone's *recommendations* are worth, as distinct from what they are worth. Compounds along a path; a zero prunes the branch while leaving that person visible.
 
-**Derived cache** — an attestation's `derived` field, for accounts a reader's walk did not reach. Not read yet. A reader reaching for it has run out of its own reach, and either takes the number or leaves it. [reputation.md](reputation.md)
+**Derived cache** — an attestation's `derived` field, for accounts a reader's walk did not reach. A reader reaching for it has run out of its own reach, and either takes the number or leaves it. [reputation.md](reputation.md)
 
 **Hop** / **depth** — distance from the viewer. The walk goes out to `max_hops`, or until it has reached `max_accounts`.
 

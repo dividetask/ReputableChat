@@ -28,13 +28,9 @@ The cliff is steep because each word is 11 bits. Seven words was the original ta
 
 **Argon2id is mandatory at every length.** Without a memory-hard KDF, even 8 words falls in days. Raising the work factor cannot substitute for entropy: doubling it takes 7 words from 81 days to 162.
 
-### Checksum
-
-8 bits, so roughly 1 typo in 256 still validates. Because a valid-but- unregistered seed leads to account creation, a mistyped login that happens to pass the checksum would otherwise silently make a new empty account and leave the user thinking they had lost everything. The UI therefore warns explicitly before creating an account and makes it a second deliberate action.
-
 ### Recovery
 
-Losing the seed loses the account and all of its reputation, unless the account declared a master key and its holder still has it: see the rules on key changes. Without one there is no recovery, and the UI says so at generation time. How a master key is made and kept is not built yet.
+Losing the seed loses the account and all of its reputation, unless the account declared a master key and its holder still has it: see the rules on key changes. Without one there is no recovery.
 
 ## Keys
 
@@ -65,7 +61,7 @@ It is one Argon2id pass, not two. The vault key is taken off the same output the
 
 Three things, and only three.
 
-It can **verify the signature** over the ciphertext, which is what proves the blob came back the way it went in. It can **reject a rollback**, because `revision` sits outside the ciphertext — the one number it reads from a document it can otherwise make nothing of, leaking roughly how many times you have saved and nothing else. And it can **refuse an oversized blob**, which is the only limit left once shape checking is impossible: it cannot count your friends, so it counts your bytes.
+It can **verify the signature** over the ciphertext, which is what proves the blob came back the way it went in. It can **reject a update**. And it can **refuse an oversized blob**, which is the only limit left once shape checking is impossible: it cannot count your friends, so it counts your bytes.
 
 What it gives up is real. The signed-but-readable record this replaced let the server check that `settings` was a bounded tree of scalars; an encrypted one cannot be checked at all, so the client has to be as careful about what it decrypts as it would be about anything else arriving over the wire.
 
@@ -77,7 +73,6 @@ Handles are not unique and never will be, so something has to decide which Joe i
 
 1. **friends**, longest-held handle first
 2. **accounts you have seen**, earliest sighting first
-3. everybody else
 
 Whoever comes first holds the handle bare; everyone else carries a suffix, which is the first eight characters of their account ID, the same as their fingerprint. A handle nobody is competing for is always shown bare, because there is nobody to tell apart.
 
@@ -85,27 +80,21 @@ The ordering is what makes this worth anything. An impersonator arrives *after* 
 
 Three details carry real weight:
 
-**A rename forfeits seniority, for friends as much as for sightings.** An account could otherwise rename onto somebody else's handle and outrank them on time it never served under that name — and being a long-standing friend would make that worse rather than better. So both records store the handle they were made under, and seeing that account under a different one restarts its clock.
-
-That means a friend carries two clocks. The **friend list** is ordered by when each was added and a rename never moves anybody; the **name claim** is dated from when they took the handle they are using now. Only the second one resets.
-
-**Friend order comes from the vault, not from the ratings.** Canonical serialization sorts keys, so a ratings map comes back from the server in account-ID order and cannot say who was added first. Taking the order from there would make "first friend wins" mean "lowest ID wins" — and an account ID is something an impersonator can grind until it sorts above yours.
-
-**A stranger sorts last.** Somebody neither chosen nor previously seen never takes a contested name from an account the viewer has a record of. In practice this is a narrow case, because an account nobody has vouched for is invisible and so never gets seen in the first place — the seen set is a record of what this viewer could actually read. Turning on `show_unrated` widens it, and those sightings keep their seniority afterwards, so the setting has a memory.
+**A rename forfeits seniority, for friends as much as for sightings.** Whenever an account is first seen it is placed on the end of the **seen set** and whenever an account is added as a friend they are put at the bottom of the friend list. Whenever any account, friend or otherwise, changes their name they are moved to the bottom of their respective list. Any account whose reputation dips below 0 is automatically removed from the **seen set**. Both lists are stored in the vault and are not public.
 
 A [suffix](#handles) appears only where a handle is contested, never beside every name. So a suffix means something when you see one, and the cost is that a stranger with an unfamiliar handle is shown bare — which is exactly when a reader knows least about them.
 
 ### The seen set
 
-The accounts a message has been seen from that are neither friends nor blocked, held in the vault. It records seniority and nothing else.
+The accounts a message has been seen from that are neither friends nor blocked, held in the vault. It is initially ordered by seniority.
 
 Friends and blocked accounts leave it: one ranks above it, the other is never shown, so a record of either is one nothing reads.
 
-It is bounded by `seen_entries`, and over budget the **newest** sightings are dropped. Seniority is the entire content of the set, so discarding the oldest would throw away the only thing it holds — and dropping the newest leaves the conservative bias in place, where an account with no sighting on file loses a contested name to one that has.
+It is bounded by `seen_entries`, and over budget the last entries are dropped.
 
 ## Two devices editing one vault
 
-A vault is a single encrypted blob with a monotonic revision, so two signed-in devices both pushing will have one of them refused. The refusal is the useful part: it means *merge*, never *retry*. A client that reacts to a rejection by taking the server's copy silently drops everything it did since its last push; one that reacts by bumping the revision and overwriting silently drops what the other device did. Both are easy to write by accident, because a conflict looks like something to retry.
+A vault is a single encrypted blob with a monotonic revision. Before pushing a new revision the client will first request a fingerprint of the current version to check to see if another device has added changes not reflected in the current version. If the fingerprint does not match the last pushed local copy then a merge will happen before pushing the updated revision.
 
 The merge is per-list, and the two lists resolve in opposite directions:
 

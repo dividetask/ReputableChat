@@ -2,7 +2,7 @@
 
 Every signed record in ReputableChat names the most recent records its author had seen when they signed it. That one field turns a pile of independent signatures into a single tangled history: if you can see a record, you can walk back from it through everything its author had already seen, and everything *those* authors had seen, until you reach the genesis.
 
-There is no proof of work and no mining. The chain is not there to put records in one agreed order or to stop double spends — it is there so that a record cannot be quietly removed, back-dated, or shown to one person and not another. A server that drops a message has to drop everything that acknowledged it, and everything that acknowledged *those*, which is not something it can do selectively without the gap being visible.
+There is no proof of work and thus no mining. The chain is not there to put records in one agreed order or to stop double spends — it is there so that a record cannot be quietly removed, back-dated, or shown to one person and not another. A server that drops a message has to drop everything that acknowledged it, and everything that acknowledged *those*, which is not something it can do selectively without the gap being visible.
 
 ## Records
 
@@ -38,15 +38,13 @@ Nothing enforces who signs what. By convention the genesis account signs what co
 
 A new account starts with the genesis account as a friend, and with the host account as a second one where the server has one.
 
-It has to. An unrated account sits at exactly zero and is invisible to everyone, which is the sybil defense — but it also means a newcomer who trusts nobody sees nobody, and a network where nobody has vouched for anybody shows a blank screen. Trusting the genesis gives a new arrival one anchor to see through, and it is what makes `script/tim.rb visible <pubkey>` do anything: lifting somebody over the line in the genesis account's own ratings lifts them for everyone who has the genesis at one hop.
+It has to or there would simply be nothing to see on the server. An unrated account sits at exactly zero and is invisible to everyone, which is the sybil defense — but it also means a newcomer who trusts nobody sees nobody, and a network where nobody has vouched for anybody shows a blank screen. Trusting the genesis gives a new arrival one anchor to see through, and it is what makes `script/tim.rb visible <pubkey>` do anything: lifting somebody over the line in the genesis account's own ratings lifts them for everyone who has the genesis at one hop.
 
 Two things about how it is done matter more than the fact of it.
 
-**It is an ordinary friend in the user's own vault** — not a rule in the client, not a rule on the server, and not a special case anywhere. The friend list is private; what reaches anyone else is the genesis account's own attestation, which is published like everybody's. It sits in the friend list beside everybody else and it can be removed like anybody else. A trust that cannot be seen or withdrawn is not a default, it is a policy wearing a default's clothes, and avoiding a reputation nobody chose is the entire point of this project.
+**It is an ordinary friend in the user's own vault** — not a rule in the client, not a rule on the server, and not a special case anywhere. The friend list is private; what reaches anyone else is the genesis account's own attestation, which is published like everybody's. It sits in the friend list beside everybody else and it can be removed like anybody else.
 
-**It is seeded once, when the identity is created.** Re-adding it whenever it is missing would mean removing it never took, which is the same thing as not being able to remove it. `public/js/defaults.js` holds the rule, and `spec/defaults_spec.rb` asserts there is exactly one call site.
-
-Removing it is a real choice with real consequences: without the genesis at one hop, nothing it vouches for reaches you, and nobody it has made visible is visible. That is the user's decision to make, which is why they get to make it. Everything here applies to the host account too.
+**It is seeded once, when the identity is created.** `public/js/defaults.js` holds the rule, and `spec/defaults_spec.rb` asserts there is exactly one call site.
 
 ### Its avatar is committed too
 
@@ -54,13 +52,11 @@ The genesis account's avatar sits beside its record as `config/genesis/<environm
 
 Every other image reaches the store by being uploaded. This one cannot: the declaration naming it is committed and read before any client has fetched anything, and the store lives under `data/`, which is not in the repository. So the bytes are committed as well, and the name stays what it is for every other image — the SHA-256 of those bytes — which is what lets a reader confirm the avatar is the one that was signed for.
 
-Adopting it rather than serving it from `config/` keeps one serving path. And the adoption checks: if the committed image does not hash to the name the declaration carries, the server says so, because the alternative is a broken avatar and no other sign that a signed claim was wrong.
-
 ### Development and production
 
 Development and production have different genesis accounts, and different host accounts, and the difference is not cosmetic. What follows is said of the genesis and holds for the host account the same way.
 
-**Development's seed is committed**, so that identity is public: everyone who has cloned the repository can sign as it. That is the point. A fresh clone can post messages and vouch for accounts locally without anybody being handed a secret, and the CLI works out of the box. Nothing of value is protected by it, because a development chain is not one anybody relies on.
+**Development's seed is committed to git**, so that identity is public: everyone who has cloned the repository can sign as it. That is the point. A fresh clone can post messages and vouch for accounts locally without anybody being handed a secret, and the CLI works out of the box. Nothing of value is protected by it, because a development chain is not one anybody relies on.
 
 **Production's seed is never committed.** Whoever holds it is the genesis account. The production genesis seed lives with the developer, never on a server: a server needs only the committed record. A server's production host seed lives on that server.
 
@@ -90,13 +86,9 @@ Each version's text lives in the repository as `docs/project/rules/v<version>.md
 
 Versions below 1 are pre-launch and cost nothing to change, since nothing is published. Version 1 is reserved for the first rules that go live.
 
-### Not built
-
-The code still signs the shapes that came before these rules: a single `ack` hash, `purpose` rather than `type`, a signing key rather than an account ID, and emotes rather than reactions. The genesis record's body is not yet read from the rules file.
-
 ## What gets acknowledged
 
-You acknowledge the most recent records you have seen **whose authors you rate above `chain.min_reputation_to_acknowledge`**. Not the most recent records, full stop. More than one is what lets a record join branches of the history that grew side by side.
+You acknowledge the most recent records you have seen **whose authors you rate above `chain.min_reputation_to_acknowledge`**, and have not yet been acknowledged by such authors.
 
 That threshold is your own, it uses your own attestation and your own config, and so the rule is subjective in exactly the way everything else here is. Two people reading the same history will disagree about which references were legitimate, and there is no view from nowhere that settles it.
 
@@ -140,23 +132,17 @@ The server does not check any of this. It cannot: it never computes a reputation
 
 Most people never set a rating by hand — friending and reacting move it, and the curve runs once, in the author. Advanced users can set it directly.
 
-A trust multiplier exists for the case where a friend is worth reading but has terrible taste in who *else* to vouch for: set them to 0 and their messages stay visible while their recommendations stop carrying anyone in.
+A trust multiplier exists for the case where a friend is worth reading but has terrible judgement in who *else* to vouch for: set them to 0 and their messages stay visible while their recommendations stop carrying anyone in.
 
-**Multipliers compound along the path.** A 0.5 at hop one and a 0.5 at hop two means everything past the second is worth a quarter. A 0 prunes the branch there — the traversal stops rather than carrying a zero through the remaining hops, which is both correct and cheaper. A negative inverts, which is what "I trust this person to be reliably wrong" means, and it compounds like any other factor, so two negatives in a chain do multiply back to positive.
+**Multipliers compound along the path.** A 0.5 at hop one and a 0.5 at hop two means everything past the second is worth a quarter. A 0 prunes the branch there — the traversal stops rather than carrying a zero through the remaining hops, which is both correct and cheaper. A negative inverts, which is what "I trust this person to be reliably wrong" means, and it compounds like any other factor, so two negatives in a chain do multiply back to positive. This functionality exists simply because including it is cheap, and not because it will likely see mainstream use.
 
 The friend and report lists are not in an attestation. They are in the private vault: what the network sees is the rating that resulted, never the act that caused it.
 
 ### The derived cache
 
-`derived` reaches out to `attestation.published_hops` (3 by default), for readers whose walk did not reach that far. Nothing reads it yet; see **The derived cache** in [reputation.md](reputation.md).
+`derived` reaches out to `attestation.published_hops` (3 by default), for readers whose walk did not reach that far. See **The derived cache** in [reputation.md](reputation.md).
 
-It carries trust as well as reputation because somebody at the far end of the walk may be honest while their attestations are not reliable, and a reader who has run out of reach cannot find that out for themselves.
-
-A reader reaching for it has run out of its own reach: it either takes the number or leaves it. Nothing about the parameters it was computed under is published, which would tell everyone how a particular reader scores.
-
-## Releases
-
-Publishing every release to the chain means the operator cannot serve one person different rules from everyone else without it being visible. Each person chooses which releases to follow, and a client can let them choose by account.
+A reader reaching for it has run out of its own reach and uses it to cheaply extending their reach. 
 
 ### Not built: fetching a record by hash
 

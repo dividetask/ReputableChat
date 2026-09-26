@@ -20,6 +20,8 @@ Friending plus a maxed-out curve reaches exactly +1, the most a rating can be.
 
 **A report is not absolute across raters.** At aggregation it is just −1 in the mean, so roughly three friendships at the same depth outvote it. This is deliberate: making reports unoutvoteable would let a single malicious contact you rated +0.001 permanently hide anyone from you, with no way for the rest of your network to overrule them.
 
+**These are the default values and can be overwritten by a user's config file.**
+
 ## The vote curve
 
 ```
@@ -64,7 +66,7 @@ Your rating of someone is a **gate, not a multiplier**. A contact you rated +0.0
 
 ### The derived cache
 
-Attestations may carry `derived`, the author's own calculated reputations. Nothing reads it yet. It is meant for accounts the walk did not reach.
+Attestations may carry `derived`, the author's own calculated reputations. These are used whenever `max_accounts` or `max_hops` is reached and added to the sum as though they were the next hop out. They will use the author's formulas which may differ from the current user's formulas.
 
 ## The three buckets
 
@@ -82,41 +84,19 @@ Because hop 2 tops out at 0.009, just under `trusted_at`, **Trusted means you ra
 
 `show_unrated` lets a user opt into seeing users nobody has rated — necessary for anyone willing to wade through the muck and vouch for newcomers. It surfaces only the unrated, never the net-negative.
 
-That rule exists because of a real bug in an earlier design. When visibility was purely threshold-based, an unrated spammer sat at 0 and was hidden — but the same spammer *reported* from two hops out came to −0.009, which is above any sane hide threshold, so reporting them made them **more** visible. The further away the reporter, the stronger the effect. Sign-based visibility removes the whole class of problem.
+That rule exists for those willing to do the work of wading through the spam to find honest users and give them a chance to join the network. We will also allow other ways to join the network such as having a automated user request email verification and/or captcha completion and give a small rating to those who complete it. Users may choose to set the trust value for the automated user to zero if they find the verification method too prone to abuse.
 
 ## Sessions
 
-Reputations are calculated once at login, everyone is sorted into a bucket, and the numbers are discarded. For the rest of the session the buckets are what matter.
+Reputations are calculated by the client once at login, everyone is sorted into a bucket, and the numbers are discarded. For the rest of the session the buckets are what matter.
 
-The session holds a **snapshot** of the graph, not a live view. Freezing only the walk is not enough: a rating published later by someone already inside it would still leak through. So further likes and dislikes — yours or anyone else's — move nobody until the next login.
+The session holds a **snapshot** of the graph, not a live view. Freezing only the walk is not enough: a rating published later by someone already inside it would still leak through. So further likes and dislikes — yours or anyone else's — move nobody until the next login or recalculation is requested (the later is not yet implemented).
 
-Reports are the exception, since waiting a whole session to act on one defeats the point. `session.report_blocks` maps hops to how many reporters at that distance are needed:
+Reports are the exception, since waiting a whole session to act on one defeats the point. The server, after detecting an influx of reports against a single user, will send an alert to all users indicating this. This report will include the offending user and a list of users reporting them. A second report will be issued if the offender hits a second threshold. The client will need to decide whether to listen to the report depending upon which bucket the reporters fall into. The reason for the second threshold is in case the first report was ignored due to not trusting the initial reporters.
 
-| reporter is | reporters needed |
-|---|---|
-| you | 1 |
-| 1 hop away | 1 |
-| 2 hops away | 2 |
-| 3+ hops | no immediate effect |
+`session.report_blocks` maps hops to how many tolerated or trusted reporters are needed to tentatively block a user. Tentatively blocking a user simply means blocking them for the remainder of the session. It is likely they will remain blocked next session, but until their reputation is recalculated we cannot know for certain whether or not the block will remain.
 
-Because the reputation is gone by then, this is a flat count rather than a weighing. That makes it **stricter than the login-time maths**, so someone blocked this way may reappear at the next login once the report is averaged against everything else. That is expected, not a bug.
-
-`Session#explain` re-derives the reputation and itemises it — which hop, who rated, what each contributed. It is defined in terms of the same `breakdown` that produces the reputation, so what the UI explains cannot drift from what it acts on.
-
-## The coupling — read before retuning anything
-
-The rule "a report from three steps out hides someone you have liked once, but two of your likes outweigh it" is a constraint tying the curve to the ladder:
-
-```
-curve(1)  <  k³  <  curve(2)
-   A      < 0.000729 <  4A
-```
-
-which pins `A` to the window **(0.00025, 0.001)**. At `A = 0.0004` the margins are symmetric: one like lands 0.00054 below the line and two likes 0.00054 above it, each 60% of the report's weight.
-
-This means **`k`, `max_hops`, `A`, `B` and `cap` are no longer independent**. Changing any one of them can silently flip a distant report from hiding someone to not. `spec/reputation_rules_spec.rb` asserts the rule directly and fails the build if a retune breaks it — if that test goes red after a config change, the config change is the thing to reconsider.
-
-`rake curve` prints the current curve, ladder and window.
+`daily.report_blocks.initial` and `daily.report_blocks.secondary` are used by the server to determine whether or not to issue a report warning of poor behavior. Future versions will need additional safeguards to prevent malicious users from repeatedly reporting themselves with new unknown accounts and prematurely trigger the report feature before engaging in malicious behavior.
 
 ## Precision
 
@@ -129,7 +109,5 @@ Scale interacts with `max_hops`. A single like at depth 7 is ~1e-12, so too smal
 Three layers resolve in order: a user's pinned value, the current server default, the hardcoded fallback. A key that is absent or blank in a user's settings tracks the default, so editing `config/reputation.yml` moves every user who never pinned that setting and nobody who did.
 
 An attestation carries **ratings**, not the actions behind them. `friend`, `reported` and `net_votes` stay in the author's vault; what gets published is the rating they came to.
-
-Publishing the actions instead would ask every reader to apply *their own* curve to *somebody else's* counts, which computes a number neither of them holds — there is no answer to whose curve a stranger's `net_votes` should go through. The author runs their own curve once and publishes the rating, so the curve is an authoring parameter rather than a reading one.
 
 The cost is that a published rating goes stale when its author retunes, where an action count never would. The author's next attestation carries the retuned ratings. See **Derived cache** in [glossary.md](glossary.md).
