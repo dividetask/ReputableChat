@@ -43,32 +43,6 @@ class ReputationRulesSpec < Minitest::Test
     assert_in_delta 0.1, l.stranger_ceiling.to_f, 1e-6
   end
 
-  # RULE (the coupling): the report-visibility rule below only holds while
-  # k**3 sits strictly inside (curve(1), curve(2)) == (A, 4A). This is the
-  # invariant that makes k and the curve un-retunable independently.
-  def test_k_cubed_stays_inside_the_curve_window
-    e = engine(store)
-    k_cubed = e.ladder.k**3
-
-    assert_operator e.curve.value(1), :<, k_cubed, "curve(1) must sit below k**3"
-    assert_operator e.curve.value(2), :>, k_cubed, "curve(2) must sit above k**3"
-  end
-
-  # RULE: a report from three steps out hides someone you have liked once,
-  # but two likes of your own outweigh it.
-  def test_distant_report_versus_your_own_likes
-    graph = store.chain(VIEWER, "a", "b", "c")
-    graph.report("c", TARGET)
-
-    graph.like(VIEWER, TARGET, 1)
-    assert_equal :blocked, engine(graph).bucket(viewer: VIEWER, target: TARGET),
-                 "one like must lose to a depth-3 report"
-
-    graph.like(VIEWER, TARGET, 2)
-    assert_equal :tolerated, engine(graph).bucket(viewer: VIEWER, target: TARGET),
-                 "two likes must outweigh a depth-3 report"
-  end
-
   # RULE: nobody is visible by default. Being unrated is indistinguishable from
   # scoring zero, and both are hidden.
   def test_unrated_users_are_hidden

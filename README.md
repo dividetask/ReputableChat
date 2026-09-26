@@ -18,7 +18,7 @@ bundle exec rake spec      # test suite
 bundle exec puma           # http://localhost:9292
 ```
 
-`bundle exec rake curve` prints the current curve, ladder and safety window.
+`bundle exec rake curve` prints the current curve and ladder.
 
 ## Deploying
 

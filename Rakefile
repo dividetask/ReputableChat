@@ -49,10 +49,6 @@ task :curve do
   puts
   puts "votes  value"
   [1, 2, 3, 5, 10, 20, 30, 36].each { |n| puts format("%5d  %s", n, engine.curve.value(n).to_s("F")) }
-  puts
-  k3 = engine.ladder.k**3
-  puts "report-rule window: curve(1)=#{engine.curve.value(1).to_s('F')} < " \
-       "k**3=#{k3.to_s('F')} < curve(2)=#{engine.curve.value(2).to_s('F')}"
 end
 
 desc "Generate the genesis account's record (the developer's) for committing"
