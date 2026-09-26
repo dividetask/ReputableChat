@@ -26,11 +26,11 @@ record, payload, signature, record hash, text, decimal, record type (`type`), ac
 
 ## Off the chain
 
-**Vault** — the owner's encrypted private document: settings, the voted list, the friend order, the seen set, and the private actions every published rating is computed from. Encrypted under a key derived from the seed under `seed.kdf.vault_domain`, then signed over the ciphertext. Not a record on the chain, and not governed by the rules. [identity.md](identity.md)
+**Vault** — the owner's encrypted private document: settings, the voted list, the friend list, the seen list, and the private actions every published rating is computed from. Encrypted under a key derived from the seed under `seed.kdf.vault_domain`, then signed over the ciphertext. Not a record on the chain, and not governed by the rules. [identity.md](identity.md)
 
-**Seen set** — the accounts you have seen a message from that are neither friends nor blocked, held in the vault. It records seniority, which is what decides whose handle shows bare and whose carries a suffix.
+**Seen list** — the accounts you have seen a message from that are neither friends nor blocked, held in the vault. It records seniority, which is what decides whose handle shows bare and whose carries a suffix.
 
-**Friend set** — the accounts added as friends. This is initially sorted by the order they were added but friends will be moved to the end of the list whenever they change their handle.
+**Friend list** — the accounts added as friends. This is initially sorted by the order they were added but friends will be moved to the end of the list whenever they change their handle.
 
 **Sealed** — the vault's ciphertext, as the server sees it. Named apart from "encrypted" because the server never handles a key, only a blob.
 

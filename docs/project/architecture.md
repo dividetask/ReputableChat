@@ -21,9 +21,9 @@ Every record on the chain is defined in [rules/v0.001.md](rules/v0.001.md), with
 
 ## The vault
 
-Inside it: `settings` (a sparse override tree mirroring `config/reputation.yml` — the user layer of the three described under **Configuration layering** in [reputation.md](reputation.md)), `voted` (which messages have already been reacted to, so one vote per message survives moving to another device), `friends` in the order they were added, the `seen` set, and `ratings` — the friending, reporting and voting every published rating was computed from.
+Inside it: `settings` (a sparse override tree mirroring `config/reputation.yml` — the user layer of the three described under **Configuration layering** in [reputation.md](reputation.md)), `voted` (which messages have already been reacted to, so one vote per message survives moving to another device), `friends` in the order they were added, the `seen` list, and `ratings` — the friending, reporting and voting every published rating was computed from.
 
-The friend order is in there because it exists nowhere else: canonical serialization sorts keys, so a ratings map read back from the server is in key order and cannot say who was added first.
+The friend list is in there, in order, because the order exists nowhere else: canonical serialization sorts keys, so a ratings map read back from the server is in key order and cannot say who was added first.
 
 The server holds the vault so it cannot be lost, and **cannot read it**. The key is derived from the same Argon2id output the identity key comes from, run through HKDF under `seed.kdf.vault_domain` — one expensive derivation, two keys. The signature covers the ciphertext, so the server cannot swap one vault for another or alter one it cannot read. The server keeps only the latest copy, and the only limit it can enforce is a byte bound, because it cannot see the shape of what it is holding.
 

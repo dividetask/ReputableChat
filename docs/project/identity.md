@@ -72,18 +72,18 @@ The read route takes **no pubkey** — it uses the session's — so serving some
 Handles are not unique and never will be, so something has to decide which Joe is "Joe" and which is "Joe a4f2c1de". The rule is seniority, in this order:
 
 1. **friends**, in the order of the friend list
-2. **accounts you have seen**, in the order of the seen set
-3. **everybody else**: accounts whose name is on screen before any of their messages has been, such as a name in a reaction. They join the seen set as soon as one of their messages is shown.
+2. **accounts you have seen**, in the order of the seen list
+3. **everybody else**: accounts whose name is on screen before any of their messages has been, such as a name in a reaction. They join the seen list as soon as one of their messages is shown.
 
 Whoever comes first holds the handle bare; everyone else carries a suffix: the first four characters of their account ID, extended up to eight where four do not tell them apart. A handle nobody is competing for is always shown bare, because there is nobody to tell apart.
 
 The ordering is what makes this worth anything. An impersonator arrives *after* the person they are copying, so they are always the one wearing the suffix, and the person being copied never has to do anything to keep their name.
 
-**A rename forfeits seniority, for friends as much as for sightings.** Whenever an account is first seen it is placed on the end of the **seen set** and whenever an account is added as a friend they are put at the bottom of the friend list. Whenever any account, friend or otherwise, changes their name they are moved to the bottom of their respective list. Any account whose reputation dips below 0 is automatically removed from the **seen set**. Both lists are stored in the vault and are not public.
+**A rename forfeits seniority, for friends as much as for sightings.** Whenever an account is first seen it is placed on the end of the **seen list** and whenever an account is added as a friend they are put at the bottom of the friend list. Whenever any account, friend or otherwise, changes their name they are moved to the bottom of their respective list. Any account whose reputation dips below 0 is automatically removed from the **seen list**. Both lists are stored in the vault and are not public.
 
 A [suffix](#handles) appears only where a handle is contested, never beside every name. So a suffix means something when you see one, and the cost is that a stranger with an unfamiliar handle is shown bare — which is exactly when a reader knows least about them.
 
-### The seen set
+### The seen list
 
 The accounts a message has been seen from that are neither friends nor blocked, held in the vault. It is initially ordered by seniority.
 
