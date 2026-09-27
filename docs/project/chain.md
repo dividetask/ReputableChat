@@ -20,7 +20,7 @@ Hashing the stored `payload` **string** rather than a re-serialized object is de
 
 ## Genesis
 
-The genesis account's first identity declaration is the bottom of the chain. Its body is the founding notice — see **The founding notice** below.
+The genesis account's first identity declaration is the bottom of the chain. Its `rules` field holds the founding notice — see **The founding notice** below.
 
 The genesis account is the developer's, and it is the same on every server: there is one network and one chain. Its handle is Tim by default, but the docs say *genesis account* because the handle is only a handle.
 
@@ -78,11 +78,13 @@ When a record is refused because newer rules have been published, the browser si
 
 ### The founding notice
 
-The first rules, `docs/project/rules/v0.001.md`, are the **founding notice**: the body of the genesis record. It is not a record of its own. It sits inside the genesis, so it is at the bottom of the chain with it and every record that reaches the genesis reaches it too. There is one per chain; later versions of the rules are releases, not founding notices.
+The first rules, `docs/project/rules/v0.001.md`, are the **founding notice**: the `rules` field of the genesis record. It is not a record of its own. It sits inside the genesis, so it is at the bottom of the chain with it and every record that reaches the genesis reaches it too. There is one per chain; later versions of the rules are releases, not founding notices.
+
+The rules have a field of their own, carried only by the genesis and by releases, so the genesis record's `body` is free to be the genesis account's bio like anybody else's. A rules document also outgrows `body`'s 16,000 bytes long before it outgrows its own limit.
 
 ### The rules file is the source
 
-Each version's text lives in the repository as `docs/project/rules/v<version>.md`, the founding notice included. The generator is to read the body straight from that file rather than from a copy, so the file and the chain cannot disagree. A new version is a new file; an existing one is never edited once published, because its bytes are signed into the chain.
+Each version's text lives in the repository as `docs/project/rules/v<version>.md`, the founding notice included. The generator is to read the `rules` field straight from that file rather than from a copy, so the file and the chain cannot disagree. A new version is a new file; an existing one is never edited once published, because its bytes are signed into the chain.
 
 Versions below 1 are pre-launch and cost nothing to change, since nothing is published. Version 1 is reserved for the first rules that go live.
 

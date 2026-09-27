@@ -6,7 +6,7 @@ One name per thing. **Retired terms** at the bottom is the single list of words 
 
 These are defined in [rules/v0.001.md](rules/v0.001.md), and only there, so that no second definition can drift from it:
 
-record, payload, signature, record hash, text, decimal, record type (`type`), account ID (`id`), working key (`pubkey`), master public key (`mpubkey`), current keys, `ack`, `body`, record timestamp (`ts`), `target`, `note`, identity declaration, avatar, bio, handle, attestation, scores, derived, message, reaction, notice, key change, master key change, release, rules version, guideline.
+record, payload, signature, record hash, text, decimal, record type (`type`), app, account ID (`id`), working key (`pubkey`), master public key (`mpubkey`), current keys, `ack`, `body`, record timestamp (`ts`), `target`, title (`title`), `file`, `url`, language (`lang`), `rules`, identity declaration, avatar, bio, handle, attestation, scores, derived, message, reaction, notice, key change, master key change, release, rules version, guideline.
 
 ## The chain
 
@@ -16,7 +16,7 @@ record, payload, signature, record hash, text, decimal, record type (`type`), ac
 
 **Host account** — a server's own account, optional. Its first identity declaration acknowledges the genesis, so it hangs off the one chain. Committed beside the genesis under `config/host/`. Where a server has one, a new account starts with it as a second friend. By convention it signs what concerns one server, such as an outage notice, as well as provides initial trust through a verification method for new users. Nothing enforces either convention. [chain.md](chain.md)
 
-**Founding notice** — the first rules, `docs/project/rules/v0.001.md`, as the body of the genesis record. Not a record of its own. There is one per chain. [chain.md](chain.md)
+**Founding notice** — the first rules, `docs/project/rules/v0.001.md`, as the `rules` field of the genesis record. Not a record of its own. There is one per chain. [chain.md](chain.md)
 
 **Rules** — the documents in `docs/project/rules/`, one file per version, never edited once published.
 
@@ -84,9 +84,12 @@ Do not reintroduce these; they each have a current name above.
 | public key (as the key that is not the master key) | working key |
 | `reply_to`, an emote's `message` | `target` |
 | `icon`, `avatar` (as a field) | `file`, which on an identity declaration is the avatar |
-| `bio` (as a field) | `note` |
+| `bio` (as a field) | `body`, which on an identity declaration is the bio |
 | `master_pubkey` | `mpubkey` |
 | `note` (as free text up to 16,000 bytes) | `body` |
+| `note` (as a short field of up to 280 bytes) | `title` |
+| `handle` (as a field) | `title`, which on an identity declaration is the handle |
+| the genesis body (as the rules) | `rules` |
 | `supersedes`, `seq`, `prev`, `room`, `previous_pubkey`, `derived.hops`, `derived.params` | (removed; no replacement) |
 | parameter fingerprint | (removed; nothing published says what parameters it was computed under) |
 | Tim (as the general term) | genesis account |
