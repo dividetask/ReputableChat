@@ -6,7 +6,7 @@ One name per thing. **Retired terms** at the bottom is the single list of words 
 
 These are defined in [rules/v0.001.md](rules/v0.001.md), and only there, so that no second definition can drift from it:
 
-record, payload, signature, record hash, text, decimal, record type (`type`), app, account ID (`id`), working key (`pubkey`), master public key (`mpubkey`), current keys, `ack`, `body`, record timestamp (`ts`), `target`, title (`title`), `file`, `url`, language (`lang`), `rules`, identity declaration, avatar, bio, handle, attestation, scores, derived, message, reaction, notice, key change, master key change, release, rules version, guideline.
+record, payload, signature, record hash, text, decimal, record type (`type`), account ID (`id`), working key (`pubkey`), master public key (`mpubkey`), current keys, `ack`, `body`, record timestamp (`ts`), `target`, title (`title`), `file`, `url`, language (`lang`), `rules`, identity declaration, avatar, bio, handle, attestation, scores, derived, message, reaction, notice, key change, master key change, release, rules version, guideline.
 
 ## The chain
 
@@ -17,6 +17,8 @@ record, payload, signature, record hash, text, decimal, record type (`type`), ap
 **Host account** — a server's own account, optional. Its first identity declaration acknowledges the genesis, so it hangs off the one chain. Committed beside the genesis under `config/host/`. Where a server has one, a new account starts with it as a second friend. By convention it signs what concerns one server, such as an outage notice, as well as provides initial trust through a verification method for new users. Nothing enforces either convention. [chain.md](chain.md)
 
 **Founding notice** — the first rules, `docs/project/rules/v0.001.md`, as the `rules` field of the genesis record. Not a record of its own. There is one per chain. [chain.md](chain.md)
+
+**App** — a program that shows some of the chain's records to people, such as the chat or the forum, named by a further part of a record's type after the rules version: `reputablechat:message:v0.001:forum`. The chain ignores that part; each app has its own document in `docs/project/apps/` saying what it means. The rules acknowledge apps but do not define them.
 
 **Rules** — the documents in `docs/project/rules/`, one file per version, never edited once published.
 

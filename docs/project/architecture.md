@@ -72,6 +72,7 @@ config/emotes.yml         which reactions count positive, negative, neutral
 config/bip39-english.txt  wordlist; one source of truth, served at /wordlist.txt
 
 docs/project/rules/       the rules, one file per version, and signed examples
+docs/project/apps/        one document per app: what it shows, and what it does with the rest
 
 lib/reputable_chat/
   app.rb                  Roda routes, CSP, sessions
