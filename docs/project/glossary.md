@@ -6,7 +6,7 @@ One name per thing. **Retired terms** at the bottom is the single list of words 
 
 These are defined in [rules/v0.001.md](rules/v0.001.md), and only there, so that no second definition can drift from it:
 
-record, payload, signature, record hash, text, decimal, record type (`type`), account ID (`id`), working key (`pubkey`), master public key (`mpubkey`), current keys, `ack`, `body`, record timestamp (`ts`), `target`, `endorse`, `transfer`, title (`title`), `file`, `url`, language (`lang`), `rules`, validity, identity declaration, avatar, bio, handle, `adjudicators`, attestation, scores, derived, message, reaction, notice, concurrent, conflict, compromised, compromising record, key change, master key change, quorum, release, currency, issuer, output, issuing, double spend, rules version, guideline.
+record, payload, signature, record hash, text, decimal, record type (`type`), account ID (`id`), working key (`pubkey`), master public key (`mpubkey`), current keys, `ack`, `body`, record timestamp (`ts`), `target`, `endorse`, `transfer`, title (`title`), `file`, `url`, language (`lang`), `rules`, validity, identity declaration, avatar, bio, handle, `adjudicators`, attestation, scores, derived, message, reaction, notice, concurrent, conflict, disputed, disputing record, compromised (the notice), key change, master key change, quorum, release, currency, becoming a currency, issuer, output, issuing, double spend, rules version, guideline.
 
 ## The chain
 
@@ -97,5 +97,6 @@ Do not reintroduce these; they each have a current name above.
 | Tim (as the general term) | genesis account |
 | server's Tim, server account | host account |
 | score | rating (given) or reputation (calculated) |
+| compromised (as the state of an account), compromising record | disputed, disputing record; `compromised` remains the notice saying a key was stolen |
 
 And one word to avoid rather than replace: **troll** is not a category this system has an opinion about. Someone unbearable to one reader is worth reading to another, and the design holds that disagreement open rather than resolving it. Where the docs need to name what is actually excluded, the term is **unvouched-for**.
