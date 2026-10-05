@@ -8,6 +8,11 @@
   calls or implementation until the user has replied.
 - Ask often, especially where something is ambiguous or where the user may have
   made a mistake.
+- **Never reuse labels within one response.** The user replies by label, so
+  every numbered or lettered item in a response must be unique across it. Use
+  letters for one list and numbers for another, or continue the numbering
+  (questions start after the last numbered point), so "(3)" can only mean one
+  thing.
 
 ## Do not loop on errors
 
