@@ -36,7 +36,7 @@ Handing tokens to every account invites people to make accounts to collect them.
 
 ## Double spends
 
-An output can be spent once in any one history. Two records from one account spending the same output, neither acknowledging the other, is a double spend. It makes the spender's account disputed, and neither spend takes effect until the currency's issuer endorses one. A server accepting a payment is usually the issuer itself, so it knows at once which spend it has chosen.
+An output can be spent once in any one history. Two records from one account spending the same output, neither acknowledging the other, is a double spend. It makes the spender's account disputed, and both spends are disputed until the currency's issuer endorses one; the other is then void. A server accepting a payment is usually the issuer itself, so it knows at once which spend it has chosen.
 
 The spender's account stays disputed until its adjudicators post a quorum. Its keys are not assumed stolen: the quorum lets it carry on with the keys it had. Deciding which spend stands is the issuer's, because the spender's own adjudicators are the spender's choice; deciding whether the account carries on is the adjudicators', as it is for any disputed account. That holds when the issuer double spends too: its own adjudicators settle its dispute, and once they have, the issuer chooses which of its spends stands.
 
