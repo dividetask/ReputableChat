@@ -144,7 +144,7 @@ for (const r of recs) {
 
 // --- attestations -------------------------------------------------------------
 
-const SCORE_LIMIT = 16_777_216;
+const SCORE_LIMIT = 1_048_576;
 for (const r of recs) {
   if (!r.p.scores && !r.p.derived) continue;
   const size = ["scores", "derived"].filter((k) => r.p[k])
