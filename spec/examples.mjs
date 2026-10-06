@@ -142,6 +142,24 @@ for (const r of recs) {
     contests.push(`${short(r.hash)} ${names[r.signer]}`);
 }
 
+// --- attestations -------------------------------------------------------------
+
+const SCORE_LIMIT = 1_048_576;
+for (const r of recs) {
+  if (!r.p.scores && !r.p.derived) continue;
+  const size = ["scores", "derived"].filter((k) => r.p[k])
+    .reduce((n, k) => n + Buffer.byteLength(canonical(r.p[k]), "utf8"), 0);
+  if (size > SCORE_LIMIT) say(`${short(r.hash)} has ${size} bytes of scores and derived`);
+  for (const field of ["scores", "derived"]) for (const [id, score] of Object.entries(r.p[field] ?? {})) {
+    if (!/^[0-9a-f]{64}$/.test(id)) say(`${short(r.hash)} ${field} is keyed by ${id}, not an account ID`);
+    for (const name of ["reputation", "trust"]) {
+      const value = score[name];
+      if (value === undefined) continue;
+      if (Math.abs(Number(value)) > 1) say(`${short(r.hash)} ${field} has a ${name} of ${value}`);
+    }
+  }
+}
+
 // --- heartbeats ---------------------------------------------------------------
 
 const HEARTBEAT_EXTRA = new Set(["type", "id", "pubkey", "mpubkey", "ack", "body", "ts", "endorse"]);
