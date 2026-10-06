@@ -102,6 +102,12 @@ inventing a word for something that already has one.
 - **Published score text.** `reputation/decimals.rb` and `toDecimal` in
   `public/js/reputation.js` must spell the same number the same way, not merely
   parse each other's. `spec/decimal_parity_spec.rb` guards it.
+- **The login origin.** The browser signs `window.location.origin` into every
+  login. With no `origin` configured -- the default -- the server compares it
+  with the address the request arrived at (`lib/reputable_chat/origin.rb`), so
+  a reverse proxy that drops `Host` or `X-Forwarded-Proto` fails every login.
+  The error names both addresses; keep it that way, since "signature did not
+  verify" alone sends people looking at their seed.
 - **The rules and their examples.** `docs/project/rules/v0.001.md` is the rules
   in prose and `docs/project/rules/v0.001-examples.md` is the same rules in
   bytes. Change a rule and the examples go stale in silence: every signature

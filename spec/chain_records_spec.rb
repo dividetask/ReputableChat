@@ -24,7 +24,7 @@ class ChainRecordsSpec < Minitest::Test
   def setup
     ReputableChat::App.store   = ReputableChat::Store::Database.new("sqlite:/")
     ReputableChat::App.images  = ReputableChat::Store::Images.new(Dir.mktmpdir)
-    ReputableChat::App.origin  = ORIGIN
+    ReputableChat::App.origins  = [ORIGIN]
     ReputableChat::App.genesis = GenesisFixture.build
     @signing = Ed25519::SigningKey.generate
     @pubkey  = Sig.encode(@signing.verify_key.to_bytes)

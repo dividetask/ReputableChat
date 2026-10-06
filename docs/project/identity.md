@@ -122,6 +122,12 @@ Challenge–response:
 
 The nonce is claimed **after** signature verification, so a failed signature does not burn the challenge.
 
+The origin a server checks against is the list in `origin` / `ORIGIN` when an operator has set one, and otherwise the address the request arrived at (`lib/reputable_chat/origin.rb`), believing a reverse proxy's `X-Forwarded-Proto` and `X-Forwarded-Host`. Unset is the default, so one codebase runs at any domain or IP with no configuration. What that gives up:
+
+- **Replay of a harvested login:** nothing. The nonce is issued by this server and spent once, so a signature collected elsewhere carries a nonce this server never issued.
+- **A malicious server, in a browser:** nothing. It serves its own page and reads the seed as it is typed, whatever the server checks.
+- **A malicious server, from `script/tim.rb`:** this is the one case. It can pass this server's nonce to the client and relay the signature here, choosing the `Host` it presents. Listing the origins closes it.
+
 Logging in is not a record and never reaches the chain, so the rules do not govern it.
 
 ## Handles

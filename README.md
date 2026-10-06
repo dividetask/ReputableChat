@@ -22,11 +22,11 @@ bundle exec puma           # http://localhost:9292
 
 ## Deploying
 
-Server settings live in `config/server.yml`, which documents itself: paths, the public origin, and the size limits an operator gets to choose. Every key can be overridden by the matching environment variable for deployments that inject configuration rather than edit files.
+Server settings live in `config/server.yml`, which documents itself: paths, the optional public origin, and the size limits an operator gets to choose. Every key can be overridden by the matching environment variable for deployments that inject configuration rather than edit files.
 
 Two things that bite:
 
-- **`origin` must match the URL browsers actually reach you at.** It travels inside the signed login payload, so a mismatch rejects every login as a bad signature.
+- **Behind a reverse proxy, pass the browser's address through.** No domain or IP needs configuring: the server signs logins in at whatever address it was reached at. Behind a proxy that means the proxy must forward `Host` and `X-Forwarded-Proto` -- Caddy does by default; nginx needs `proxy_set_header Host $host;` and `proxy_set_header X-Forwarded-Proto $scheme;`. Otherwise every login fails, and the error names both addresses. Setting `origin` (or `ORIGIN`) pins the accepted addresses instead, which also stops a malicious server relaying a `tim.rb` login.
 - **`SESSION_SECRET` is environment-only**, because `config/server.yml` is in the repository. Without it a random secret is generated at boot, which is fine locally and signs everyone out on every restart.
 
 The genesis account has to exist before the server will start. `bundle exec rake genesis` makes one; every client needs the same hash before it has fetched anything, so it is committed rather than downloaded.
