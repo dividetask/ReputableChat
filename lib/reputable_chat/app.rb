@@ -6,6 +6,7 @@ require "yaml"
 require "securerandom"
 require_relative "params"
 require_relative "server_config"
+require_relative "origin"
 require_relative "cryptography/signature"
 require_relative "cryptography/canonical"
 require_relative "cryptography/payload"
@@ -72,17 +73,21 @@ module ReputableChat
 
     class << self
       # `host` is nil when this server runs without a host account.
-      attr_accessor :store, :images, :origin, :genesis, :host
-      attr_writer :limits
+      attr_accessor :store, :images, :genesis, :host
+      attr_writer :limits, :origins
 
       # Defaulted rather than required, so a test or a script can build the app
       # without assembling a config first.
       def limits = @limits || ServerConfig::LIMITS
+
+      # The origins a login may be signed for. Empty means whichever origin the
+      # request arrived at -- see Origin.
+      def origins = @origins || []
     end
 
     def store = self.class.store
     def images = self.class.images
-    def origin = self.class.origin
+    def origins = self.class.origins
     def genesis = self.class.genesis
     def host = self.class.host
     def limits = self.class.limits
@@ -174,8 +179,10 @@ module ReputableChat
     # --- handlers ---------------------------------------------------------
 
     # Challenge-response. The signed payload covers the nonce, the pubkey, the
-    # origin and a timestamp: without origin and purpose in there, a signature
-    # harvested by one server could be replayed against another.
+    # origin and a timestamp. The nonce is what stops a signature harvested by
+    # one server being replayed against another; the origin also stops a live
+    # relay, but only when the operator has listed the server's origins (see
+    # Origin for why that is optional).
     def open_session(r)
       pubkey    = Params.pubkey(r.params["pubkey"])      or bad_request(r, "bad pubkey")
       signature = Params.signature(r.params["signature"]) or bad_request(r, "bad signature")
@@ -185,11 +192,11 @@ module ReputableChat
       fresh = (Time.now.to_i - issued_at).abs <= Store::Database::CLOCK_SKEW
       bad_request(r, "stale timestamp") unless fresh
 
-      payload = Cryptography::Payload.login(pubkey: pubkey, nonce: nonce, origin: origin, issued_at: issued_at)
-
-      unless Cryptography::Signature.verify(pubkey_b64: pubkey, signature_b64: signature, payload: payload)
-        r.halt(401, { "error" => "signature did not verify" })
+      verified = login_origins(r).any? do |origin|
+        payload = Cryptography::Payload.login(pubkey: pubkey, nonce: nonce, origin: origin, issued_at: issued_at)
+        Cryptography::Signature.verify(pubkey_b64: pubkey, signature_b64: signature, payload: payload)
       end
+      r.halt(401, { "error" => login_failure(r) }) unless verified
 
       # Claimed last, so a failed signature does not burn the challenge.
       r.halt(401, { "error" => "challenge expired or already used" }) unless store.claim_nonce(nonce)
@@ -485,6 +492,31 @@ module ReputableChat
       return if Cryptography::Signature.verify(pubkey_b64: pubkey, signature_b64: signature, payload: payload)
 
       r.halt(400, { "error" => "signature did not verify" })
+    end
+
+    # Configured origins when there are any; otherwise the one this request
+    # arrived at, so a server needs no configuration to run at a new address.
+    def login_origins(r)
+      return origins unless origins.empty?
+
+      [Origin.from_request(r)].compact
+    end
+
+    # A signature for the wrong origin is indistinguishable from a bad one, but
+    # the browser's Origin header usually says which it was. It only chooses
+    # the wording of the error; nothing is accepted because of it.
+    def login_failure(r)
+      browser = Origin.normalize(r.get_header("HTTP_ORIGIN"))
+      expected = login_origins(r)
+      return "signature did not verify" if browser.nil? || expected.include?(browser)
+
+      fix = if origins.empty?
+              "If a reverse proxy is in front, it must pass Host and X-Forwarded-Proto."
+            else
+              "Use that address, or add this one to ORIGIN on the server."
+            end
+      "signature did not verify: this server signs in at #{expected.join(' or ')}, " \
+        "but this page is at #{browser}. #{fix}"
     end
 
     def current_pubkey(r)

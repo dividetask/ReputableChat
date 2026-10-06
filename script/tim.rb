@@ -46,6 +46,7 @@ module Tim
   Crypto   = ReputableChat::Cryptography
   Payload  = Crypto::Payload
   MAX_BODY = 4_000
+  DEFAULT_URL = "http://localhost:9292"
 
   class Failed < StandardError; end
 
@@ -53,8 +54,8 @@ module Tim
 
   # Challenge-response, the same three steps the browser takes: ask for a
   # nonce, sign {purpose, pubkey, nonce, origin, ts}, present it. `origin` is
-  # inside the signature, so it has to be the origin the server is configured
-  # with rather than the URL we happened to dial.
+  # inside the signature, so it has to be one the server accepts: the address
+  # we dial, unless --origin says otherwise.
   class Client
     attr_reader :pubkey, :vault_key
 
@@ -438,8 +439,8 @@ module Tim
 
   def parse(argv)
     settings = ReputableChat::ServerConfig.load
-    options = { command: nil, args: [], origin: settings.fetch("origin"),
-                url: nil, seed_path: nil, note: nil, account: :genesis }
+    options = { command: nil, args: [], origin: nil, url: nil,
+                seed_path: nil, note: nil, account: :genesis }
 
     until argv.empty?
       flag = argv.shift
@@ -455,9 +456,12 @@ module Tim
     end
 
     # The URL is where we dial; the origin is what goes inside the signature.
-    # They differ when the server is reached over a tunnel or on localhost
-    # while configured with its public name.
-    options[:url] ||= options[:origin]
+    # By default they are the same address, which is what a server with no
+    # origin configured expects. They differ when the server is reached over a
+    # tunnel or on localhost while configured with its public name.
+    options[:url] ||= options[:origin] || settings.fetch("origin").first || DEFAULT_URL
+    options[:origin] = ReputableChat::Origin.normalize(options[:origin] || options[:url]) or
+      abort "  not an http(s) address: #{(options[:origin] || options[:url]).inspect}"
     options[:seed_path] ||= ReputableChat::Operator.seed_path(account: options[:account])
     options
   end
@@ -478,8 +482,9 @@ module Tim
                             genesis account
         --note TEXT         free text signed into the record for anyone reading
                             the raw chain; the software never reads it
-        --url URL           where to reach the server (default: the origin)
-        --origin ORIGIN     the origin inside the signature (default: config/server.yml)
+        --url URL           where to reach the server (default: --origin, else the
+                            first origin in config/server.yml, else #{DEFAULT_URL})
+        --origin ORIGIN     the origin inside the signature (default: the URL)
         --seed FILE         seed file (default: config/genesis/<env>.seed,
                             or config/host/<env>.seed with --host)
 

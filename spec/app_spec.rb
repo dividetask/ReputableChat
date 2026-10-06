@@ -23,7 +23,7 @@ class AppSpec < Minitest::Test
   def setup
     ReputableChat::App.store  = ReputableChat::Store::Database.new("sqlite:/")
     ReputableChat::App.images = ReputableChat::Store::Images.new(Dir.mktmpdir)
-    ReputableChat::App.origin = ORIGIN
+    ReputableChat::App.origins = [ORIGIN]
     ReputableChat::App.genesis = GenesisFixture.build
     @signing = Ed25519::SigningKey.generate
     @pubkey  = Sig.encode(@signing.verify_key.to_bytes)
@@ -81,8 +81,9 @@ class AppSpec < Minitest::Test
     assert_equal 401, last_response.status
   end
 
-  # A signature made for another origin must not authenticate here. This is
-  # what stops one server replaying a harvested login against another.
+  # RULE: with origins configured, a signature made for another origin must
+  # not authenticate here. That is what stops a malicious server relaying a
+  # live login to this one.
   def test_rejects_a_signature_bound_to_another_origin
     nonce = challenge
     ts = Time.now.to_i
@@ -92,6 +93,70 @@ class AppSpec < Minitest::Test
               { "pubkey" => @pubkey, "nonce" => nonce, "ts" => ts, "signature" => sign(elsewhere) }
 
     assert_equal 401, last_response.status
+  end
+
+  # RULE: an operator can list more than one origin, and a login signed for
+  # any of them is accepted.
+  def test_accepts_any_configured_origin
+    ReputableChat::App.origins = [ORIGIN, "https://chat.example.test"]
+
+    assert_equal 200, log_in_as("https://chat.example.test").status
+  end
+
+  # RULE: a mismatch says which origin the server expected and which the page
+  # is at, rather than only that the signature failed.
+  def test_a_wrong_origin_names_both_origins
+    log_in_as("http://192.168.1.10:9292", headers: { "HTTP_ORIGIN" => "http://192.168.1.10:9292" })
+
+    assert_equal 401, last_response.status
+    assert_includes json["error"], ORIGIN
+    assert_includes json["error"], "http://192.168.1.10:9292"
+  end
+
+  # --- login with no origin configured ----------------------------------
+
+  # RULE: a server with no origin configured accepts a login signed for the
+  # address it was reached at, so it runs at any domain or IP unconfigured.
+  def test_unconfigured_server_takes_its_origin_from_the_request
+    ReputableChat::App.origins = []
+
+    assert_equal 200, log_in_as("http://192.168.1.10:9292", headers: { "HTTP_HOST" => "192.168.1.10:9292" }).status
+  end
+
+  def test_unconfigured_server_still_rejects_another_origin
+    ReputableChat::App.origins = []
+
+    log_in_as("http://elsewhere.test", headers: { "HTTP_HOST" => "chat.example.test" })
+
+    assert_equal 401, last_response.status
+  end
+
+  # RULE: behind a reverse proxy the app sees the proxy's connection, so the
+  # origin is rebuilt from X-Forwarded-Proto and X-Forwarded-Host, taking the
+  # first of a list -- the one the outermost proxy, facing the browser, saw.
+  def test_unconfigured_server_believes_the_reverse_proxy
+    ReputableChat::App.origins = []
+    behind_nginx = { "HTTP_HOST" => "127.0.0.1:9292", "HTTP_X_FORWARDED_PROTO" => "https, http",
+                     "HTTP_X_FORWARDED_HOST" => "chat.example.test" }
+
+    assert_equal 200, log_in_as("https://chat.example.test", headers: behind_nginx).status
+  end
+
+  def test_unconfigured_server_with_a_proxy_passing_only_host_and_scheme
+    ReputableChat::App.origins = []
+    behind_nginx = { "HTTP_HOST" => "chat.example.test", "HTTP_X_FORWARDED_PROTO" => "https" }
+
+    assert_equal 200, log_in_as("https://chat.example.test", headers: behind_nginx).status
+  end
+
+  def log_in_as(origin, headers: {})
+    nonce = challenge
+    ts = Time.now.to_i
+    payload = Payload.login(pubkey: @pubkey, nonce: nonce, origin: origin, issued_at: ts)
+    post "/api/session",
+         JSON.generate({ "pubkey" => @pubkey, "nonce" => nonce, "ts" => ts, "signature" => sign(payload) }),
+         { "CONTENT_TYPE" => "application/json" }.merge(headers)
+    last_response
   end
 
   def test_a_challenge_cannot_be_replayed
@@ -421,7 +486,7 @@ class FrozenAppSpec < Minitest::Test
   FROZEN = Class.new(ReputableChat::App) do
     self.store  = ReputableChat::Store::Database.new("sqlite:/")
     self.images = ReputableChat::Store::Images.new(Dir.mktmpdir)
-    self.origin = "http://example.test"
+    self.origins = ["http://example.test"]
   end.freeze
 
   def app = FROZEN.app

@@ -134,7 +134,9 @@ class BrowserSpec < Minitest::Test
     @server = spawn(
       { "RACK_ENV" => "development",
         "SESSION_SECRET" => SecureRandom.hex(64),
-        "ORIGIN" => "http://127.0.0.1:#{@port}",
+        # Unset rather than configured: the server takes its origin from the
+        # request, which is how a server with no configuration runs.
+        "ORIGIN" => nil,
         "DATABASE_URL" => "sqlite://#{@dir}/browser.db",
         "IMAGE_ROOT" => "#{@dir}/images" },
       "bundle", "exec", "puma", "-p", @port.to_s, "-q",

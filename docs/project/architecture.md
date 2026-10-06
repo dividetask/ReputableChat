@@ -66,7 +66,7 @@ The browser signs bytes and the server verifies bytes, so both must produce the 
 ```
 config/genesis/<env>.json the genesis identity declaration; the chain hangs off its hash
 config/host/<env>.json    this server's host account, acknowledging the genesis (optional)
-config/server.yml         origin, database and image paths, size limits (env overrides)
+config/server.yml         optional origin, database and image paths, size limits (env overrides)
 config/reputation.yml     tunable reputation parameters (the defaults layer)
 config/emotes.yml         which reactions count positive, negative, neutral
 config/bip39-english.txt  wordlist; one source of truth, served at /wordlist.txt
@@ -77,6 +77,7 @@ docs/project/apps/        one document per app: what it shows, and what it does 
 lib/reputable_chat/
   app.rb                  Roda routes, CSP, sessions
   server_config.rb        config/server.yml, with env winning
+  origin.rb               the origin a login is signed for: configured, or from the request
   config.rb               three-layer config resolution
   params.rb               input validation
   committed_declaration.rb  what the genesis and host records share: loading, checks, icon
