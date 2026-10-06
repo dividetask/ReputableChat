@@ -102,6 +102,22 @@ inventing a word for something that already has one.
 - **Published score text.** `reputation/decimals.rb` and `toDecimal` in
   `public/js/reputation.js` must spell the same number the same way, not merely
   parse each other's. `spec/decimal_parity_spec.rb` guards it.
+- **The rules and their examples.** `docs/project/rules/v0.001.md` is the rules
+  in prose and `docs/project/rules/v0.001-examples.md` is the same rules in
+  bytes. Change a rule and the examples go stale in silence: every signature
+  still verifies, so nothing looks wrong. `spec/examples_spec.rb` drives
+  `spec/examples.mjs`, which re-derives each key from the formula the file
+  states, verifies every record, and checks each against the rules it is an
+  example of. `spec/fixtures/examples_broken.md` holds three correctly signed
+  records that each break a rule, because a checker that has quietly stopped
+  looking passes everything.
+- **One home per rule.** A rule written in two places gets edited in one of
+  them, and the two copies then disagree about which records are valid. That
+  happened three times in one afternoon of editing, each time as a paraphrase
+  rather than a copy, which is why none of them read as duplication.
+  `spec/rules_text_spec.rb` holds the table of where each rule lives and fails
+  when one is stated outside its section. Before editing a rule, grep for its
+  distinctive words; when adding one, add it to that table.
 - **The seed derivation domain.** Changing `seed.kdf.domain` in
   `config/reputation.yml` changes every derived key, which strands every
   existing account. It is versioned (`:v1`) so a future change can be handled
