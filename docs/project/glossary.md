@@ -6,7 +6,7 @@ One name per thing. **Retired terms** at the bottom is the single list of words 
 
 These are defined in [rules/v0.001.md](rules/v0.001.md), and only there, so that no second definition can drift from it:
 
-record, payload, signature, record hash, text, decimal, signing key, encryption key, record type (`type`), account ID (`id`), working key (`pubkey`), master public key (`mpubkey`), encryption key (`epubkey`), current keys, `ack`, `body`, record timestamp (`ts`), `target`, `endorse`, `transfer`, title (`title`), `file`, `url`, language (`lang`), `rules`, validity, identity declaration, avatar, bio, handle, `adjudicators`, attestation, scores, derived, message, reaction, notice, concurrent, conflict, disputed, compromised (the notice), invalid, tentative, confirmed, void, key change, master key change, quorum, release, heartbeat, `within`, `waiting`, orphaned, split, currency, becoming a currency, issuer, output, issuing, double spend, rules version, guideline.
+record, payload, signature, record hash, text, decimal, signing key, encryption key, record type (`type`), account ID (`id`), working key (`pubkey`), master public key (`mpubkey`), encryption key (`epubkey`), current keys, `ack`, `body`, record timestamp (`ts`), `target`, `endorse`, `transfer`, title (`title`), `file`, `url`, language (`lang`), `rules`, validity, identity declaration, avatar, bio, handle, `adjudicators`, attestation, scores, derived, message, reaction, notice, concurrent, conflict, disputed, compromised (the notice), invalid, tentative, confirmed, void, key change, master key change, quorum, release, heartbeat, orphaned, split, currency, becoming a currency, issuer, output, issuing, double spend, rules version, guideline.
 
 ## The chain
 
@@ -100,6 +100,7 @@ Do not reintroduce these; they each have a current name above.
 | compromised (as the state of an account) | disputed; `compromised` remains the notice saying a key was stolen |
 | compromising record, disputing record | (removed; nothing needs it) |
 | stale (of a record), left behind | orphaned |
+| `within`, `waiting` (heartbeat fields) | (removed; a guideline sets the pace) |
 | following (of a heartbeat publisher) | (removed; orphaned records do its work) |
 | takes no effect | void, or disputed while a decision is waited on |
 
