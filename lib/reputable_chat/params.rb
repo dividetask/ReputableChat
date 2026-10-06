@@ -94,7 +94,10 @@ module ReputableChat
     # canonical serialization refuses floats outright, because they have no
     # single textual form across languages, and the Blocked line is
     # `effective > 0`, which binary floating point cannot be trusted to land on.
-    DECIMAL = /\A-?(0|[1-9]\d{0,6})(\.\d{1,18})?\z/
+    # One spelling per number, as the rules require: a whole part ("0.5", not
+    # ".5"), no trailing zero in the fraction ("0.5", not "0.50"), and zero
+    # unsigned ("0", not "-0").
+    DECIMAL = /\A(?!-0\z)-?(0|[1-9]\d{0,6})(\.\d{0,17}[1-9])?\z/
 
     def decimal(value, min: -1, max: 1)
       return nil unless value.is_a?(String) && value.match?(DECIMAL)

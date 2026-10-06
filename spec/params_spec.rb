@@ -16,6 +16,23 @@ class ParamsSpec < Minitest::Test
     assert_nil P.pubkey(["a" * 43])
   end
 
+  def test_a_decimal_below_one_is_written_with_its_leading_zero
+    assert_equal "0.5", P.decimal("0.5")
+    assert_equal "-0.5", P.decimal("-0.5")
+    assert_nil P.decimal(".5")
+    assert_nil P.decimal("-.5")
+  end
+
+  def test_a_decimal_has_exactly_one_spelling
+    assert_equal "0.5", P.decimal("0.5")
+    assert_equal "0", P.decimal("0")
+    assert_equal "-0.05", P.decimal("-0.05")
+    assert_nil P.decimal("0.50")
+    assert_nil P.decimal("1.0")
+    assert_nil P.decimal("-0")
+    assert_nil P.decimal("00.5")
+  end
+
   def test_strips_and_bounds_strings
     assert_equal "hello", P.string("  hello  ", max: 10)
     assert_nil P.string("", max: 10)

@@ -18,7 +18,7 @@ The issuer's handle is the currency's name, its avatar the currency's picture, a
 
 A server can refuse to store records its own users submit unless they pay, in the same record, with a `transfer` to the issuer. A message paying a fee is one record, not two. What a record costs is the server's choice.
 
-What comes back is the issuer's to reuse. Most issuers are expected to hand returned tokens out again rather than destroy them, so a currency can run for years without issuing more than it started with. Destroying is there for an issuer that wants it, as an output with no `to`.
+What comes back is the issuer's to reuse. Most issuers are expected to hand returned tokens out again rather than destroy them, so a currency can run for years without issuing more than it started with. Destroying is there for anyone who wants it, as a transfer with no `out`.
 
 This is a limit on what a server spends, not a defence of the network. A record does not say which server it came in through, and servers are expected to store records that arrive from other servers whether or not they paid anybody, or at least their record hashes, so that walking the chain still works. Someone unwilling to pay can post through a cheaper server. Keeping unvouched-for accounts out is still reputation's job.
 
@@ -36,9 +36,9 @@ Handing tokens to every account invites people to make accounts to collect them.
 
 ## Double spends
 
-An output can be spent once in any one history. Two records from one account spending the same output, neither acknowledging the other, is a double spend. It makes the spender's account disputed, and neither spend takes effect until the currency's issuer endorses one. A server accepting a payment is usually the issuer itself, so it knows at once which spend it has chosen.
+An output can be spent once in any one history. Two records from one account spending the same output, neither acknowledging the other, is a double spend. It makes the spender's account disputed, and both spends are disputed until the currency's issuer endorses one; the other is then void. A server accepting a payment is usually the issuer itself, so it knows at once which spend it has chosen.
 
-The spender's account stays disputed until its adjudicators post a quorum. Its keys are not assumed stolen: the quorum lets it carry on with the keys it had. Deciding which spend stands is the issuer's, because the spender's own adjudicators are the spender's choice; deciding whether the account carries on is the adjudicators', as it is for any disputed account.
+The spender's account stays disputed until its adjudicators post a quorum. Its keys are not assumed stolen: the quorum lets it carry on with the keys it had. Deciding which spend stands is the issuer's, because the spender's own adjudicators are the spender's choice; deciding whether the account carries on is the adjudicators', as it is for any disputed account. That holds when the issuer double spends too: its own adjudicators settle its dispute, and once they have, the issuer chooses which of its spends stands.
 
 ## IOUs
 

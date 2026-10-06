@@ -57,6 +57,16 @@ Versioned for the same reason `seed.kdf.domain` is: changing it strands every ex
 
 It is one Argon2id pass, not two. The vault key is taken off the same output the identity key comes from, separated by domain through HKDF. A second memory-hard pass would double the wait at every login and buy nothing a domain-separated HKDF does not already give — and re-deriving the identity key differently is off the table entirely, since that strands every account that exists.
 
+## The encryption key
+
+An account can publish an encryption key, `epubkey` on its identity declaration, so that others can send it messages only it can read. See [apps/messaging.md](apps/messaging.md). The identity key cannot do this, for the reason the vault key exists: it is Ed25519, and its private half is non-extractable.
+
+It comes from the seed the same way the vault key does: off the same Argon2id output, separated through HKDF by a domain of its own, giving the 32 bytes of an X25519 private key. A fresh computer and the seed are therefore enough to read one's messages again, and the seed is the only thing a user is expected to keep. The domain is to be `seed.kdf.encryption_domain`, versioned like the others, since changing it gives every account a key nobody has published. It goes into `config/reputation.yml` with the code that first uses it, not before.
+
+A new seed gives a new encryption key, and nothing makes an account publish it. One whose seed was stolen should publish its new key promptly, because until it does the thief can read what people send to the old one; the rules leave that to the account.
+
+There is no forward secrecy. Whoever kept a copy of a message can read it if the recipient's seed ever leaks. That is a deliberate trade for keys recovered from a seed alone, and acceptable for the casual use this is for.
+
 ## What the server can still do with a vault it cannot read
 
 Two things, and only two.
