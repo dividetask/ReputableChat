@@ -91,8 +91,9 @@ export async function deriveFromSeed(phrase, kdf) {
 
 // --- persistence -------------------------------------------------------
 //
-// A CryptoKey survives structured cloning, so the non-extractable key can live
-// in IndexedDB across a page refresh without its bytes ever being exposed.
+// A CryptoKey survives structured cloning, so the non-extractable keys -- the
+// signing key and the vault key -- can live in IndexedDB across a page refresh
+// without their bytes ever being exposed.
 // Memory-only storage would die on every refresh, which is not a log out --
 // this matches "stays until you log off" more literally.
 

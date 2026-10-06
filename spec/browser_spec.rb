@@ -115,6 +115,17 @@ class BrowserSpec < Minitest::Test
                  "a friended account must land in the trusted bucket, not merely appear in the list"
   end
 
+  # RULE: a refresh is not a log off. The settings and ratings in the vault
+  # are there afterwards, because the vault key is remembered along with the
+  # signing key.
+  def test_the_vault_survives_a_refresh
+    assert seen.fetch("vault_saved_before_refresh"), "the vault must have been saved before the refresh"
+    assert_equal "", seen.fetch("after_refresh_status"), "the vault must open after a refresh"
+    assert seen.fetch("after_refresh_show_unrated"), "a saved setting must survive a refresh"
+    assert_includes seen.fetch("after_refresh_friend_keys"), seen.fetch("stranger"),
+                    "a friendship saved before the refresh must survive it"
+  end
+
   private
 
   def chromium_builds

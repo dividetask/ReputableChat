@@ -216,8 +216,13 @@ async function writeVault(revision, contents) {
 // rather than retrying -- see vault.merge for which direction each list
 // resolves in.
 async function pushVault({ force = false } = {}) {
-  if (!state.me?.vaultKey) return;
+  if (!state.me) return;
   if (!state.vaultDirty && !force) return;
+  // Said out loud: returning quietly here once made every change after a
+  // refresh look saved while none of them were.
+  if (!state.me.vaultKey) {
+    return status($("chat-status"), "Your settings cannot be saved: sign in with your seed again.", "error");
+  }
 
   state.vaultDirty = false;
   try {
@@ -736,8 +741,12 @@ async function fetchConfigs(pubkeys) {
 
 async function enterChat() {
   // Remembered only now: before the account exists, storing the key strands a
-  // signup nobody finished.
-  await identity.remember({ privateKey: state.me.privateKey, pubkey: state.me.pubkey });
+  // signup nobody finished. The vault key goes with the signing key -- it can
+  // only be derived from the seed, so without it a refresh comes back signed in
+  // to a vault it cannot open.
+  await identity.remember({
+    privateKey: state.me.privateKey, pubkey: state.me.pubkey, vaultKey: state.me.vaultKey,
+  });
 
   goTo(LOGIN_PATH, { replace: true }); // do not leave /new-account in the bar
   $("seed").value = ""; // the seed has done its job

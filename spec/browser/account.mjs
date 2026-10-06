@@ -89,6 +89,15 @@ try {
   );
   results.added_mid_session = (await page.locator("#profile-status").textContent()).trim();
 
+  // A setting, saved to the vault along with the friendship above. Waiting on
+  // the save itself rather than a fixed delay: the push is debounced.
+  const saved = page.waitForResponse(
+    (response) => response.url().endsWith("/api/vault") && response.request().method() === "PUT",
+    { timeout: 30_000 },
+  );
+  await page.check("#show-unrated");
+  results.vault_saved_before_refresh = (await saved).ok();
+
   // --- the whole reputation pipeline, as rendered ------------------------
   //
   // Clicking a friend's name opens their profile, which states the bucket they
@@ -101,6 +110,21 @@ try {
   await page.waitForSelector("#profile-view:not(.hidden)", { timeout: 10_000 });
   results.friend_profile_name = (await page.locator("#profile-name").textContent()).trim();
   results.friend_bucket = (await page.locator("#profile-bucket").textContent()).trim();
+
+  // --- a refresh ---------------------------------------------------------
+  //
+  // A refresh is not a log off: the remembered keys sign straight back in,
+  // and the vault has to open with them. When only the signing key was
+  // remembered, this came back signed in with every setting and rating gone.
+  await page.reload({ waitUntil: "networkidle" });
+  await page.waitForSelector("#chat:not(.hidden)", { timeout: 30_000 });
+  results.after_refresh_status = (await page.locator("#chat-status").textContent()).trim();
+  await page.click("#my-profile");
+  await page.waitForSelector("#profile-edit:not(.hidden)", { timeout: 10_000 });
+  results.after_refresh_show_unrated = await page.isChecked("#show-unrated");
+  results.after_refresh_friend_keys = (await page.locator("#friend-list .pubkey").allTextContents())
+    .map((key) => key.trim());
+  results.stranger = stranger;
 } catch (error) {
   results.error = `${error}`;
 } finally {
