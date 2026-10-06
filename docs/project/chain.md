@@ -2,7 +2,7 @@
 
 Every signed record in ReputableChat names the most recent records its author had seen when they signed it. That one field turns a pile of independent signatures into a single tangled history: if you can see a record, you can walk back from it through everything its author had already seen, and everything *those* authors had seen, until you reach the genesis.
 
-There is no proof of work and thus no mining. The chain is not there to put records in one agreed order or to stop double spends — it is there so that a record cannot be quietly removed, back-dated, or shown to one person and not another. A server that drops a message has to drop everything that acknowledged it, and everything that acknowledged *those*, which is not something it can do selectively without the gap being visible.
+There is no proof of work and thus no mining. The chain is not there to put records in one agreed order, and it does not prevent double spends: it only says who settles one, which is the currency's issuer (see section 10 of the rules). It is there so that a record cannot be quietly removed, back-dated, or shown to one person and not another. A server that drops a message has to drop everything that acknowledged it, and everything that acknowledged *those*, which is not something it can do selectively without the gap being visible.
 
 ## Records
 
