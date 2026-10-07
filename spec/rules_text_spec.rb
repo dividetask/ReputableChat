@@ -30,6 +30,7 @@ class RulesTextSpec < Minitest::Test
     "which keys a record may sign with" => [/must be signed with one of/, 2],
     "the contest"                    => [/contests that change|change replacing it/, 2],
     "who may change the master key"  => [/Signed with the current master key/, 7],
+    "what conflicts"                 => [/conflict when both change the same key/, 7],
     "when an account is disputed"    => [/An account is disputed, as seen by a record/, 7],
     "what a quorum may name"         => [/quorum is valid only if|one a quorum may confirm/, 7],
     "the heartbeat interval"         => [/at least 480 seconds after/, 9],
