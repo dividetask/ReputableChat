@@ -6,17 +6,19 @@ require "yaml"
 require "securerandom"
 require_relative "params"
 require_relative "server_config"
+require_relative "origin"
 require_relative "cryptography/signature"
 require_relative "cryptography/canonical"
 require_relative "cryptography/payload"
 require_relative "cryptography/record"
 require_relative "genesis"
+require_relative "host"
 require_relative "store/database"
 require_relative "store/images"
 
 module ReputableChat
-  # The server does as little as it can: it verifies signatures, rejects config
-  # rollbacks, and stores signed blobs. It never sees a seed, holds a private
+  # The server does as little as it can: it verifies signatures, rejects
+  # revision rollbacks, and stores signed blobs. It never sees a seed, holds a private
   # key, or computes a reputation -- reputation is subjective per viewer, so it
   # belongs on the client.
   class App < Roda
@@ -70,18 +72,24 @@ module ReputableChat
     ALLOWED_EMOTES = EMOTES.values_at("positive", "negative", "neutral").compact.flatten.freeze
 
     class << self
-      attr_accessor :store, :images, :origin, :genesis
-      attr_writer :limits
+      # `host` is nil when this server runs without a host account.
+      attr_accessor :store, :images, :genesis, :host
+      attr_writer :limits, :origins
 
       # Defaulted rather than required, so a test or a script can build the app
       # without assembling a config first.
       def limits = @limits || ServerConfig::LIMITS
+
+      # The origins a login may be signed for. Empty means whichever origin the
+      # request arrived at -- see Origin.
+      def origins = @origins || []
     end
 
     def store = self.class.store
     def images = self.class.images
-    def origin = self.class.origin
+    def origins = self.class.origins
     def genesis = self.class.genesis
+    def host = self.class.host
     def limits = self.class.limits
     def limit(name) = limits.fetch(name.to_s)
 
@@ -105,7 +113,7 @@ module ReputableChat
         # Serving them (rather than baking them into the JS) is what lets a
         # default change reach every user who never pinned that setting.
         r.get("defaults") { DEFAULTS }
-        r.get("emotes")   { EMOTES }
+        r.get("emote-kinds") { EMOTES }
         # The kinds a client has to be able to render, served for the same
         # reason the emotes are: baking them into the JS means a new kind
         # cannot reach anyone already running an old copy.
@@ -119,6 +127,9 @@ module ReputableChat
         # was built with against the one this server is running, rather than
         # discovering a mismatch as signatures that will not verify.
         r.get("genesis")  { genesis.to_h }
+        # This server's own account, or null. Served beside the genesis so a new
+        # account can start with both as friends before it has fetched anything else.
+        r.get("host")     { { "host" => host&.to_h } }
         r.post("session")   { open_session(r) }
         r.post("register")  { register(r) }
         r.post("image")     { upload_image(r) }
@@ -130,13 +141,7 @@ module ReputableChat
           r.put { put_vault(r) }
         end
 
-        r.on "private-config" do
-          r.get { own_private_config(r) }
-          r.put { store_private_config(r) }
-        end
-
-        # The chain records. `config` below is what these replace and is on
-        # its way out; both are served while the client moves across.
+        # The chain records.
         r.on "identity" do
           r.post("batch") { batch(r, :identities) }
           r.put { put_identity(r) }
@@ -151,7 +156,7 @@ module ReputableChat
 
         r.on "notice" do
           r.post { post_notice(r) }
-          r.get(String) { |publisher| fetch_notices(r, publisher) }
+          r.get(String) { |pubkey| fetch_notices(r, pubkey) }
         end
 
         r.on "adjustment" do
@@ -159,20 +164,13 @@ module ReputableChat
           r.get(String) { |pubkey| fetch_adjustments(r, pubkey) }
         end
 
-        r.on "config" do
-          r.post("batch") { config_batch(r) }
-          r.put { store_config(r) }
-          r.get(String) { |pubkey| fetch_config(pubkey) }
-        end
-
-        r.on "room", String do |room_name|
-          room = Params.room(room_name) or bad_request(r, "bad room")
-
-          r.get("messages") { { "messages" => store.room_messages(room).map { |m| present_message(m) } } }
-          r.get("emotes")   { { "emotes" => store.room_emotes(room) } }
-          r.post("message") { post_message(r, room) }
-          r.post("emote")   { post_emote(r, room) }
-        end
+        # No room segment: there are no rooms. When they arrive they will be
+        # their own records, named by hash rather than by a name anybody can
+        # claim, so a path built out of a name would have to go anyway.
+        r.get("messages") { { "messages" => store.messages.map { |m| present_message(m) } } }
+        r.get("emotes")   { { "emotes" => store.emotes } }
+        r.post("message") { post_message(r) }
+        r.post("emote")   { post_emote(r) }
       end
     end
 
@@ -181,8 +179,10 @@ module ReputableChat
     # --- handlers ---------------------------------------------------------
 
     # Challenge-response. The signed payload covers the nonce, the pubkey, the
-    # origin and a timestamp: without origin and purpose in there, a signature
-    # harvested by one server could be replayed against another.
+    # origin and a timestamp. The nonce is what stops a signature harvested by
+    # one server being replayed against another; the origin also stops a live
+    # relay, but only when the operator has listed the server's origins (see
+    # Origin for why that is optional).
     def open_session(r)
       pubkey    = Params.pubkey(r.params["pubkey"])      or bad_request(r, "bad pubkey")
       signature = Params.signature(r.params["signature"]) or bad_request(r, "bad signature")
@@ -192,11 +192,11 @@ module ReputableChat
       fresh = (Time.now.to_i - issued_at).abs <= Store::Database::CLOCK_SKEW
       bad_request(r, "stale timestamp") unless fresh
 
-      payload = Cryptography::Payload.login(pubkey: pubkey, nonce: nonce, origin: origin, issued_at: issued_at)
-
-      unless Cryptography::Signature.verify(pubkey_b64: pubkey, signature_b64: signature, payload: payload)
-        r.halt(401, { "error" => "signature did not verify" })
+      verified = login_origins(r).any? do |origin|
+        payload = Cryptography::Payload.login(pubkey: pubkey, nonce: nonce, origin: origin, issued_at: issued_at)
+        Cryptography::Signature.verify(pubkey_b64: pubkey, signature_b64: signature, payload: payload)
       end
+      r.halt(401, { "error" => login_failure(r) }) unless verified
 
       # Claimed last, so a failed signature does not burn the challenge.
       r.halt(401, { "error" => "challenge expired or already used" }) unless store.claim_nonce(nonce)
@@ -209,8 +209,8 @@ module ReputableChat
 
     # A valid but unregistered seed reaches here. The client warns before
     # calling it -- a mistyped seed that happens to pass the checksum would
-    # otherwise silently create a new empty account. The display name is not
-    # set here; the client publishes it in its first signed config.
+    # otherwise silently create a new empty account. The handle is not set
+    # here; the client publishes it in its first identity declaration.
     def register(r)
       pubkey = current_pubkey(r)
       r.halt(409, { "error" => "already registered" }) if store.registered?(pubkey)
@@ -230,29 +230,6 @@ module ReputableChat
       when :unsupported then bad_request(r, "unsupported image type")
       else { "icon" => result }
       end
-    end
-
-    def fetch_config(pubkey_param)
-      pubkey = Params.pubkey(pubkey_param)
-      return { "config" => nil } unless pubkey
-
-      { "config" => present_config(store.config_blob(pubkey)) }
-    end
-
-    # One round trip for a whole traversal level. A seven-deep walk done one
-    # fetch at a time would be hundreds of sequential requests.
-    def config_batch(r)
-      pubkeys = Params.array_of(r.params["pubkeys"], max: MAX_BATCH) { |v| Params.pubkey(v) }
-      bad_request(r, "bad pubkeys") unless pubkeys
-
-      { "configs" => store.config_blobs(pubkeys).map { |row| present_config(row) } }
-    end
-
-    # Takes no pubkey -- it uses the session's. Asking for somebody else's
-    # private config is not expressible through this route, rather than being
-    # a check that has to stay correct.
-    def own_private_config(r)
-      { "config" => present_config(store.private_config(current_pubkey(r))) }
     end
 
     def own_vault(r)
@@ -289,51 +266,7 @@ module ReputableChat
       { "stored" => true, "revision" => revision }
     end
 
-    def store_private_config(r)
-      pubkey   = current_pubkey(r)
-      revision  = Params.integer(r.params["revision"], min: 1) or bad_request(r, "bad revision")
-      settings = Params.settings(r.params["settings"])       or bad_request(r, "bad settings")
-      voted    = Params.voted(r.params["voted"] || [])       or bad_request(r, "bad voted list")
-      sig      = Params.signature(r.params["signature"])     or bad_request(r, "bad signature")
-      ts       = Params.integer(r.params["ts"])              or bad_request(r, "bad timestamp")
-
-      payload = Cryptography::Payload.private_config(
-        pubkey: pubkey, revision: revision, settings: settings, voted: voted, issued_at: ts
-      )
-      verify!(r, pubkey, sig, payload)
-
-      result = store.store_private_config(
-        pubkey: pubkey, revision: revision,
-        payload: Cryptography::Canonical.dump(payload), signature: sig
-      )
-      r.halt(409, { "error" => "revision is not newer than the stored one" }) if result == :stale
-
-      { "stored" => true, "revision" => revision }
-    end
-
-    def store_config(r)
-      pubkey  = current_pubkey(r)
-      revision = Params.integer(r.params["revision"], min: 1) or bad_request(r, "bad revision")
-      profile = Params.profile(r.params["profile"])         or bad_request(r, "bad profile")
-      ratings = Params.ratings(r.params["ratings"])         or bad_request(r, "bad ratings")
-      sig     = Params.signature(r.params["signature"])     or bad_request(r, "bad signature")
-      ts      = Params.integer(r.params["ts"])              or bad_request(r, "bad timestamp")
-
-      payload = Cryptography::Payload.config(
-        pubkey: pubkey, revision: revision, profile: profile, ratings: ratings, issued_at: ts
-      )
-      verify!(r, pubkey, sig, payload)
-
-      result = store.store_config(
-        pubkey: pubkey, revision: revision,
-        payload: Cryptography::Canonical.dump(payload), signature: sig
-      )
-      r.halt(409, { "error" => "revision is not newer than the stored one" }) if result == :stale
-
-      { "stored" => true, "revision" => revision }
-    end
-
-    # `ack` is the record this message's author had last seen. The server does
+    # `ack` is the record this message's signer had last seen. The server does
     # not check that it was well chosen -- it cannot, since it never computes a
     # reputation and the rule is the author's own. It checks only that it is
     # the right shape, and stores what it is given.
@@ -378,6 +311,15 @@ module ReputableChat
         pubkey: pubkey, revision: revision, scores: scores, derived: derived,
         ack: ack, issued_at: ts, note: optional_note(r)
       )
+
+      # Bounded here rather than by an entry count. This is the one record whose
+      # size its author chooses, and the canonical bytes are what has to be
+      # stored and served back, so they are the thing to measure.
+      canonical = Cryptography::Canonical.dump(payload)
+      if canonical.bytesize > limit(:attestation_bytes)
+        bad_request(r, "attestation is larger than #{limit(:attestation_bytes)} bytes")
+      end
+
       store_record(r, :store_attestation, pubkey, revision, payload, sig)
     end
 
@@ -396,9 +338,9 @@ module ReputableChat
 
     # An official statement. The server checks the shape, the signature and the
     # revision, and has no opinion about the contents -- it does not know what a
-    # policy is, only that this publisher has not used this number before.
+    # policy is, only that this account has not used this number before.
     def post_notice(r)
-      publisher  = current_pubkey(r)
+      pubkey     = current_pubkey(r)
       revision   = Params.integer(r.params["revision"], min: 1) or bad_request(r, "bad revision")
       kind       = Params.notice_kind(r.params["kind"], allowed: NOTICE_KINDS) or bad_request(r, "unknown kind")
       title      = Params.title(r.params["title"])       or bad_request(r, "bad title")
@@ -413,15 +355,15 @@ module ReputableChat
       bad_request(r, "a founding notice supersedes nothing") if kind == "founding" && supersedes
 
       payload = Cryptography::Payload.notice(
-        publisher: publisher, revision: revision, kind: kind, title: title, body: body,
+        pubkey: pubkey, revision: revision, kind: kind, title: title, body: body,
         ack: ack, issued_at: ts, supersedes: supersedes, note: optional_note(r)
       )
-      verify!(r, publisher, sig, payload)
+      verify!(r, pubkey, sig, payload)
 
       canonical = Cryptography::Canonical.dump(payload)
       hash = Cryptography::Record.digest(payload: canonical, signature: sig)
       result = store.store_notice(
-        hash: hash, publisher: publisher, revision: revision, kind: kind, title: title,
+        hash: hash, pubkey: pubkey, revision: revision, kind: kind, title: title,
         supersedes: supersedes, ack: ack, payload: canonical, signature: sig
       )
       r.halt(409, { "error" => "that revision is already used" }) if result == :duplicate
@@ -429,10 +371,10 @@ module ReputableChat
       { "stored" => true, "revision" => revision, "hash" => hash }
     end
 
-    def fetch_notices(r, publisher_param)
-      publisher = Params.pubkey(publisher_param) or bad_request(r, "bad publisher")
+    def fetch_notices(r, pubkey_param)
+      pubkey = Params.pubkey(pubkey_param) or bad_request(r, "bad pubkey")
 
-      { "notices" => store.notices(publisher).map { |row| present_notice(row) } }
+      { "notices" => store.notices(pubkey).map { |row| present_notice(row) } }
     end
 
     # One change to an attestation between republishes. `base_revision` names
@@ -492,35 +434,35 @@ module ReputableChat
       { kind.to_s => store.public_send(kind, pubkeys).map { |row| present_record(row) } }
     end
 
-    def post_message(r, room)
-      author = current_pubkey(r)
-      seq    = Params.integer(r.params["seq"], min: 1) or bad_request(r, "bad seq")
+    def post_message(r)
+      pubkey = current_pubkey(r)
       body   = Params.string(r.params["body"], max: limit(:message_bytes)) or bad_request(r, "bad body")
       sig    = Params.signature(r.params["signature"]) or bad_request(r, "bad signature")
       ts     = Params.integer(r.params["ts"]) or bad_request(r, "bad timestamp")
       ack    = Params.record_hash(r.params["ack"]) or bad_request(r, "bad ack")
-      prev   = optional_hash(r, "prev")
       reply  = optional_hash(r, "reply_to")
 
       payload = Cryptography::Payload.message(
-        author: author, room: room, seq: seq, prev: prev, body: body,
+        pubkey: pubkey, body: body,
         ack: ack, issued_at: ts, reply_to: reply, note: optional_note(r)
       )
-      verify!(r, author, sig, payload)
+      verify!(r, pubkey, sig, payload)
 
       canonical = Cryptography::Canonical.dump(payload)
+      hash = Cryptography::Record.digest(payload: canonical, signature: sig)
       result = store.store_message(
-        hash: Cryptography::Record.digest(payload: canonical, signature: sig),
-        author: author, room: room, seq: seq, prev: prev, ack: ack,
+        hash: hash, pubkey: pubkey, ack: ack,
         reply_to: reply, payload: canonical, signature: sig
       )
-      r.halt(409, { "error" => "that sequence number is already used" }) if result == :duplicate
+      # The record hash is what catches a repeat now that there is no sequence
+      # number: the identical record, signature and all, has been sent twice.
+      r.halt(409, { "error" => "that record has already been stored" }) if result == :duplicate
 
-      { "stored" => true, "seq" => seq }
+      { "stored" => true, "hash" => hash }
     end
 
-    def post_emote(r, room)
-      author  = current_pubkey(r)
+    def post_emote(r)
+      pubkey  = current_pubkey(r)
       message = Params.record_hash(r.params["message"]) or bad_request(r, "bad message")
       choice  = Params.emote(r.params["emote"], allowed: ALLOWED_EMOTES) or bad_request(r, "unknown emote")
       sig     = Params.signature(r.params["signature"]) or bad_request(r, "bad signature")
@@ -528,15 +470,15 @@ module ReputableChat
       ack     = Params.record_hash(r.params["ack"]) or bad_request(r, "bad ack")
 
       payload = Cryptography::Payload.emote(
-        author: author, room: room, message: message, emote: choice,
+        pubkey: pubkey, message: message, emote: choice,
         ack: ack, issued_at: ts, note: optional_note(r)
       )
-      verify!(r, author, sig, payload)
+      verify!(r, pubkey, sig, payload)
 
       canonical = Cryptography::Canonical.dump(payload)
       result = store.store_emote(
         hash: Cryptography::Record.digest(payload: canonical, signature: sig),
-        author: author, room: room, message: message, emote: choice,
+        pubkey: pubkey, message: message, emote: choice,
         ack: ack, payload: canonical, signature: sig
       )
       r.halt(409, { "error" => "you have already reacted to that message" }) if result == :duplicate
@@ -550,6 +492,31 @@ module ReputableChat
       return if Cryptography::Signature.verify(pubkey_b64: pubkey, signature_b64: signature, payload: payload)
 
       r.halt(400, { "error" => "signature did not verify" })
+    end
+
+    # Configured origins when there are any; otherwise the one this request
+    # arrived at, so a server needs no configuration to run at a new address.
+    def login_origins(r)
+      return origins unless origins.empty?
+
+      [Origin.from_request(r)].compact
+    end
+
+    # A signature for the wrong origin is indistinguishable from a bad one, but
+    # the browser's Origin header usually says which it was. It only chooses
+    # the wording of the error; nothing is accepted because of it.
+    def login_failure(r)
+      browser = Origin.normalize(r.get_header("HTTP_ORIGIN"))
+      expected = login_origins(r)
+      return "signature did not verify" if browser.nil? || expected.include?(browser)
+
+      fix = if origins.empty?
+              "If a reverse proxy is in front, it must pass Host and X-Forwarded-Proto."
+            else
+              "Use that address, or add this one to ORIGIN on the server."
+            end
+      "signature did not verify: this server signs in at #{expected.join(' or ')}, " \
+        "but this page is at #{browser}. #{fix}"
     end
 
     def current_pubkey(r)
@@ -580,16 +547,6 @@ module ReputableChat
       Params.note(r.params["note"], max: limit(:note_bytes)) or bad_request(r, "bad note")
     end
 
-    # Signed blobs go out exactly as they came in. The client verifies them
-    # against the author's key, so the server re-serializing them would only
-    # create a way to break signatures.
-    def present_config(row)
-      return nil unless row
-
-      { "pubkey" => row[:pubkey], "revision" => row[:revision],
-        "payload" => row[:payload], "signature" => row[:signature] }
-    end
-
     # Signed blobs go out exactly as they came in, with the record hash the
     # server derived from them. A reader re-derives it from the same two
     # strings, so a server that invented one would be caught.
@@ -601,7 +558,7 @@ module ReputableChat
     end
 
     def present_notice(row)
-      { "publisher" => row[:publisher], "revision" => row[:revision], "kind" => row[:kind],
+      { "pubkey" => row[:pubkey], "revision" => row[:revision], "kind" => row[:kind],
         "title" => row[:title], "supersedes" => row[:supersedes], "hash" => row[:hash],
         "payload" => row[:payload], "signature" => row[:signature] }
     end
@@ -615,8 +572,8 @@ module ReputableChat
     end
 
     def present_message(row)
-      { "hash" => row[:hash], "author" => row[:author], "seq" => row[:seq],
-        "prev" => row[:prev], "reply_to" => row[:reply_to], "ack" => row[:ack],
+      { "hash" => row[:hash], "pubkey" => row[:pubkey],
+        "reply_to" => row[:reply_to], "ack" => row[:ack],
         "payload" => row[:payload], "signature" => row[:signature],
         "received_at" => row[:received_at] }
     end

@@ -12,12 +12,12 @@ module ReputableChat
     class Ladder
       ONE = BigDecimal("1")
 
-      attr_reader :k, :max_hops, :max_configs, :scale
+      attr_reader :k, :max_hops, :max_accounts, :scale
 
       def initialize(config)
         @k           = config.decimal("constants.k")
         @max_hops    = config.integer("ladder.max_hops")
-        @max_configs = config.integer("ladder.max_configs")
+        @max_accounts = config.integer("ladder.max_accounts")
         @scale       = config.scale
         @weights     = (0..@max_hops).map { |d| ((ONE - @k) * (@k**d)).round(@scale) }.freeze
       end

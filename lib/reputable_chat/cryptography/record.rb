@@ -9,7 +9,7 @@ module ReputableChat
     # its signature together.
     #
     # `ack`, `reply_to` and an emote's `message` field all name one of these.
-    # They used to name signatures, which identify a payload; a record hash
+    # Never a signature: a signature identifies a payload, while a record hash
     # identifies the whole record, signature included, which is what a link has
     # to cover if it is going to be tamper-evident.
     #

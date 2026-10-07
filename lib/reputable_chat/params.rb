@@ -54,12 +54,6 @@ module ReputableChat
       value.match?(RECORD_HASH) ? value : nil
     end
 
-    def room(value)
-      return nil unless value.is_a?(String)
-
-      value.match?(/\A[a-z0-9][a-z0-9-]{0,63}\z/) ? value : nil
-    end
-
     def array_of(value, max:, &block)
       return nil unless value.is_a?(Array)
       return nil if value.empty? || value.size > max
@@ -78,22 +72,6 @@ module ReputableChat
       value.match?(ICON) ? value : nil
     end
 
-    MAX_USERNAME = 64
-
-    def profile(value)
-      return nil unless value.is_a?(Hash)
-
-      username = string(value["username"], max: MAX_USERNAME) or return nil
-
-      bio = value["message"].to_s
-      bio = bio.empty? ? "" : (string(bio, max: MAX_BIO) or return nil)
-
-      image = value["icon"]
-      return nil unless image.nil? || icon(image)
-
-      { "username" => username, "message" => bio, "icon" => image }
-    end
-
     # An emote must be one the server actually publishes, so an arbitrary
     # string can never be stored and rendered back to everyone.
     def emote(value, allowed:)
@@ -104,11 +82,9 @@ module ReputableChat
 
     # --- chain records ------------------------------------------------------
 
-    MAX_NOTE    = 2_000
+    MAX_NOTE    = 16_000
     MAX_HANDLE  = 64
     MAX_BIO     = 280
-    MAX_SCORES  = 10_000
-    MAX_DERIVED = 50_000
     MAX_LABEL   = 64
     MAX_NOTES   = 1_000
     MAX_FILES   = 500
@@ -118,7 +94,10 @@ module ReputableChat
     # canonical serialization refuses floats outright, because they have no
     # single textual form across languages, and the Blocked line is
     # `effective > 0`, which binary floating point cannot be trusted to land on.
-    DECIMAL = /\A-?(0|[1-9]\d{0,6})(\.\d{1,18})?\z/
+    # One spelling per number, as the rules require: a whole part ("0.5", not
+    # ".5"), no trailing zero in the fraction ("0.5", not "0.50"), and zero
+    # unsigned ("0", not "-0").
+    DECIMAL = /\A(?!-0\z)-?(0|[1-9]\d{0,6})(\.\d{0,17}[1-9])?\z/
 
     def decimal(value, min: -1, max: 1)
       return nil unless value.is_a?(String) && value.match?(DECIMAL)
@@ -170,9 +149,11 @@ module ReputableChat
     # amplify a branch past the weight the ladder assigned it, and the ladder's
     # weights summing to (just under) 1 is what keeps an effective score inside
     # -1..1 without clamping.
-    def scores(value, max_entries: MAX_SCORES)
+    # No entry cap. How many people somebody has an opinion about is not the
+    # server's business and never bounded anything it cared about; what bounds
+    # an attestation is `attestation_bytes`, checked on the request.
+    def scores(value)
       return nil unless value.is_a?(Hash)
-      return nil if value.size > max_entries
 
       value.each do |target, entry|
         return nil unless pubkey(target)
@@ -184,17 +165,16 @@ module ReputableChat
       value
     end
 
-    # The author's own calculated scores, and the fingerprint of the parameters
-    # they were computed under. The fingerprint is not optional: without it a
-    # reader cannot tell whether the numbers mean anything to them, and taking
-    # them anyway would mean silently adopting a stranger's settings.
+    # The author's own calculated reputations, and nothing about how they were
+    # calculated. A reader reaching for this cache has run out of its own reach
+    # and either takes a number or leaves it, so the parameters behind it were
+    # nothing it could act on -- and publishing them would tell everyone the
+    # settings a particular reader scores under.
     def derived(value)
       return nil unless value.is_a?(Hash)
-      return nil unless integer(value["hops"], min: 0, max: 7)
-      return nil unless record_hash(value["params"])
 
       scores = value["scores"]
-      return nil unless scores.is_a?(Hash) && scores.size <= MAX_DERIVED
+      return nil unless scores.is_a?(Hash)
 
       scores.each do |target, score|
         return nil unless pubkey(target)
@@ -246,59 +226,5 @@ module ReputableChat
       string(value, max: MAX_NOTES)
     end
 
-    MAX_SETTING_KEYS   = 100
-    MAX_SETTING_DEPTH  = 4
-    MAX_SETTING_STRING = 256
-    MAX_VOTED          = 50_000
-
-    # A sparse override tree mirroring config/reputation.yml. The server checks
-    # only that it is a bounded structure of scalars -- it never interprets the
-    # contents, which stay the client's business.
-    def settings(value, depth: MAX_SETTING_DEPTH)
-      return nil unless value.is_a?(Hash)
-      return nil if value.size > MAX_SETTING_KEYS || depth.zero?
-
-      value.each do |key, item|
-        return nil unless key.is_a?(String) && key.bytesize <= 64
-
-        case item
-        when Hash                      then return nil unless settings(item, depth: depth - 1)
-        when String                    then return nil if item.bytesize > MAX_SETTING_STRING
-        when Numeric, true, false, nil then next
-        else return nil
-        end
-      end
-
-      value
-    end
-
-    # Record hashes of the comments this user has already emoted on, so one
-    # vote per comment survives moving to another device.
-    def voted(value)
-      return nil unless value.is_a?(Array)
-      return nil if value.size > MAX_VOTED
-
-      value.all? { |entry| record_hash(entry) } ? value : nil
-    end
-
-    # A ratings map is passed through to storage unparsed, but its shape is
-    # still checked so a malformed blob cannot be stored and then break every
-    # client that fetches it.
-    def ratings(value, max_entries: 10_000)
-      return nil unless value.is_a?(Hash)
-      return nil if value.size > max_entries
-
-      value.each do |target, rating|
-        return nil unless pubkey(target)
-        return nil unless rating.is_a?(Hash)
-        return nil unless [true, false].include?(rating["friend"])
-        return nil unless [true, false].include?(rating["reported"])
-        return nil unless integer(rating["net_votes"], min: -1_000_000, max: 1_000_000)
-        # Optional so a config written before `cleared` existed still validates.
-        return nil unless [nil, true, false].include?(rating["cleared"])
-      end
-
-      value
-    end
   end
 end

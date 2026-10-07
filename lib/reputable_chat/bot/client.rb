@@ -60,10 +60,12 @@ module ReputableChat
         @cookie    = nil
       end
 
-      def defaults      = request(:get, "/api/defaults")
-      def emote_config  = request(:get, "/api/emotes")
-      def genesis       = request(:get, "/api/genesis")
-      def challenge     = request(:post, "/api/challenge", {}).fetch("nonce")
+      def defaults     = request(:get, "/api/defaults")
+      def emote_kinds  = request(:get, "/api/emote-kinds")
+      def limits       = request(:get, "/api/limits")
+      def genesis      = request(:get, "/api/genesis")
+      def host         = request(:get, "/api/host")["host"]
+      def challenge    = request(:post, "/api/challenge", {}).fetch("nonce")
 
       def log_in(identity)
         nonce     = challenge
@@ -86,47 +88,76 @@ module ReputableChat
         self.class.new(base_url: nil, origin: @origin, logger: @logger, transport: @transport)
       end
 
-      def config(pubkey)   = request(:get, "/api/config/#{pubkey}")["config"]
-      def configs(pubkeys) = request(:post, "/api/config/batch", "pubkeys" => pubkeys)["configs"]
+      # --- chain records ----------------------------------------------------
+      #
+      # Who somebody is, and what they think of everybody else: two records,
+      # because they change on completely different clocks. A reaction moves an
+      # attestation; nothing about a reaction touches a display name.
 
-      def messages(room) = request(:get, "/api/room/#{room}/messages")["messages"]
-      def reactions(room) = request(:get, "/api/room/#{room}/emotes")["emotes"]
+      def identity(pubkey)   = request(:get, "/api/identity/#{pubkey}")["identity"]
+      def identities(pubkeys) = request(:post, "/api/identity/batch", "pubkeys" => pubkeys)["identities"]
 
-      def publish_config(identity:, revision:, profile:, ratings:)
-        issued_at = Time.now.to_i
-        payload   = Cryptography::Payload.config(
-          pubkey: identity.pubkey, revision: revision, profile: profile,
-          ratings: ratings, issued_at: issued_at
-        )
+      def attestation(pubkey)   = request(:get, "/api/attestation/#{pubkey}")["attestation"]
 
-        request(:put, "/api/config",
-                "revision" => revision, "profile" => profile, "ratings" => ratings,
-                "ts" => issued_at, "signature" => identity.sign(payload))
+      # One round trip for a whole traversal level. A seven-deep walk done one
+      # fetch at a time would be hundreds of sequential requests.
+      def attestations(pubkeys)
+        request(:post, "/api/attestation/batch", "pubkeys" => pubkeys)["attestations"]
       end
 
-      # Returns the record hash, derived here from the same two strings the
-      # server derives it from. Everything that later points at this message --
-      # a reply, a reaction, an ack -- names that hash.
-      def send_message(identity:, room:, seq:, prev:, body:, ack:, reply_to: nil)
+      def publish_identity(identity:, revision:, handle:, bio:, ack:, icon: nil)
+        issued_at = Time.now.to_i
+        payload   = Cryptography::Payload.identity(
+          pubkey: identity.pubkey, revision: revision, handle: handle, bio: bio,
+          icon: icon, ack: ack, issued_at: issued_at
+        )
+
+        request(:put, "/api/identity",
+                "revision" => revision, "handle" => handle, "bio" => bio, "icon" => icon,
+                "ack" => ack, "ts" => issued_at, "signature" => identity.sign(payload))
+      end
+
+      def publish_attestation(identity:, revision:, scores:, derived:, ack:)
+        issued_at = Time.now.to_i
+        payload   = Cryptography::Payload.attestation(
+          pubkey: identity.pubkey, revision: revision, scores: scores,
+          derived: derived, ack: ack, issued_at: issued_at
+        )
+
+        request(:put, "/api/attestation",
+                "revision" => revision, "scores" => scores, "derived" => derived,
+                "ack" => ack, "ts" => issued_at, "signature" => identity.sign(payload))
+      end
+
+      # --- the room that is not a room --------------------------------------
+
+      def messages  = request(:get, "/api/messages")["messages"]
+      def reactions = request(:get, "/api/emotes")["emotes"]
+
+      # Returns the record hash. Everything that later points at this message
+      # -- a reply, a reaction, an ack -- names it, and the server derives the
+      # same one from the same two strings, so a mismatch means the bytes it
+      # stored are not the bytes that were signed.
+      def send_message(identity:, body:, ack:, reply_to: nil)
         issued_at = Time.now.to_i
         payload   = Cryptography::Payload.message(
-          author: identity.pubkey, room: room, seq: seq, prev: prev,
-          body: body, ack: ack, issued_at: issued_at, reply_to: reply_to
+          pubkey: identity.pubkey, body: body, ack: ack,
+          issued_at: issued_at, reply_to: reply_to
         )
 
-        deliver_record(identity, payload, "/api/room/#{room}/message",
-                       "seq" => seq, "prev" => prev, "ack" => ack, "body" => body,
-                       "ts" => issued_at, "reply_to" => reply_to)
+        deliver_record(identity, payload, "/api/message",
+                       "body" => body, "ack" => ack, "ts" => issued_at,
+                       "reply_to" => reply_to)
       end
 
-      def send_emote(identity:, room:, message:, emote:, ack:)
+      def send_emote(identity:, message:, emote:, ack:)
         issued_at = Time.now.to_i
         payload   = Cryptography::Payload.emote(
-          author: identity.pubkey, room: room, message: message,
-          emote: emote, ack: ack, issued_at: issued_at
+          pubkey: identity.pubkey, message: message, emote: emote,
+          ack: ack, issued_at: issued_at
         )
 
-        deliver_record(identity, payload, "/api/room/#{room}/emote",
+        deliver_record(identity, payload, "/api/emote",
                        "message" => message, "emote" => emote, "ack" => ack,
                        "ts" => issued_at)
       end
@@ -136,10 +167,16 @@ module ReputableChat
       def deliver_record(identity, payload, path, fields)
         canonical = Cryptography::Canonical.dump(payload)
         signature = identity.sign(payload)
+        hash      = Cryptography::Record.digest(payload: canonical, signature: signature)
 
-        request(:post, path, fields.merge("signature" => signature))
+        stored = request(:post, path, fields.merge("signature" => signature))
+        served = stored["hash"]
 
-        Cryptography::Record.digest(payload: canonical, signature: signature)
+        if served && served != hash
+          raise Error, "#{path}: the server hashed that record to #{served} and this client to #{hash}"
+        end
+
+        hash
       end
 
       def request(verb, path, body = nil)

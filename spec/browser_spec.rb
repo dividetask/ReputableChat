@@ -56,10 +56,13 @@ class BrowserSpec < Minitest::Test
     assert_equal "Create Account", buttons.fetch("submit_label").strip
   end
 
-  # RULE: the genesis account is on the list before the account exists, named
-  # and with its face, from the declaration the client already holds.
-  def test_the_genesis_account_is_listed_with_its_name_and_face
-    assert_equal 1, seen.fetch("friend_rows_before_creating")
+  # RULE: the default friends are on the list before the account exists, named
+  # and, where they have one, with their faces, from the declarations the client
+  # already holds. Development runs a host account, so there are two: the
+  # genesis account and this server's host account.
+  def test_the_default_friends_are_listed_with_their_names_and_faces
+    assert_equal 2, seen.fetch("friend_rows_before_creating")
+    assert_equal "Host", seen.fetch("host_named")
     assert_equal "Tim", seen.fetch("genesis_named")
     assert seen.fetch("genesis_has_an_image"), "the genesis avatar must be its image, not a placeholder"
     assert_equal 43, seen.fetch("whole_key_shown").length, "the whole key must be shown"
@@ -67,7 +70,7 @@ class BrowserSpec < Minitest::Test
 
   # RULE: a pasted key still gets an avatar, so the list looks like one list.
   def test_an_added_key_gets_the_generated_placeholder
-    assert_equal 2, seen.fetch("friend_rows_after_adding")
+    assert_equal 3, seen.fetch("friend_rows_after_adding")
     assert seen.fetch("added_row_has_a_placeholder")
   end
 
@@ -76,6 +79,51 @@ class BrowserSpec < Minitest::Test
     assert_operator seen.fetch("friends_after_creating"), :>=, 1
     assert seen.fetch("friend_list_shows_an_image"), "the friend list must show the avatar"
     assert_equal 43, seen.fetch("friend_list_shows_a_whole_key")
+  end
+
+  # RULE: the friend list reads first-added at the top. The ratings come back
+  # from the server sorted by public key, because canonical serialization
+  # sorts, so this order exists only because the vault records it.
+  def test_the_friend_list_is_ordered_by_when_they_were_added
+    assert_equal "Tim", seen.fetch("friend_order").first.strip,
+                 "the genesis account was added first and belongs at the top"
+  end
+
+  # RULE: a rating made during the session counts during that session.
+  #
+  # Friending somebody does not publish -- the attestation cadence decides that
+  # -- so between publishes the author's own vault is the only place the rating
+  # exists. The graph has to read it from there or a friend stays invisible
+  # until the next republish.
+  def test_a_friendship_made_during_the_session_counts_immediately
+    assert_equal "Added. They are now trusted.", seen.fetch("added_mid_session"),
+                 "a rating made since the last publish must reach this session's scores"
+  end
+
+  # RULE: someone this account friended comes out trusted, in the browser, end
+  # to end.
+  #
+  # This is the only test that runs the whole reputation pipeline and looks at
+  # the result: the vault's private ratings, the curve, the author's own entry
+  # in the graph, the ladder, the bucket. Every other interface test reads
+  # app.js as text, and a friend who came out `blocked` would render in the
+  # friend list exactly as well as one who came out trusted.
+  def test_a_friend_comes_out_trusted
+    assert_equal "Tim", seen.fetch("friend_profile_name"),
+                 "clicking a friend's name must open that friend's profile"
+    assert_equal "Currently trusted this session.", seen.fetch("friend_bucket"),
+                 "a friended account must land in the trusted bucket, not merely appear in the list"
+  end
+
+  # RULE: a refresh is not a log off. The settings and ratings in the vault
+  # are there afterwards, because the vault key is remembered along with the
+  # signing key.
+  def test_the_vault_survives_a_refresh
+    assert seen.fetch("vault_saved_before_refresh"), "the vault must have been saved before the refresh"
+    assert_equal "", seen.fetch("after_refresh_status"), "the vault must open after a refresh"
+    assert seen.fetch("after_refresh_show_unrated"), "a saved setting must survive a refresh"
+    assert_includes seen.fetch("after_refresh_friend_keys"), seen.fetch("stranger"),
+                    "a friendship saved before the refresh must survive it"
   end
 
   private
@@ -97,7 +145,9 @@ class BrowserSpec < Minitest::Test
     @server = spawn(
       { "RACK_ENV" => "development",
         "SESSION_SECRET" => SecureRandom.hex(64),
-        "ORIGIN" => "http://127.0.0.1:#{@port}",
+        # Unset rather than configured: the server takes its origin from the
+        # request, which is how a server with no configuration runs.
+        "ORIGIN" => nil,
         "DATABASE_URL" => "sqlite://#{@dir}/browser.db",
         "IMAGE_ROOT" => "#{@dir}/images" },
       "bundle", "exec", "puma", "-p", @port.to_s, "-q",

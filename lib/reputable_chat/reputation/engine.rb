@@ -2,8 +2,10 @@
 
 require "bigdecimal"
 require_relative "curve"
+require_relative "decimals"
 require_relative "ladder"
 require_relative "rating"
+require_relative "score"
 
 module ReputableChat
   module Reputation
@@ -13,6 +15,7 @@ module ReputableChat
     # +/-1e-17 and flip people across it.
     class Engine
       ZERO = BigDecimal("0")
+      ONE  = BigDecimal("1")
 
       attr_reader :config, :store, :curve, :ladder
 
@@ -32,8 +35,8 @@ module ReputableChat
       # Effective reputation of `target` from `viewer`'s point of view.
       #
       # `depths` lets a caller supply a walk taken earlier. A Session passes
-      # the one it took at login so that later changes to other people's
-      # configs stay invisible until the next login.
+      # the one it took at login so that attestations published since stay
+      # invisible until the next login.
       def effective(viewer:, target:, depths: nil)
         breakdown(viewer: viewer, target: target, depths: depths).fetch(:effective)
       end
@@ -45,11 +48,15 @@ module ReputableChat
         return { effective: ZERO, levels: [] } if viewer == target
 
         depths ||= reachable_depths(viewer)
+        # Passed down rather than memoized on the engine: one engine answers
+        # for whatever viewer it is asked about, and a cache that did not know
+        # that would hand one person's trust to another.
+        trust = trust_to(viewer, depths)
         levels = []
         total  = ZERO
 
         (0..ladder.max_hops).each do |depth|
-          raters = raters_at(depths, depth, target)
+          raters = raters_at(depths, depth, target, trust)
           next if raters.empty?
 
           mean         = raters.sum(ZERO) { |r| r.fetch(:rating) } / BigDecimal(raters.size)
@@ -87,6 +94,25 @@ module ReputableChat
         :trusted
       end
 
+      # Private actions in, the published form out: what an attestation carries.
+      #
+      # The curve runs here, once, in the author -- that is the whole difference
+      # between an attestation and the config it replaces. Shared rather than
+      # written out at each call site because two producers of a signed field
+      # that agree on the number and differ on its spelling is a trap, not a
+      # difference: `decimal` is the one text both this and
+      # public/js/reputation.js write.
+      def publishable_scores(ratings)
+        ratings.each_with_object({}) do |(target, action), out|
+          value = Rating.from_h(action).value(curve: curve, friend_value: @friend_value)
+
+          out[target] = {
+            "reputation" => Reputation.decimal(value, @scale),
+            "trust" => Reputation.decimal(value.positive? ? ONE : ZERO, @scale)
+          }
+        end
+      end
+
       # The fewest votes one rater has to cast to lift somebody over the
       # visibility line. Read off the curve rather than hardcoded, so retuning
       # the curve moves it: the answer is a property of the configuration, not
@@ -101,17 +127,43 @@ module ReputableChat
           curve.saturation_point
       end
 
+      # The same answer in the form an attestation carries: the least
+      # reputation one rater can publish that still lifts somebody over the
+      # visibility line. For saying "this account exists" without saying "I
+      # know them".
+      def minimum_visible_reputation
+        Reputation.decimal(curve.value(minimum_visible_votes), @scale)
+      end
+
       # Breadth-first walk out from the viewer, gated at every hop.
       #
       # Reaching a hop means every link on the path was rated above the gate by
       # the person one step closer in. Each person is counted once, at their
-      # shortest distance. The walk also stops once max_configs have been
+      # shortest distance. The walk also stops once max_accounts have been
       # discovered, whichever limit is hit first -- a positive-only graph still
+      # How much each person's recommendations are worth, compounded along the
+      # path that reached them. The viewer trusts their own judgement fully; a
+      # nought prunes, which is why it never appears here.
+      def trust_to(viewer, depths)
+        trust = { viewer => ONE }
+
+        depths.sort_by { |_, depth| depth }.each do |rater, _|
+          carried = trust.fetch(rater, ONE)
+          store.ratings_by(rater).each do |subject, rating|
+            next if trust.key?(subject)
+
+            trust[subject] = carried * multiplier_of(rating)
+          end
+        end
+
+        trust
+      end
+
       # branches, so seven hops is unbounded in practice.
       def reachable_depths(viewer)
         depths   = { viewer => 0 }
         frontier = [viewer]
-        budget   = ladder.max_configs
+        budget   = ladder.max_accounts
 
         (0...ladder.max_hops).each do |depth|
           next_frontier = []
@@ -145,18 +197,32 @@ module ReputableChat
       # The people who actually rated the target at this depth. The mean is
       # taken over these, not over everyone at this depth with non-raters
       # counted as zero.
-      def raters_at(depths, depth, target)
+      def raters_at(depths, depth, target, trust = {})
         depths.filter_map do |rater, rater_depth|
           next unless rater_depth == depth
           next if rater == target
 
           rating = store.rating(rater, target)
-          rating && { pubkey: rater, rating: value_of(rating), reported: rating.reported }
+          next unless rating
+
+          # What a rater says is worth what the path to them is worth. The
+          # multiplier compounds, so a nought anywhere makes everything past it
+          # count for nothing and a negative inverts what they recommend.
+          weight = trust.fetch(rater, ONE)
+          { pubkey: rater, rating: value_of(rating) * weight, reported: rating.reported }
         end
       end
 
       def value_of(rating)
         rating.value(curve: curve, friend_value: @friend_value)
+      end
+
+      # A Rating has no multiplier of its own -- it is what an author works
+      # from, not what they publish -- so it carries the default.
+      def multiplier_of(rating)
+        return rating.multiplier if rating.respond_to?(:multiplier)
+
+        value_of(rating) > ZERO ? ONE : ZERO
       end
 
       def positive?(rating)

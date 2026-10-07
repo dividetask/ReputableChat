@@ -1,113 +1,52 @@
 # frozen_string_literal: true
 
-require "json"
-require_relative "environment"
-require_relative "cryptography/payload"
-require_relative "cryptography/record"
-require_relative "cryptography/signature"
+require_relative "committed_declaration"
 
 module ReputableChat
-  # The bottom of the chain: Tim's identity declaration.
+  # The bottom of the chain: the genesis account's identity declaration.
+  #
+  # The genesis account is the developer's. It is the same on every server,
+  # because there is one network and one chain; each server's own account is
+  # the host account (see host.rb), which acknowledges this record.
   #
   # Every record that has seen nothing else acknowledges this one, and it is the
-  # only record whose own `ack` is null. It is also the only record stored as a
-  # file rather than regenerated from a database row, because every client has
-  # to agree on the hash before it has fetched anything -- a genesis you have to
-  # download from the server is not a genesis.
+  # only record whose own `ack` is null. It is stored as a file rather than
+  # regenerated from a database row, because every client has to agree on the
+  # hash before it has fetched anything -- a genesis you have to download from
+  # the server is not a genesis.
   #
   # Generated once by script/generate_genesis.rb and committed.
   #
   # There are two of them, because a developer needs to be able to sign as the
-  # genesis account and a production operator needs nobody else to be able to.
+  # genesis account and a production network needs nobody else to be able to.
   # Development's seed is committed and therefore public: anyone who has cloned
   # the repository owns that identity, which is exactly what makes a fresh
   # clone useful. Production's seed is never committed.
   class Genesis
+    include CommittedDeclaration
+
     DIRECTORY = File.expand_path("../../config/genesis", __dir__)
 
     class Missing < StandardError; end
     class Corrupt < StandardError; end
     class WrongEnvironment < StandardError; end
 
-    # Named for the environment rather than for the handle, so which one is
-    # loaded is obvious from the filename rather than from remembering which
-    # person's name meant which deployment.
-    def self.path(environment = Environment.name)
-      File.join(DIRECTORY, "#{environment}.json")
-    end
-
-    # The genesis account's avatar, committed beside its record.
-    #
-    # Every other image reaches the image store by being uploaded. This one
-    # cannot: the declaration naming it is committed and read before any client
-    # has fetched anything, and the image store lives under data/, which is not
-    # in the repository. So the bytes are committed too, and the server adopts
-    # them at boot.
-    def self.icon_path(environment = Environment.name)
-      Dir[File.join(DIRECTORY, "#{environment}.{png,jpg,gif,webp}")].first
-    end
-
     PATH = path(Environment::DEVELOPMENT)
 
-    attr_reader :pubkey, :payload, :signature, :hash
+    def self.label = "genesis"
 
-    # The icon filename the declaration names, or nil.
-    def icon = declaration["icon"]
-
-    def declaration = @declaration ||= JSON.parse(payload)
-
-    # Puts the committed bytes into the image store, where every other image
-    # lives, so there is one serving path rather than a special case.
-    #
-    # The store derives the name from the bytes, so a mismatch here means the
-    # committed image is not the one the declaration was signed over -- which
-    # would otherwise show up as a broken avatar and nothing else.
-    def install_icon(images, path: Genesis.icon_path)
-      return nil unless icon && path && File.exist?(path)
-
-      stored = images.store(File.binread(path))
-      unless stored == icon
-        raise Corrupt, "#{path} stores as #{stored.inspect} but the genesis declares #{icon.inspect}"
-      end
-
-      stored
-    end
-
-    def self.load(path: self.path)
-      raise Missing, missing_message(path) unless File.exist?(path)
-
-      new(JSON.parse(File.read(path)), path: path)
-    rescue JSON::ParserError => e
-      raise Corrupt, "#{path} is not valid JSON: #{e.message}"
-    end
+    def self.load(path: self.path) = new(read_record(path), path: path)
 
     # Memoized, since it never changes while a process is running.
     def self.current = @current ||= refuse_development_in_production(load)
 
-    # The failure this exists to prevent: a production deployment running the
-    # published development identity, where every person who has cloned the
-    # repository can sign releases and announcements as the genesis account.
-    #
-    # Checked by comparing keys rather than by trusting the filename, because
-    # the realistic mistake is copying the development record into place, not
-    # misnaming it.
-    def self.refuse_development_in_production(genesis)
-      return genesis unless Environment.production?
-
-      development = begin
-        load(path: path(Environment::DEVELOPMENT))
-      rescue Missing, Corrupt
-        nil
-      end
-      return genesis unless development && development.pubkey == genesis.pubkey
-
-      raise WrongEnvironment,
-            "this is the development genesis, whose seed is committed to the repository and " \
-            "therefore public. Generate a production one with " \
-            "`RACK_ENV=production bundle exec rake genesis` and keep its seed out of git."
-    end
-
     def self.reset! = @current = nil
+
+    def self.development_message
+      "this is the development genesis, whose seed is committed to the repository and " \
+        "therefore public. Generate a production one with " \
+        "`RACK_ENV=production bundle exec rake genesis` and keep its seed out of git."
+    end
 
     def self.missing_message(path)
       "no genesis record at #{path}. Generate one with " \
@@ -115,64 +54,17 @@ module ReputableChat
         "and commit it -- nothing can be acknowledged until it exists."
     end
 
-    def initialize(record, path: Genesis.path)
-      @pubkey    = record["pubkey"]
-      @payload   = record["payload"]
-      @signature = record["signature"]
-      @hash      = record["hash"]
-
-      verify!(path)
-    end
-
-    def to_h = { "pubkey" => pubkey, "payload" => payload, "signature" => signature, "hash" => hash }
+    def initialize(record, path: Genesis.path) = adopt(record, path)
 
     private
 
-    # Checked on every load rather than trusted. A genesis that has been edited
-    # by hand, or truncated by a bad merge, would otherwise put every client on
-    # a slightly different chain and show up only as signatures failing for no
-    # visible reason.
-    def verify!(path)
-      %w[pubkey payload signature hash].each do |field|
-        raise Corrupt, "#{path} is missing #{field}" if send(field).to_s.empty?
-      end
+    # The one record that acknowledges nothing, because there was nothing to
+    # acknowledge.
+    def check_ack!(path)
+      return if declaration["ack"].nil?
 
-      shape!(path)
-
-      recomputed = Cryptography::Record.digest(payload: payload, signature: signature)
-      unless recomputed == hash
-        raise Corrupt, "#{path} records hash #{hash} but its contents hash to #{recomputed}"
-      end
-
-      return if Cryptography::Signature.verify(
-        pubkey_b64: pubkey, signature_b64: signature, payload: JSON.parse(payload)
-      )
-
-      raise Corrupt, "the signature on #{path} does not verify against #{pubkey}"
-    end
-
-    # A genesis written against an older payload shape still verifies -- its
-    # signature covers the bytes it was made from, and those have not changed.
-    # It is still wrong: every record signed since has a different field list,
-    # and a reader looking for a field this one does not carry would find nil
-    # and carry on. Caught here rather than discovered downstream.
-    def shape!(path)
-      record = JSON.parse(payload)
-
-      unless record["purpose"] == Cryptography::Payload::IDENTITY
-        raise Corrupt, "#{path} is not a #{Cryptography::Payload::IDENTITY} record"
-      end
-
-      expected = Cryptography::Payload.identity(
-        pubkey: pubkey, revision: 1, handle: "x", bio: "", icon: nil, ack: nil, issued_at: 0
-      ).keys.sort
-
-      missing = expected - record.keys
-      return if missing.empty?
-
-      raise Corrupt, "#{path} was written against an older payload shape and is missing " \
-                     "#{missing.join(', ')}. Delete it and the seed beside it, then run " \
-                     "`bundle exec rake genesis` again -- nothing has been published from it yet."
+      raise Corrupt, "#{path} acknowledges #{declaration['ack']}, but the genesis is the bottom " \
+                     "of the chain and acknowledges nothing"
     end
   end
 end

@@ -21,6 +21,18 @@ export function toNumber(fixed) {
   return Number(fixed) / Number(SCALE);
 }
 
+// The form a score travels in. Never a float and never exponent notation: what
+// is published is signed, and canonical serialization refuses a float outright
+// because it has no single textual form across languages.
+export function toDecimal(fixed) {
+  const negative = fixed < 0n;
+  const magnitude = negative ? -fixed : fixed;
+  const whole = magnitude / SCALE;
+  const fraction = (magnitude % SCALE).toString().padStart(SCALE_DIGITS, "0").replace(/0+$/, "");
+
+  return `${negative ? "-" : ""}${whole}${fraction ? `.${fraction}` : ""}`;
+}
+
 const mul = (a, b) => (a * b) / SCALE;
 const clamp = (v) => (v > SCALE ? SCALE : v < -SCALE ? -SCALE : v);
 
@@ -33,7 +45,7 @@ export class Reputation {
     this.cap = toFixed(curve.cap);
     this.k = toFixed(config.constants.k);
     this.maxHops = Number(config.ladder.max_hops);
-    this.maxConfigs = Number(config.ladder.max_configs);
+    this.maxAccounts = Number(config.ladder.max_accounts);
     this.friendValue = toFixed(config.actions.friend.value);
     this.minRating = toFixed(config.gate.min_rating);
     this.visibleAbove = toFixed(config.display.visible_above);
@@ -69,8 +81,12 @@ export class Reputation {
   // the mean, and so remains outvoteable. `cleared` pins someone to zero
   // however often they are emoted or replied to, before or after; friending is
   // deliberate and outranks it.
+  // A published score is taken as it stands: the curve already ran in whoever
+  // published it, so there is nothing left to compute. Actions only appear
+  // here for the viewer's own entry, which is built from their vault.
   ratingValue(rating) {
     if (!rating) return null;
+    if (rating.reputation !== undefined) return clamp(toFixed(rating.reputation));
     if (rating.reported) return -SCALE;
 
     const votes = this.curve(rating.net_votes || 0);
@@ -80,10 +96,44 @@ export class Reputation {
     return clamp(votes);
   }
 
+  // What this person's recommendations are worth, as distinct from what they
+  // are worth. Defaults to full for anyone positive and none for anyone
+  // blocked, so an attestation only carries an entry where it was overridden.
+  multiplierOf(rating) {
+    if (rating?.trust !== undefined && rating.trust !== null) return toFixed(rating.trust);
+
+    return this.ratingValue(rating) > 0n ? SCALE : 0n;
+  }
+
+  // A report is the only thing that reaches exactly -1, so a published score
+  // of -1 is a report. Actions are private; this is what survives of them.
+  reportedBy(rating) {
+    if (!rating) return false;
+    if (rating.reputation !== undefined) return toFixed(rating.reputation) <= -SCALE;
+
+    return Boolean(rating.reported);
+  }
+
+  // How much each person's recommendations are worth, compounded along the
+  // path that reached them. A nought anywhere makes everything past it count
+  // for nothing; a negative inverts it.
+  trustTo(viewer, graph, depths) {
+    const trust = new Map([[viewer, SCALE]]);
+
+    for (const [rater] of [...depths].sort((a, b) => a[1] - b[1])) {
+      const carried = trust.get(rater) ?? SCALE;
+      for (const [subject, rating] of Object.entries(graph.ratingsBy(rater) || {})) {
+        if (trust.has(subject)) continue;
+        trust.set(subject, mul(carried, this.multiplierOf(rating)));
+      }
+    }
+    return trust;
+  }
+
   // Breadth-first, gated at every hop. Reaching a hop means every link on the
   // path was rated above the gate by the person one step closer in. Each
   // person is counted once, at their shortest distance. The walk also stops at
-  // maxConfigs -- a positive-only graph still branches, so seven hops is
+  // maxAccounts -- a positive-only graph still branches, so seven hops is
   // unbounded in practice.
   reachableDepths(viewer, graph) {
     const depths = new Map([[viewer, 0]]);
@@ -94,7 +144,7 @@ export class Reputation {
 
       for (const rater of frontier) {
         for (const [subject, rating] of Object.entries(graph.ratingsBy(rater) || {})) {
-          if (depths.size >= this.maxConfigs) return depths;
+          if (depths.size >= this.maxAccounts) return depths;
           if (depths.has(subject)) continue;
           if (this.ratingValue(rating) <= this.minRating) continue;
 
@@ -123,6 +173,10 @@ export class Reputation {
     if (viewer === target) return { effective: 0n, levels: [] };
 
     const walk = depths || this.reachableDepths(viewer, graph);
+    // Recomputed per call rather than cached on the instance: one Reputation
+    // answers for whatever viewer it is asked about, and a cache that did not
+    // know that would hand one person's trust to another.
+    const trust = this.trustTo(viewer, graph, walk);
     const byDepth = new Map();
 
     for (const [rater, depth] of walk) {
@@ -132,8 +186,13 @@ export class Reputation {
       const value = this.ratingValue(rating);
       if (value === null) continue;
 
+      // What a rater says is worth what the path to them is worth.
+      const weighted = mul(value, trust.get(rater) ?? SCALE);
+
       if (!byDepth.has(depth)) byDepth.set(depth, []);
-      byDepth.get(depth).push({ pubkey: rater, rating: value, reported: Boolean(rating.reported) });
+      byDepth.get(depth).push({
+        pubkey: rater, rating: weighted, reported: this.reportedBy(rating),
+      });
     }
 
     const levels = [];
@@ -181,15 +240,20 @@ export class Reputation {
   }
 }
 
-// Holds verified configs keyed by pubkey. Only signature-checked ratings ever
-// reach here -- see app.js.
+// What everybody has published about everybody else, keyed by pubkey: one
+// entry per author, holding the scores from their attestation. The viewer's own
+// entry is the exception -- it holds their vault's actions, because it is the
+// one entry that can contain a rating nobody has published yet. `ratingValue`
+// reads either shape.
+//
+// Only signature-checked records ever reach here -- see app.js.
 export class Graph {
   constructor() {
-    this.configs = new Map();
+    this.scores = new Map();
   }
 
   add(pubkey, ratings) {
-    this.configs.set(pubkey, ratings || {});
+    this.scores.set(pubkey, ratings || {});
   }
 
   // A fixed copy of what the walk reached. Freezing only the walk is not
@@ -202,11 +266,11 @@ export class Graph {
   }
 
   has(pubkey) {
-    return this.configs.has(pubkey);
+    return this.scores.has(pubkey);
   }
 
   ratingsBy(pubkey) {
-    return this.configs.get(pubkey) || {};
+    return this.scores.get(pubkey) || {};
   }
 
   rating(pubkey, target) {

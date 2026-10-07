@@ -9,7 +9,7 @@ module ReputableChat
     module Brain
       # What the brain is being asked for. `recent` is oldest-last, already
       # filtered to what this account can see.
-      Context = Struct.new(:kind, :target, :target_name, :recent, :name, :room,
+      Context = Struct.new(:kind, :target, :target_name, :recent, :name,
                            keyword_init: true)
 
       # Chat length, not the server's 4000-byte limit. A tiny model asked for

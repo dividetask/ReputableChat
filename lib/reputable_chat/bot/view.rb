@@ -3,28 +3,41 @@
 require "json"
 require_relative "../config"
 require_relative "../reputation/engine"
+require_relative "../reputation/score"
 require_relative "../reputation/session"
 require_relative "../store/memory"
 
 module ReputableChat
   module Bot
-    # What this account can actually see.
+    # What this account can actually see, and what it publishes.
     #
     # A bot reads the room through the same reputation it would see in a
-    # browser: it walks out from its own ratings, fetches a hop per request,
-    # sorts everyone into trusted / tolerated / blocked, and drops the blocked.
-    # Mirrors loadNetwork() and Session in public/js.
+    # browser: it walks out from its own opinions, fetches a hop of
+    # attestations per request, sorts everyone into trusted / tolerated /
+    # blocked, and drops the blocked.
     #
     # A visit is a login, so the sort happens once on arrival and holds for the
     # rest of the visit -- which is the rule the design is built on, not a
     # shortcut. Reacting during a visit changes nobody's bucket until the bot
     # comes back.
-    # `hash` is the record hash: what a reply, a reaction or an ack names.
-    Message = Struct.new(:hash, :signature, :author, :seq, :body, :ts, :reply_to, :received_at,
+    #
+    # The bot's own actions are private and live in its state file; what goes
+    # out is the attestation, which carries the numbers those actions come to.
+    # Nothing else can see an action, so nothing else needs it.
+    Message = Struct.new(:hash, :signature, :pubkey, :body, :ts, :reply_to, :received_at,
                          keyword_init: true)
 
     class View
-      attr_reader :profile, :revision, :ratings, :session, :messages, :reactions
+      # Deliberately empty, as in script/tim.rb. `derived` is the author's own
+      # calculated reputations for everyone their walk reached, offered to
+      # readers whose own reach ran out. A bot could publish a real one; until
+      # something decides that a swarm's caches are worth reading, publishing
+      # none says "I am offering you nothing" where a half-filled one would
+      # offer a number nobody asked how it was reached.
+      NO_CACHE = { "scores" => {} }.freeze
+
+      attr_reader :handle, :bio, :identity_revision, :attestation_revision,
+                  :session, :messages, :reactions
 
       def initialize(client:, identity:, persona:, defaults:, genesis_hash:)
         @client       = client
@@ -34,10 +47,11 @@ module ReputableChat
         @config       = Config.new(defaults: defaults, overrides: persona.display_overrides)
       end
 
-      # Everything a visit starts with: own config, the graph, the room.
-      def arrive!
-        load_own_config
-        build_session
+      # Everything a visit starts with. `ratings` is the bot's own private
+      # actions, which only it holds.
+      def arrive!(ratings)
+        load_own_records
+        build_session(ratings)
         refresh_room
         self
       end
@@ -45,26 +59,28 @@ module ReputableChat
       # Called on every poll while the bot is present. Deliberately does not
       # rebuild the session: buckets do not move mid-visit, by design.
       def refresh_room
-        @messages  = @client.messages(@persona.room).filter_map { |row| parse_message(row) }
-        @reactions = @client.reactions(@persona.room)
+        @messages  = @client.messages.filter_map { |row| parse_message(row) }
+        @reactions = @client.reactions
 
-        # Authors who are not in the walk still need their profile, or every
-        # name in the room is a base64 fragment. The browser does exactly this
-        # on each refresh. It adds them to the graph for their names only --
-        # the session's own snapshot was taken on arrival and does not change.
+        # Authors who are not in the walk still need their declaration, or
+        # every name in the room is a base64 fragment. The browser does the
+        # same on each refresh. It adds nothing to the graph -- the session's
+        # snapshot was taken on arrival and does not change.
         learn_authors
         self
       end
 
-      # The highest sequence number the server has from this account. The room
-      # only keeps the last hundred messages, so this can undercount and is
-      # only ever used to move a counter forward, never back.
-      def highest_seq_for(pubkey)
-        @seqs ||= {}
-        @seqs[pubkey] || 0
+      def visible_messages = @messages.select { |m| @session.visible?(m.pubkey) }
+
+      def visible_from_others
+        visible_messages.reject { |m| m.pubkey == @identity.pubkey }
       end
 
-      def visible_messages = @messages.select { |m| @session.visible?(m.author) }
+      def display_name(pubkey)
+        return @handle if pubkey == @identity.pubkey
+
+        @handles[pubkey] || "user-#{pubkey[0, 6]}"
+      end
 
       # The record this bot's next record acknowledges: the most recent one it
       # can see whose author it rates above the bar, or the genesis if there is
@@ -75,104 +91,119 @@ module ReputableChat
 
         recent = @messages.reverse.find do |message|
           next false unless message.hash
-          next true if message.author == @identity.pubkey
+          next true if message.pubkey == @identity.pubkey
 
-          @session.explain(message.author).fetch(:effective) > bar
+          @session.explain(message.pubkey).fetch(:effective) > bar
         end
 
         recent ? recent.hash : @genesis_hash
       end
 
-      def visible_from_others
-        visible_messages.reject { |m| m.author == @identity.pubkey }
+      # --- publishing -------------------------------------------------------
+
+      # Who the bot says it is. Separate from the attestation because a display
+      # name and an opinion change on completely different clocks.
+      def publish_identity!(handle:, bio:)
+        @handle = handle
+        @bio    = bio
+        @identity_revision += 1
+
+        @client.publish_identity(identity: @identity, revision: @identity_revision,
+                                 handle: handle, bio: bio, ack: ack_or_genesis)
+      rescue Client::Conflict
+        reload_identity_revision
+        @identity_revision += 1
+        @client.publish_identity(identity: @identity, revision: @identity_revision,
+                                 handle: handle, bio: bio, ack: ack_or_genesis)
       end
 
-      # Display names, for prompting the model with something more human than
-      # a base64 key.
-      def display_name(pubkey)
-        return @profile["username"] if pubkey == @identity.pubkey
-
-        @profiles[pubkey]&.dig("username") || "user-#{pubkey[0, 6]}"
-      end
-
-      # Ratings are the published form of everything the bot has done to
-      # somebody: reactions land here as net_votes, friending as a flag. This
-      # is what the rest of the network reads, so a reaction that never makes
-      # it into a config never affects anyone's reputation.
-      def adjust_rating(pubkey, friend: nil, votes: 0)
-        current = @ratings[pubkey] || { "friend" => false, "reported" => false, "net_votes" => 0 }
-        updated = current.merge("net_votes" => current.fetch("net_votes", 0) + votes)
-        updated = updated.merge("friend" => friend) unless friend.nil?
-
-        @ratings[pubkey] = updated
-      end
-
-      # The revision must climb or the server rejects the write as a rollback.
-      def publish_config!
-        @revision += 1
-        @client.publish_config(
-          identity: @identity, revision: @revision, profile: @profile, ratings: publishable_ratings
-        )
+      # The numbers the bot's private actions come to. A reaction that never
+      # reaches an attestation changes nobody's reputation: the records are the
+      # display form, this is the reputation form.
+      def publish_attestation!(ratings)
+        @attestation_revision += 1
+        send_attestation(ratings)
       rescue Client::Conflict
         # Somebody wrote a newer revision under this key -- another instance of
         # the same bot, usually. Re-read and try once from where it actually is.
-        load_own_config
-        @revision += 1
-        @client.publish_config(
-          identity: @identity, revision: @revision, profile: @profile, ratings: publishable_ratings
-        )
-      end
-
-      def set_profile(username:, bio:)
-        @profile = { "username" => username, "message" => bio, "icon" => nil }
+        reload_attestation_revision
+        @attestation_revision += 1
+        send_attestation(ratings)
       end
 
       private
 
-      # Only ratings that say something. An entry of all-defaults is noise in
-      # a config that already grows without bound.
-      def publishable_ratings
-        @ratings.select do |_, r|
-          r["friend"] || r["reported"] || r["cleared"] || r.fetch("net_votes", 0) != 0
-        end
+      def send_attestation(ratings)
+        @client.publish_attestation(
+          identity: @identity, revision: @attestation_revision,
+          scores: scoring_engine.publishable_scores(ratings),
+          derived: NO_CACHE, ack: ack_or_genesis
+        )
       end
 
-      def load_own_config
-        payload  = parse_payload(@client.config(@identity.pubkey))
-        @revision = payload ? payload["revision"].to_i : 0
-        @ratings = payload ? (payload["ratings"] || {}) : {}
-        @profile = payload ? payload["profile"] : nil
-        @profile ||= { "username" => @persona.username, "message" => @persona.bio, "icon" => nil }
+      # An engine with nothing in its store: it is wanted for the curve and the
+      # friend value, not for a walk.
+      def scoring_engine
+        @scoring_engine ||= Reputation::Engine.new(config: @config, store: Store::Memory.new)
+      end
+
+      # Before the room has been fetched there is nothing to acknowledge but
+      # the bottom of the chain, which is the right answer for an account's
+      # first record anyway.
+      def ack_or_genesis = @messages ? ack : @genesis_hash
+
+      def load_own_records
+        declaration = parse_payload(@client.identity(@identity.pubkey))
+        @identity_revision = declaration ? declaration["revision"].to_i : 0
+        @handle = declaration ? declaration["handle"] : @persona.username
+        @bio    = declaration ? declaration["bio"] : @persona.bio
+
+        reload_attestation_revision
+      end
+
+      def reload_identity_revision
+        declaration = parse_payload(@client.identity(@identity.pubkey))
+        @identity_revision = declaration ? declaration["revision"].to_i : 0
+      end
+
+      def reload_attestation_revision
+        published = parse_payload(@client.attestation(@identity.pubkey))
+        @attestation_revision = published ? published["revision"].to_i : 0
       end
 
       # The walk out from the viewer, a hop per request, bounded by max_hops
       # and max_configs together -- a positive-only graph still branches, so
       # hop count alone does not bound the fetch.
-      def build_session
-        engine   = Reputation::Engine.new(config: @config, store: Store::Memory.new)
+      #
+      # The viewer's own row is its private actions; everyone else's is the
+      # scores they published. The engine reads either without knowing which it
+      # has, which is the whole point of a Score answering the same questions a
+      # Rating does.
+      def build_session(ratings)
         @graph   = Store::Memory.new
-        @profiles = {}
+        @handles = {}
+        @fetched = {}
 
-        add_ratings(@identity.pubkey, @ratings)
+        ratings.each { |target, action| @graph.put(@identity.pubkey, target, Reputation::Rating.from_h(action)) }
 
         frontier = [@identity.pubkey]
         seen     = { @identity.pubkey => true }
         hops     = @config.fetch("ladder.max_hops").to_i
-        budget   = @config.fetch("ladder.max_configs").to_i
+        budget   = @config.fetch("ladder.max_accounts").to_i
 
         hops.times do
           wanted = []
           frontier.each do |rater|
-            @graph.ratings_by(rater).each do |subject, rating|
+            @graph.ratings_by(rater).each do |subject, score|
               next if seen.key?(subject) || (seen.size + wanted.size) >= budget
-              next unless positive?(engine, rating)
+              next unless positive?(score)
 
               wanted << subject
             end
           end
           break if wanted.empty?
 
-          fetch_configs(wanted)
+          fetch_attestations(wanted)
           wanted.each { |pubkey| seen[pubkey] = true }
           frontier = wanted
         end
@@ -183,39 +214,46 @@ module ReputableChat
         )
       end
 
-      def learn_authors
-        @seqs = Hash.new(0)
-        @messages.each { |m| @seqs[m.author] = [@seqs[m.author], m.seq.to_i].max }
+      def fetch_attestations(pubkeys)
+        fresh = pubkeys.reject { |pubkey| @fetched.key?(pubkey) }
+        return if fresh.empty?
 
-        authors = (@messages.map(&:author) + @reactions.map { |r| r["author"] }).uniq
-        unknown = authors.reject { |pubkey| pubkey.nil? || @profiles.key?(pubkey) }
+        fresh.each { |pubkey| @fetched[pubkey] = true }
 
-        fetch_configs(unknown) unless unknown.empty?
-      end
-
-      def fetch_configs(pubkeys)
-        # Recorded even when the fetch finds nothing, so an author who has
-        # never published a config is not asked for again on every poll.
-        pubkeys.each { |pubkey| @profiles[pubkey] = nil unless @profiles.key?(pubkey) }
-
-        @client.configs(pubkeys).each do |blob|
+        @client.attestations(fresh).each do |blob|
           payload = parse_payload(blob)
           # MVP: signatures are taken on trust, exactly as the browser does
           # (session.verify_signatures). Guarding the pubkey match is the one
           # check that costs nothing.
           next unless payload && payload["pubkey"] == blob["pubkey"]
 
-          add_ratings(blob["pubkey"], payload["ratings"] || {})
-          @profiles[blob["pubkey"]] = payload["profile"]
+          (payload["scores"] || {}).each do |target, score|
+            @graph.put(blob["pubkey"], target, Reputation::Score.from_h(score))
+          end
         end
       end
 
-      def add_ratings(pubkey, ratings)
-        ratings.each { |subject, raw| @graph.put(pubkey, subject, Reputation::Rating.from_h(raw)) }
+      # Display names only. Recorded even when the fetch finds nothing, so an
+      # author who has never declared an identity is not asked for again on
+      # every poll.
+      def learn_authors
+        authors = (@messages.map(&:pubkey) + @reactions.map { |r| r["pubkey"] }).compact.uniq
+        unknown = authors.reject { |pubkey| @handles.key?(pubkey) }
+        return if unknown.empty?
+
+        unknown.each { |pubkey| @handles[pubkey] = nil }
+
+        @client.identities(unknown).each do |blob|
+          payload = parse_payload(blob)
+          next unless payload && payload["pubkey"] == blob["pubkey"]
+
+          @handles[blob["pubkey"]] = payload["handle"]
+        end
       end
 
-      def positive?(engine, rating)
-        rating.value(curve: engine.curve, friend_value: @config.decimal("actions.friend.value")) >
+      def positive?(score)
+        score.value(curve: scoring_engine.curve,
+                    friend_value: @config.decimal("actions.friend.value")) >
           @config.decimal("gate.min_rating")
       end
 
@@ -231,9 +269,9 @@ module ReputableChat
         payload = JSON.parse(row["payload"])
 
         Message.new(
-          hash: row["hash"], signature: row["signature"], author: row["author"],
-          body: payload["body"], seq: row["seq"], ts: payload["ts"],
-          reply_to: row["reply_to"], received_at: row["received_at"]
+          hash: row["hash"], signature: row["signature"], pubkey: row["pubkey"],
+          body: payload["body"], ts: payload["ts"], reply_to: row["reply_to"],
+          received_at: row["received_at"]
         )
       rescue JSON::ParserError
         nil

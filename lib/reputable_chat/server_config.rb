@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "yaml"
+require_relative "origin"
 
 module ReputableChat
   # Server settings from config/server.yml, with environment variables winning
@@ -12,8 +13,9 @@ module ReputableChat
   module ServerConfig
     PATH = File.expand_path("../../config/server.yml", __dir__)
 
+    # No origin by default: the server takes it from each request. See Origin.
     DEFAULTS = {
-      "origin" => "http://localhost:9292",
+      "origin" => nil,
       "database_url" => "sqlite://data/reputablechat.db",
       "image_root" => "data/images"
     }.freeze
@@ -32,7 +34,8 @@ module ReputableChat
       "image_bytes" => 262_144,
       "message_bytes" => 4_000,
       "notice_bytes" => 16_000,
-      "note_bytes" => 2_000,
+      "note_bytes" => 16_000,
+      "attestation_bytes" => 4_194_304,
       "seen_entries" => 5_000,
       "vault_sync_seconds" => 3_600
     }.freeze
@@ -51,7 +54,8 @@ module ReputableChat
         [key, value]
       end
 
-      settings.merge("limits" => limits(file["limits"] || {}, env))
+      settings.merge("origin" => Origin.list(settings["origin"]),
+                     "limits" => limits(file["limits"] || {}, env))
     end
 
     # A limit that is absent, unparseable or not positive falls back to the

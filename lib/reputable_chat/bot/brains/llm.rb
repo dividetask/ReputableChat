@@ -42,7 +42,7 @@ module ReputableChat
 
           unless context.recent.empty?
             transcript = context.recent.map { |(name, body)| "#{name}: #{body}" }.join("\n")
-            parts << "Messages in ##{context.room}, newest last:\n#{transcript}"
+            parts << "The conversation so far, newest last:\n#{transcript}"
           end
 
           parts << if context.kind == :reply && context.target

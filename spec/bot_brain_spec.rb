@@ -101,7 +101,7 @@ class BotBrainSpec < Minitest::Test
 
   def context(recent: [])
     Brain::Context.new(kind: :post, target: nil, target_name: nil,
-                       recent: recent, name: "Ana", room: "general")
+                       recent: recent, name: "Ana")
   end
 
   def test_a_scripted_bot_does_not_repeat_itself_immediately

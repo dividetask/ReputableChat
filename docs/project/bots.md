@@ -40,8 +40,8 @@ Vouchers live in `data/bots/vouchers.json`, written 0600 because they are seed
 phrases. If the genesis seed is not on the machine you run `bin/vouch` on, it
 prints the `script/tim.rb friend` commands to run wherever it is.
 
-Every bot also friends the genesis account when it is born, and `starting_friends`
-other bots — a new account arrives with a contact or two, the way a person who
+Every bot also friends the genesis account and this server's host account when
+it is born, plus `starting_friends` other bots — a new account arrives with a contact or two, the way a person who
 joined a small server on somebody's recommendation does.
 
 ## Categories
@@ -226,9 +226,14 @@ would point at a record nobody else has.
 ## What the bots do to reputation
 
 Reacting and replying both count as one vote for the author, once per message,
-and are folded into the bot's own published config as `net_votes` — the records
-are the display form, the config is the reputation form, and a reaction that
-never reached a config changes nobody's reputation.
+and move the bot's own private count for that author. What goes out is an
+**attestation**: the numbers those private actions come to, with the curve run
+once in the bot rather than by every reader. The messages and emotes are the
+display form, the attestation is the reputation form, and a reaction that never
+reached an attestation changes nobody's reputation.
+
+A bot declares who it is in a separate **identity** record, because a display
+name and an opinion change on completely different clocks.
 
 Friending is rare for most categories (`friend_per_visit`, around 0.02). A
 friendship is worth 0.5 on its own, which is most of the way to Trusted for

@@ -6,9 +6,14 @@ module ReputableChat
     # was made for, so a harvested signature cannot be replayed against another
     # server or replanted in another channel.
     #
-    # Every shape but `login` and `private_config` carries `ack`: the hash of
-    # the last record its author had seen. That is what makes the set of
+    # Every shape but `login` and `vault` carries `ack`: the hash of the last
+    # record its author had seen. That is what makes the set of
     # signatures a chain rather than a pile. See docs/project/chain.md.
+    #
+    # The account that signed a record is always `pubkey`. It was `author` on a
+    # message and `publisher` on a release, for the same field -- and the role
+    # words were the trouble, since one account authors a message and publishes
+    # a release. A key is a key.
     #
     # They also carry `note`: free text the software never reads, for a person
     # browsing the raw chain. It is signed like everything else, so it cannot be
@@ -23,8 +28,6 @@ module ReputableChat
     module Payload
       LOGIN          = "reputablechat:login:v1"
       MESSAGE        = "reputablechat:message:v1"
-      CONFIG         = "reputablechat:config:v1"
-      PRIVATE_CONFIG = "reputablechat:private-config:v1"
       EMOTE          = "reputablechat:emote:v1"
       IDENTITY       = "reputablechat:identity:v1"
       ATTESTATION    = "reputablechat:attestation:v1"
@@ -124,12 +127,12 @@ module ReputableChat
       # compression level, so the same source tree hashes differently on two
       # machines -- and a hash that depends on who built it proves nothing.
       #
-      # `publisher` is carried so a per-user trusted-developer setting can
+      # `pubkey` is carried so a per-user trusted-developer setting can
       # arrive later without re-signing anything. Nothing consults it yet.
-      def release(publisher:, revision:, label:, files:, notes:, ack:, issued_at:, note: nil)
+      def release(pubkey:, revision:, label:, files:, notes:, ack:, issued_at:, note: nil)
         {
           "purpose"   => RELEASE,
-          "publisher" => publisher,
+          "pubkey"    => pubkey,
           "revision"   => revision.to_i,
           "label"     => label,
           "files"     => files,
@@ -153,11 +156,11 @@ module ReputableChat
       # of a notice is that what was said is still there to be checked.
       #
       # The founding notice is the one that supersedes nothing.
-      def notice(publisher:, revision:, kind:, title:, body:, ack:, issued_at:,
+      def notice(pubkey:, revision:, kind:, title:, body:, ack:, issued_at:,
                  supersedes: nil, note: nil)
         {
           "purpose"    => NOTICE,
-          "publisher"  => publisher,
+          "pubkey"     => pubkey,
           "revision"   => revision.to_i,
           "kind"       => kind,
           "title"      => title,
@@ -169,10 +172,10 @@ module ReputableChat
         }
       end
 
-      # `seq` and `prev` chain an author's own messages so that a server cannot
-      # silently drop or reorder one without it being detectable. `ack` chains
-      # this message to everyone else's records; the two catch different
-      # failures and both are kept.
+      # There is no per-author sequence here. `ack` already names the records
+      # this author had seen, their own included, so an author who wants their
+      # own history provable acknowledges their own earlier records rather than
+      # maintaining a second chain alongside the first one.
       #
       # `ts` is the client's clock and is attacker-controlled; the server
       # records its own receipt time separately and unsigned.
@@ -180,13 +183,10 @@ module ReputableChat
       # `reply_to` is the record hash of the message being replied to, or nil.
       # Always present so the canonical form does not change shape between a
       # reply and an ordinary message.
-      def message(author:, room:, seq:, prev:, body:, ack:, issued_at:, reply_to: nil, note: nil)
+      def message(pubkey:, body:, ack:, issued_at:, reply_to: nil, note: nil)
         {
           "purpose"  => MESSAGE,
-          "author"   => author,
-          "room"     => room,
-          "seq"      => seq.to_i,
-          "prev"     => prev,
+          "pubkey"   => pubkey,
           "reply_to" => reply_to,
           "ack"      => ack,
           "note"     => note,
@@ -195,18 +195,13 @@ module ReputableChat
         }
       end
 
-      # One person's reaction to one message. `message` is that message's
-      # record hash. `room` is carried for the same reason a message carries
-      # it: so a reaction cannot be transplanted elsewhere.
-      #
-      # An emote record is also its own attestation adjustment -- it names the
-      # author, the target message and the reaction, which is everything needed
-      # to move the author's score for that message's author.
-      def emote(author:, room:, message:, emote:, ack:, issued_at:, note: nil)
+      # One person's emote on one message. `message` is that message's record
+      # hash, which is what makes it unmovable: the hash covers the whole record
+      # it points at, so there is nothing left for a room to pin down.
+      def emote(pubkey:, message:, emote:, ack:, issued_at:, note: nil)
         {
           "purpose" => EMOTE,
-          "author"  => author,
-          "room"    => room,
+          "pubkey"  => pubkey,
           "message" => message,
           "emote"   => emote,
           "ack"     => ack,
@@ -238,38 +233,6 @@ module ReputableChat
           "ciphertext" => ciphertext,
           "iv"         => iv,
           "ts"         => issued_at.to_i
-        }
-      end
-
-      # The owner's own settings and state. The only shape with no `ack`,
-      # because nobody else ever sees it, so there is nothing to anchor it to
-      # and nobody to prove anything to.
-      #
-      # Signed, not encrypted -- this is private from other users, not from the
-      # server operator, who can read it. Superseded by the encrypted vault;
-      # see docs/project/identity.md.
-      def private_config(pubkey:, revision:, settings:, voted:, issued_at:)
-        {
-          "purpose"  => PRIVATE_CONFIG,
-          "pubkey"   => pubkey,
-          "revision"  => revision.to_i,
-          "settings" => settings,
-          "voted"    => voted,
-          "ts"       => issued_at.to_i
-        }
-      end
-
-      # Superseded by `user` (identity and presentation) and `attestation`
-      # (ratings). Kept until the routes that serve it are replaced, so that
-      # the running client does not break mid-migration.
-      def config(pubkey:, revision:, profile:, ratings:, issued_at:)
-        {
-          "purpose" => CONFIG,
-          "pubkey"  => pubkey,
-          "revision" => revision.to_i,
-          "profile" => profile,
-          "ratings" => ratings,
-          "ts"      => issued_at.to_i
         }
       end
     end

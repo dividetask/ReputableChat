@@ -50,11 +50,12 @@ module ReputableChat
       # exactly what you do not want when you are watching a single bot.
       def run(visits: nil, wait_first: true)
         @defaults = @client.defaults
-        @emotes   = @client.emote_config
+        @emotes   = @client.emote_kinds
         @schedule = @persona.schedule(random: @random)
         @brain    = Brain.for(@persona, random: @random, links: safe_links, logger: @log)
 
         agree_on_genesis!
+        @host = @client.host
 
         log "#{@persona.category} | #{@schedule.summary}"
 
@@ -145,14 +146,14 @@ module ReputableChat
         @client.register if fresh
 
         view = build_view
-        view.arrive!
+        view.arrive!(@state.ratings)
 
-        if fresh || view.revision.zero?
+        if fresh || view.identity_revision.zero?
           establish(view)
           introduce!
-          # The ratings just published are what this bot can see through, and
-          # the session was sorted before they existed.
-          view.arrive!
+          # The opinions just published are what this bot sees through, and the
+          # session was sorted before it had any.
+          view.arrive!(@state.ratings)
         end
 
         linger(view)
@@ -169,25 +170,57 @@ module ReputableChat
                  defaults: @defaults, genesis_hash: @genesis.hash)
       end
 
+      # Whichever accounts a new arrival is given. The genesis account always,
+      # because that is the one name everybody on the network knows, and this
+      # server's host account where it has one -- the same pair the browser
+      # puts in a new identity's first records, and both ordinary friendships
+      # a person could remove.
+      def introductions
+        [@genesis.pubkey, @host && @host["pubkey"]].compact
+      end
+
       # A new account arrives with contacts, the way a person who joined a
-      # small server on somebody's recommendation does. The genesis account
-      # always, because that is the one name everybody here knows; a couple of
-      # other bots, because a network where nobody knows anybody but the
-      # operator is not a network.
+      # small server on somebody's recommendation does. The genesis account and
+      # the host always, because those are the names everybody here knows; a
+      # couple of other bots, because a network where nobody knows anybody but
+      # the operator is not a network.
       def establish(view)
-        view.set_profile(username: @state.username || @persona.username, bio: @persona.bio)
-        view.adjust_rating(@genesis.pubkey, friend: true)
+        view.publish_identity!(handle: @state.username || @persona.username, bio: @persona.bio)
 
+        introductions.each { |pubkey| befriend(pubkey) }
         friends = starting_friends
-        friends.each { |member| view.adjust_rating(member.pubkey, friend: true) }
+        friends.each { |member| befriend(member.pubkey) }
 
-        view.publish_config!
-        @state.revision = view.revision
-        @state.save
+        publish_opinions(view)
 
         named = friends.map { |m| m.username || m.name }.join(", ")
-        log "published profile as #{@state.username}; friended the genesis account" \
+        log "declared #{@state.username}; friended the accounts it arrived with" \
             "#{friends.empty? ? '' : " and #{named}"}"
+      end
+
+      # The bot's own actions, which only it holds. Friending is absolute here;
+      # a vote moves a count. What the rest of the network sees is the number
+      # these come to, published as an attestation.
+      def befriend(pubkey)
+        return if pubkey == identity.pubkey
+
+        @state.ratings[pubkey] = blank_rating.merge(@state.ratings[pubkey] || {})
+                                             .merge("friend" => true, "reported" => false)
+      end
+
+      def record_vote(pubkey, polarity)
+        current = blank_rating.merge(@state.ratings[pubkey] || {})
+        @state.ratings[pubkey] = current.merge("net_votes" => current.fetch("net_votes", 0) + polarity)
+      end
+
+      def blank_rating
+        { "friend" => false, "reported" => false, "net_votes" => 0, "cleared" => false }
+      end
+
+      def publish_opinions(view)
+        view.publish_attestation!(@state.ratings)
+        @state.revision = view.attestation_revision
+        @state.save
       end
 
       def starting_friends
@@ -215,7 +248,7 @@ module ReputableChat
         voucher = @vouchers.sample(random: @random)
         result  = @vouchers.introduce(
           voucher: voucher, target: identity.pubkey, client: @client.fork,
-          seed_config: @defaults.fetch("seed"), defaults: @defaults
+          seed_config: @defaults.fetch("seed"), defaults: @defaults, ack: @genesis.hash
         )
 
         log "introduced by #{voucher.username} (#{result})"
@@ -270,30 +303,20 @@ module ReputableChat
         return unless body
 
         send_post(view, body, reply_to)
-      rescue Client::Conflict => e
-        # The server enforces one message per (author, seq). A collision means
-        # this account's counter is behind what it has already published --
-        # another copy of the same bot, or a state file restored from a
-        # backup. Skipping ahead is the only way back into line.
-        log "seq #{@state.seq} rejected (#{e.message}); skipping ahead"
-        @state.seq += 1
-        @state.save
+      rescue Client::Conflict
+        # The record hash is what catches a repeat now that there is no
+        # sequence number, so this is the identical record sent twice -- the
+        # same line, the same ack, within the same second. Nothing to recover
+        # from: the next action draws again.
+        log "that exact record was already stored; moving on"
       end
 
       def send_post(view, body, reply_to)
-        # The server is the authority on what this account has already used.
-        # A state file restored from a backup, or lost entirely, would
-        # otherwise collide with its own history on every post.
-        @state.seq = [@state.seq, view.highest_seq_for(identity.pubkey)].max
-        seq        = @state.seq + 1
-
         record = @client.send_message(
-          identity: identity, room: @persona.room, seq: seq, prev: @state.prev,
-          body: body, ack: view.ack, reply_to: reply_to&.hash
+          identity: identity, body: body, ack: view.ack, reply_to: reply_to&.hash
         )
 
-        @state.seq  = seq
-        @state.prev = record
+        @state.see(record)
         @state.save
 
         log "#{reply_to ? 'replied' : 'posted'}: #{body[0, 90]}"
@@ -308,10 +331,10 @@ module ReputableChat
         return unless target
 
         emote = pick_emote
-        @client.send_emote(identity: identity, room: @persona.room,
-                           message: target.hash, emote: emote, ack: view.ack)
+        @client.send_emote(identity: identity, message: target.hash,
+                           emote: emote, ack: view.ack)
 
-        log "reacted #{emote} to #{view.display_name(target.author)}: #{target.body[0, 60]}"
+        log "reacted #{emote} to #{view.display_name(target.pubkey)}: #{target.body[0, 60]}"
         count_vote(view, target, polarity(emote))
       rescue Client::Conflict
         # Already reacted to that message in a previous life of this state
@@ -324,14 +347,12 @@ module ReputableChat
       # nobody's reputation: the records are the display form, the config is
       # the reputation form.
       def count_vote(view, message, polarity)
-        return if message.nil? || message.author == identity.pubkey
+        return if message.nil? || message.pubkey == identity.pubkey
         return if @state.voted?(message.hash)
 
         @state.vote(message.hash)
-        view.adjust_rating(message.author, votes: polarity)
-        view.publish_config!
-        @state.revision = view.revision
-        @state.save
+        record_vote(message.pubkey, polarity)
+        publish_opinions(view)
       end
 
       # Rare, and only for somebody this bot has already been positive about.
@@ -345,16 +366,14 @@ module ReputableChat
       def consider_friending(view)
         return unless @random.rand < @persona.friend_per_visit
 
-        candidates = view.ratings.reject do |pubkey, rating|
+        candidates = @state.ratings.reject do |pubkey, rating|
           rating["friend"] || !rating.fetch("net_votes", 0).positive? || pubkey == identity.pubkey
         end
         return if candidates.empty?
 
         chosen = prefer_drawn(candidates.keys)
-        view.adjust_rating(chosen, friend: true)
-        view.publish_config!
-        @state.revision = view.revision
-        @state.save
+        befriend(chosen)
+        publish_opinions(view)
 
         log "friended #{view.display_name(chosen)}"
       end
@@ -365,10 +384,9 @@ module ReputableChat
         context = Brain::Context.new(
           kind: reply_to ? :reply : :post,
           target: reply_to,
-          target_name: reply_to && view.display_name(reply_to.author),
+          target_name: reply_to && view.display_name(reply_to.pubkey),
           recent: transcript(view),
-          name: @state.username || @persona.username,
-          room: @persona.room
+          name: @state.username || @persona.username
         )
 
         @brain.compose(context)
@@ -378,7 +396,7 @@ module ReputableChat
       # see. A bot that is blocked from seeing somebody should not be writing
       # replies informed by them either.
       def transcript(view, limit: 12)
-        view.visible_messages.last(limit).map { |m| [view.display_name(m.author), m.body] }
+        view.visible_messages.last(limit).map { |m| [view.display_name(m.pubkey), m.body] }
       end
 
       def reply_target(view)
@@ -404,7 +422,7 @@ module ReputableChat
       def attracted(messages)
         return nil if @persona.kind.drawn_to.empty? || @random.rand >= ATTRACTION
 
-        drawn = messages.select { |m| drawn_to?(m.author) }
+        drawn = messages.select { |m| drawn_to?(m.pubkey) }
         drawn.empty? ? nil : drawn
       end
 

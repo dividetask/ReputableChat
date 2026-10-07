@@ -10,27 +10,32 @@ require_relative "cryptography/canonical"
 require_relative "cryptography/signature"
 
 module ReputableChat
-  # Signing as the genesis account from a terminal.
+  # Signing as the genesis account or the host account from a terminal.
   #
   # Everything else in this project keeps private keys inside the browser, in a
   # non-extractable WebCrypto key. This is the one deliberate exception: the
-  # genesis account has to post announcements and vouch for new arrivals
-  # without a person sitting at a browser, so its seed lives in a file.
+  # genesis account and the host account have to publish notices and vouch for
+  # new arrivals without a person sitting at a browser, so their seeds live in
+  # files.
   #
   # That file is a real secret and the weakest point in the system -- whoever
-  # holds it is the genesis account. It is gitignored, written 0600, and
+  # holds it is that account. It is gitignored, written 0600, and
   # deliberately holds the SEED PHRASE rather than the derived private key, so
   # that it is the same thing a person would type into the UI and there is only
   # one secret to look after rather than two.
   module Operator
-    DIRECTORY = File.expand_path("../../config/genesis", __dir__)
+    DIRECTORIES = {
+      genesis: File.expand_path("../../config/genesis", __dir__),
+      host:    File.expand_path("../../config/host", __dir__)
+    }.freeze
+    DIRECTORY = DIRECTORIES.fetch(:genesis)
     HELPER    = File.expand_path("../../script/derive_key.mjs", __dir__)
 
     # Development's seed is committed on purpose; production's never is. The
     # .gitignore ignores every seed and then un-ignores development's, so the
     # accident it guards against is committing a seed, not forgetting to.
-    def self.path_for(environment = Environment.name)
-      File.join(DIRECTORY, "#{environment}.seed")
+    def self.path_for(environment = Environment.name, account: :genesis)
+      File.join(DIRECTORIES.fetch(account), "#{environment}.seed")
     end
 
     SEED_PATH = path_for(Environment::DEVELOPMENT)
@@ -40,7 +45,11 @@ module ReputableChat
 
     module_function
 
-    def seed_path = ENV.fetch("GENESIS_SEED") { Operator.path_for }
+    def seed_path(account: :genesis)
+      return ENV.fetch("GENESIS_SEED") { Operator.path_for } if account == :genesis
+
+      Operator.path_for(account: account)
+    end
 
     # Read, normalized and checked. A seed file that has picked up a stray edit
     # would otherwise derive a different key in silence and sign as an account
@@ -55,8 +64,9 @@ module ReputableChat
     end
 
     def missing_message(path)
-      "no seed at #{path}. `bundle exec rake genesis` writes one; it is gitignored " \
-        "and never committed, so a fresh clone does not have it."
+      "no seed at #{path}. `bundle exec rake genesis` or `bundle exec rake host` writes " \
+        "one. Outside development it is gitignored and never committed, so a fresh clone " \
+        "does not have it."
     end
 
     # Written 0600 before anything is put in it, so the secret is never briefly

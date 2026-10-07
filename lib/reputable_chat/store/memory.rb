@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
+require "bigdecimal"
 require_relative "../reputation/rating"
+require_relative "../reputation/score"
 
 module ReputableChat
   module Store
@@ -25,6 +27,16 @@ module ReputableChat
       # Builds a gated path viewer -> a -> b -> ... by friending each link.
       def chain(*people)
         people.each_cons(2) { |from, to| friend(from, to) }
+        self
+      end
+
+      # A published score, as an attestation carries it. The other half of
+      # `rate`: that is what an author works from, this is what travels.
+      def publish(rater, subject, reputation:, trust: nil)
+        @ratings[rater][subject] = Reputation::Score.new(
+          reputation: BigDecimal(reputation.to_s),
+          trust: trust.nil? ? nil : BigDecimal(trust.to_s)
+        )
         self
       end
 

@@ -6,7 +6,7 @@
 #
 # Almost everything is positive. Negative is deliberately a short list: a
 # negative emote is a real signal, not a way to express mild disagreement.
-# Neutral emotes are reactions that carry no reputational weight at all.
+# Neutral emotes carry no reputational weight at all.
 
 positive:
   - "\U0001F44D"   # thumbs up

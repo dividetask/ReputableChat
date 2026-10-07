@@ -4,7 +4,6 @@
 category: "realperson"
 username: "Ana"
 bio: "mostly lurking, occasionally opinionated"
-room: general
 brain: llm
 
 # The whole of the bot's character. This goes to the model as its system

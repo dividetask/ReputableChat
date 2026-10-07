@@ -1,532 +1,171 @@
 # The chain
 
-Every signed record in ReputableChat names the last record its author had seen
-when they signed it. That one field turns a pile of independent signatures into
-a single tangled history: if you can see a record, you can walk back from it
-through everything its author had already seen, and everything *those* authors
-had seen, until you reach the genesis.
+Every signed record in ReputableChat names the most recent records its author had seen when they signed it. That one field turns a pile of independent signatures into a single tangled history: if you can see a record, you can walk back from it through everything its author had already seen, and everything *those* authors had seen, until you reach the genesis.
 
-There is no proof of work and no mining. The chain is not there to order
-transactions or to stop double spends — it is there so that a record cannot be
-quietly removed, back-dated, or shown to one person and not another. A server
-that drops a message has to drop everything that acknowledged it, and everything
-that acknowledged *those*, which is not something it can do selectively without
-the gap being visible.
+There is no proof of work and thus no mining. The chain is not there to put records in one agreed order, and it does not prevent double spends: it only says who settles one, which is the currency's issuer (see section 10 of the rules). It is there so that a record cannot be quietly removed, back-dated, or shown to one person and not another. A server that drops a message has to drop everything that acknowledged it, and everything that acknowledged *those*, which is not something it can do selectively without the gap being visible.
 
 ## Records
 
-A record is a signed payload. Seven kinds so far:
+What each kind of record is, what its fields mean and what makes it valid is set out in [rules/v0.001.md](rules/v0.001.md), with signed examples in [rules/v0.001-examples.md](rules/v0.001-examples.md). This page explains why the chain works the way it does, and does not repeat the rules.
 
-| purpose | what it is |
-|---|---|
-| `reputablechat:identity:v1` | an **identity declaration**: who someone is, in their own words |
-| `reputablechat:attestation:v1` | what someone thinks of everyone else |
-| `reputablechat:adjustment:v1` | one change to an attestation, between republishes |
-| `reputablechat:message:v1` | a comment in a room |
-| `reputablechat:emote:v1` | a reaction to a comment |
-| `reputablechat:notice:v1` | an official statement from a publisher |
-| `reputablechat:release:v1` | a published version of the client |
+The server refuses an `ack` that is out of order rather than sorting it, because sorting it would change what was signed. The private vault is not a record on the chain — see [identity.md](identity.md).
 
-Every one of them carries `ack`. The private vault does not, because nobody
-else ever sees it — see [identity.md](identity.md).
-
-Records are **generated, not stored as files.** The server keeps database rows
-and builds the record when someone asks for it. That is only safe because the
-canonical form is deterministic: the same row produces the same bytes and
-therefore the same hash and the same signature, every time, on any machine. The
-moment that stops being true the whole structure stops verifying, which is why
-`spec/canonical_parity_spec.rb` exists and why floats are refused outright.
-
-## Notes
-
-Every chain record carries a `note`: free text, null unless set, which the
-software never reads.
-
-It is there because a chain is browsable. Somebody reading the raw records — an
-archivist, an auditor, a person checking what was signed when — gets a place
-where the author can speak to them directly, rather than only to whatever
-client happened to render the record. Bitcoin's genesis block has a newspaper
-headline in it for the same reason.
-
-Three properties make it safe to have:
-
-- **It is signed.** A note sits inside the payload, so nobody can attach one to
-  somebody else's record, strip one, or edit one afterwards.
-- **Nothing branches on it.** No code reads it, so nothing can be smuggled
-  through it by writing something that reads like a directive. It is inert by
-  construction rather than by policy.
-- **It is bounded** (2000 bytes) and **normalized**: an absent note and an
-  empty one produce identical bytes, so two records a reader would call the
-  same cannot carry different signatures.
-
-Anything that renders a note treats it as text and never as markup, like every
-other string somebody else wrote. That rule is not special to notes — see the
-`textContent` line in CLAUDE.md — but a note is the field most likely to be
-displayed by a tool nobody thought about when it was written.
-
-A note is permanent and cannot be retracted, which is worth saying twice: it is
-signed into a record that other records will acknowledge.
+Records are **generated, not stored as files.** The server keeps database rows and builds the record when someone asks for it. That is only safe because the canonical form is deterministic: the same row produces the same bytes and therefore the same hash and the same signature, every time, on any machine. The moment that stops being true the whole structure stops verifying, which is why `spec/canonical_parity_spec.rb` exists and why floats are refused outright.
 
 ## Record hashes
 
-`ack` points at a hash, and `reply_to` and an emote's `message` field now do
-too, replacing the signatures they used to name. A signature identifies a
-payload; a hash identifies the *record*, signature included, which is what you
-want when the thing you are linking to needs to be tamper-evident as a whole.
+`ack` and `target` point at record hashes rather than signatures. A signature identifies a payload; a hash identifies the *record*, signature included, which is what you want when the thing you are linking to needs to be tamper-evident as a whole.
 
-```
-record_hash = SHA256("reputablechat:record:v1\n" + canonical_payload + "\n" + signature)
-```
-
-Hex, 64 characters, the same shape as a content-addressed image name.
-
-The two newlines are unambiguous separators rather than a convention, because
-canonical JSON can never contain a raw `0x0A` — JSON escapes a newline inside a
-string to the two characters `\n`, and there is no whitespace between tokens.
-Base64url contains no newline either. So there is exactly one pair of strings
-that produces any given hash input.
-
-Hashing the stored `payload` **string** rather than a re-serialized object is
-deliberate. The server holds the canonical bytes exactly as they arrived and
-never parses them back into an object; re-serializing server-side is the one
-thing guaranteed to break a signature eventually.
-
-The domain prefix keeps this hash from colliding with the other SHA-256 in the
-system, which addresses image and asset bytes directly.
+Hashing the stored `payload` **string** rather than a re-serialized object is deliberate. The server holds the canonical bytes exactly as they arrived and never parses them back into an object; re-serializing server-side is the one thing guaranteed to break a signature eventually.
 
 ## Genesis
 
-Tim's identity declaration is the bottom of the chain. It is the only record whose `ack`
-is null; every record that has seen nothing else acknowledges Tim.
+The genesis account's first identity declaration is the bottom of the chain. Its `rules` field holds the founding notice — see **The founding notice** below.
 
-It is generated by `script/generate_genesis.rb` and committed to
-`config/genesis/<environment>.json`. That file is the only record stored as a
-file, and it is stored as one because every client needs to agree on the hash
-before it has fetched anything — a genesis you have to download from the server
-is not a genesis.
+The genesis account is the developer's, and it is the same on every server: there is one network and one chain. Its handle is Tim by default, but the docs say *genesis account* because the handle is only a handle.
 
-### Everyone starts by trusting it
+It is generated by `script/generate_genesis.rb` and committed to `config/genesis/<environment>.json`. That file is the only record stored as a file, and it is stored as one because every client needs to agree on the hash before it has fetched anything — a genesis you have to download from the server is not a genesis.
 
-A new identity's first published declaration friends the genesis account.
+### The host account
 
-It has to. An unrated account sits at exactly zero and is invisible to
-everyone, which is the sybil defense — but it also means a newcomer who trusts
-nobody sees nobody, and a network where nobody has vouched for anybody shows a
-blank screen. Trusting the genesis gives a new arrival one anchor to see
-through, and it is what makes `script/tim.rb visible <pubkey>` do anything:
-lifting somebody over the line in the genesis account's own ratings lifts them
-for everyone who has the genesis at one hop.
+A server can have an account of its own: the **host account**. Its first identity declaration acknowledges the genesis, so a server's account hangs off the network's chain instead of starting a second one. It is optional; a server without one runs on the genesis account alone.
+
+It is generated by `rake host` (`script/generate_genesis.rb --host`, which takes the same `--handle`, `--bio` and `--icon` flags as the genesis) and committed to `config/host/<environment>.json`, with its avatar beside it, for the same reason the genesis is: a client needs it before it has fetched anything. The server refuses to boot on a host account that does not acknowledge the genesis it runs.
+
+Nothing enforces who signs what. By convention the genesis account signs what covers the whole network — releases and the rules — and the host account signs what concerns one server, such as an outage notice. `script/tim.rb --host` signs as the host account.
+
+### Everyone starts by trusting them
+
+A new account starts with the genesis account as a friend, and with the host account as a second one where the server has one.
+
+It has to or there would simply be nothing to see on the server. An unrated account sits at exactly zero and is invisible to everyone, which is the sybil defense — but it also means a newcomer who trusts nobody sees nobody, and a network where nobody has vouched for anybody shows a blank screen. Trusting the genesis gives a new arrival one anchor to see through, and it is what makes `script/tim.rb visible <pubkey>` do anything: lifting somebody over the line in the genesis account's own ratings lifts them for everyone who has the genesis at one hop.
 
 Two things about how it is done matter more than the fact of it.
 
-**It is an ordinary rating in the user's own config** — not a rule in the
-client, not a rule on the server, and not a special case anywhere. It sits in
-the friend list beside everybody else and it can be removed like anybody else.
-A trust that cannot be seen or withdrawn is not a default, it is a policy
-wearing a default's clothes, and avoiding a reputation nobody chose is the
-entire point of this project.
+**It is an ordinary friend in the user's own vault** — not a rule in the client, not a rule on the server, and not a special case anywhere. The friend list is private; what reaches anyone else is the genesis account's own attestation, which is published like everybody's. It sits in the friend list beside everybody else and it can be removed like anybody else.
 
-**It is seeded once, when the identity is created.** Re-adding it whenever it
-is missing would mean removing it never took, which is the same thing as not
-being able to remove it. `public/js/defaults.js` holds the rule, and
-`spec/defaults_spec.rb` asserts there is exactly one call site.
-
-Removing it is a real choice with real consequences: without the genesis at one
-hop, nothing it vouches for reaches you, and nobody it has made visible is
-visible. That is the user's decision to make, which is why they get to make it.
+**It is seeded once, when the identity is created.** `public/js/defaults.js` holds the rule, and `spec/defaults_spec.rb` asserts there is exactly one call site.
 
 ### Its avatar is committed too
 
-The genesis account's icon sits beside its record as
-`config/genesis/<environment>.<ext>`, and the server adopts it into the image
-store at boot.
+The genesis account's avatar sits beside its record as `config/genesis/<environment>.<ext>`, and the server adopts it into the image store at boot.
 
-Every other image reaches the store by being uploaded. This one cannot: the
-declaration naming it is committed and read before any client has fetched
-anything, and the store lives under `data/`, which is not in the repository. So
-the bytes are committed as well, and the name stays what it is for every other
-image — the SHA-256 of those bytes — which is what lets a reader confirm the
-avatar is the one that was signed for.
+Every other image reaches the store by being uploaded. This one cannot: the declaration naming it is committed and read before any client has fetched anything, and the store lives under `data/`, which is not in the repository. So the bytes are committed as well, and the name stays what it is for every other image — the SHA-256 of those bytes — which is what lets a reader confirm the avatar is the one that was signed for.
 
-Adopting it rather than serving it from `config/` keeps one serving path. And
-the adoption checks: if the committed image does not hash to the name the
-declaration carries, the server says so, because the alternative is a broken
-avatar and no other sign that a signed claim was wrong.
+### Development and production
 
-### Two of them
+Development and production have different genesis accounts, and different host accounts, and the difference is not cosmetic. What follows is said of the genesis and holds for the host account the same way.
 
-Development and production have different genesis accounts, and the difference
-is not cosmetic.
+**Development's seed is committed to git**, so that identity is public: everyone who has cloned the repository can sign as it. That is the point. A fresh clone can post messages and vouch for accounts locally without anybody being handed a secret, and the CLI works out of the box. Nothing of value is protected by it, because a development chain is not one anybody relies on.
 
-**Development's seed is committed**, so that identity is public: everyone who
-has cloned the repository can sign as it. That is the point. A fresh clone can
-post announcements and vouch for accounts locally without anybody being handed
-a secret, and the CLI works out of the box. Nothing of value is protected by
-it, because a development chain is not one anybody relies on.
+**Production's seed is never committed.** Whoever holds it is the genesis account. The production genesis seed lives with the developer, never on a server: a server needs only the committed record. A server's production host seed lives on that server.
 
-**Production's seed is never committed.** Whoever holds it is the genesis
-account, and can publish a release every client would run.
+The failure this is shaped around is a production deployment quietly running the published development key. Production therefore refuses to boot on it, and the check compares public keys rather than filenames — the realistic mistake is copying the development record into place, not giving it the wrong name. `.gitignore` is written the same way round: ignore every seed, then un-ignore development's, so a new environment is refused by default rather than committed by an omission nobody notices.
 
-The failure this is shaped around is a production deployment quietly running
-the published development key. Production therefore refuses to boot on it, and
-the check compares public keys rather than filenames — the realistic mistake is
-copying the development record into place, not giving it the wrong name.
-`.gitignore` is written the same way round: ignore every seed, then un-ignore
-development's, so a new environment is refused by default rather than committed
-by an omission nobody notices.
+The script runs the **real** client derivation path under Node: the vendored Argon2id build, the same Argon2id parameters out of `config/reputation.yml`, and WebCrypto Ed25519. It is not a second implementation that could drift from the browser's and strand the account it creates.
 
-The script runs the **real** client derivation path under Node: the vendored
-Argon2id build, the same Argon2id parameters out of `config/reputation.yml`,
-and WebCrypto Ed25519. It is not a second implementation that could drift from
-the browser's and strand the account it creates.
+It writes the seed beside the record, 0600 in both environments. The production one is never printed — a terminal scrollback, a CI log and a screen share are all places a seed should not turn up. Both hold the phrase rather than the derived key, so it is the same secret a person would type into the UI and there is one thing to look after rather than two that must not disagree.
 
-It writes the seed beside the record, 0600 in both environments. The production
-one is never printed — a terminal scrollback, a CI log and a screen share are
-all places a seed should not turn up. Both hold the phrase rather than the
-derived key, so it is the same secret a person would type into the UI and there
-is one thing to look after rather than two that must not disagree.
+`script/tim.rb` signs with it, which is how the genesis account posts messages and vouches for new arrivals without somebody sitting at a browser. That file is the one place in this project a private key lives outside a browser, and it is the weakest point in the system: whoever holds it is the genesis account.
 
-`script/tim.rb` signs with it, which is how the genesis account posts
-announcements and vouches for new arrivals without somebody sitting at a
-browser. That file is the one place in this project a private key lives outside
-a browser, and it is the weakest point in the system: whoever holds it is the
-genesis account, and can publish a release every client would run.
+The command that matters on a new network is `visible`. An unrated account sits at exactly zero and is invisible to everyone, which is the sybil defense and also the reason nobody can get started. One positive rating from the genesis account lifts somebody over the line for anyone who rates the genesis account.
 
-The command that matters on a new network is `visible`. An unrated account sits
-at exactly zero and is invisible to everyone, which is the sybil defense and
-also the reason nobody can get started. One positive rating from the genesis
-account lifts somebody over the line for anyone who rates the genesis account.
+## Rules
+
+The rules, and how they change, are in [rules/v0.001.md](rules/v0.001.md). Nobody owns the chain: anyone can publish a release, and everyone decides which rules they follow.
+
+When a record is refused because newer rules have been published, the browser signs it again under the new rules, along with anything of its own that acknowledged it.
+
+### The founding notice
+
+The first rules, `docs/project/rules/v0.001.md`, are the **founding notice**: the `rules` field of the genesis record. It is not a record of its own. It sits inside the genesis, so it is at the bottom of the chain with it and every record that reaches the genesis reaches it too. There is one per chain; later versions of the rules are releases, not founding notices.
+
+The rules have a field of their own, carried only by the genesis and by releases, so the genesis record's `body` is free to be the genesis account's bio like anybody else's. A rules document also outgrows `body`'s 16,000 bytes long before it outgrows its own limit.
+
+### The rules file is the source
+
+Each version's text lives in the repository as `docs/project/rules/v<version>.md`, the founding notice included. The generator is to read the `rules` field straight from that file rather than from a copy, so the file and the chain cannot disagree. A new version is a new file; an existing one is never edited once published, because its bytes are signed into the chain.
+
+Versions below 1 are pre-launch and cost nothing to change, since nothing is published. Version 1 is reserved for the first rules that go live.
 
 ## What gets acknowledged
 
-You acknowledge the most recent record you have seen **whose author you rate
-above `chain.min_reputation_to_acknowledge`**. Not the most recent record, full
-stop.
+You acknowledge the most recent records you have seen **whose authors you rate above `chain.min_reputation_to_acknowledge`**, and have not yet been acknowledged by such authors.
 
-That threshold is your own, it uses your own attestation and your own config,
-and so the rule is subjective in exactly the way everything else here is. Two
-people looking at the same room will disagree about which references were
-legitimate, and there is no view from nowhere that settles it.
+That threshold is your own, it uses your own attestation and your own config, and so the rule is subjective in exactly the way everything else here is. Two people reading the same history will disagree about which references were legitimate, and there is no view from nowhere that settles it.
 
-This has a consequence worth stating plainly rather than discovering later:
-**records from accounts nobody has vouched for go unanchored.** They sit off to
-the side of the history, referenced by nothing, and disappear the moment the
-server stops serving them. That is the point of it — the chain is a structure
-the vouched-for part of the network builds for itself, and being outside it is
-the cost of having nobody at all willing to acknowledge you.
+This has a consequence worth stating plainly rather than discovering later: **records from accounts nobody has vouched for go unanchored.** They sit off to the side of the history, referenced by nothing, and disappear the moment the server stops serving them. That is the point of it — the chain is a structure the vouched-for part of the network builds for itself, and being outside it is the cost of having nobody at all willing to acknowledge you.
 
 ### What is actually excluded
 
-"Never acknowledged" is too strong, and correcting it needs care, because the
-obvious correction is also wrong.
+"Never acknowledged" is too strong, and correcting it needs care, because the obvious correction is also wrong.
 
-It only takes **one** person willing to acknowledge somebody for them to be
-anchored. If B can see someone A cannot, B may acknowledge their message, and
-if A then acknowledges B, that person sits inside the history A's own records
-hang from.
+It only takes **one** person willing to acknowledge somebody for them to be anchored. If B can see someone A cannot, B may acknowledge their message, and if A then acknowledges B, that person sits inside the history A's own records hang from.
 
-The tempting reading is that this is a leak — a bad actor sneaking in through
-somebody careless. It is not, and treating it that way would contradict the
-whole premise. **There is no objective troll.** Someone unbearable to A may be
-worth reading to B, and B acknowledging them is B's judgement working
-correctly, not failing. Being loud, rude or disagreeable is a matter of
-tolerance, and tolerance is exactly what this system declines to decide
-centrally. The intended end state is that the same person is muted by some and
-tolerated by others, at the same time, with both views equally correct.
+The tempting reading is that this is a leak — a bad actor sneaking in through somebody careless. It is not, and treating it that way would contradict the whole premise. **There is no objective troll.** Someone unbearable to A may be worth reading to B, and B acknowledging them is B's judgement working correctly, not failing. Being loud, rude or disagreeable is a matter of tolerance, and tolerance is exactly what this system declines to decide centrally. The intended end state is that the same person is muted by some and tolerated by others, at the same time, with both views equally correct.
 
-So the property is not "disagreeable people are kept out". It is narrower and
-more useful:
+So the property is not "disagreeable people are kept out". It is narrower and more useful:
 
-**A record is anchored only if at least one person who clears somebody's bar
-chose to acknowledge it.**
+**A record is anchored only if at least one person who clears somebody's bar chose to acknowledge it.**
 
-That is still a real defense, because it is what a sybil cannot satisfy. A
-thousand accounts controlled by one person can acknowledge each other all day
-and build an elaborate history among themselves, but nothing they make is ever
-referenced from a record anyone else hangs their own records from. They get a
-private region of the graph that the rest of the network never walks into.
-Nobody is excluded for being disagreeable; the unvouched-for are excluded for
-being unvouched-for.
+That is still a real defense, because it is what a sybil cannot satisfy. A thousand accounts controlled by one person can acknowledge each other all day and build an elaborate history among themselves, but nothing they make is ever referenced from a record anyone else hangs their own records from. They get a private region of the graph that the rest of the network never walks into. Nobody is excluded for being disagreeable; the unvouched-for are excluded for being unvouched-for.
 
-And what anchoring confers is worth naming precisely: tamper-evidence, and
-nothing else. A record that has been acknowledged cannot be silently dropped
-without leaving a gap. It buys no visibility — A still never renders it — no
-reputation, and no reach.
+And what anchoring confers is worth naming precisely: tamper-evidence, and nothing else. A record that has been acknowledged cannot be silently dropped without leaving a gap. It buys no visibility — A still never renders it — no reputation, and no reach.
 
-There is deliberately **no lever** against somebody else's acknowledgements. A
-trust multiplier governs what a person's recommendations are worth, not what
-they choose to anchor, and that asymmetry is correct: what B finds worth
-acknowledging is B's business, and A disagreeing about it is precisely the
-disagreement the system exists to hold open rather than resolve.
+There is deliberately **no lever** against somebody else's acknowledgements. A trust multiplier governs what a person's recommendations are worth, not what they choose to anchor, and that asymmetry is correct: what B finds worth acknowledging is B's business, and A disagreeing about it is precisely the disagreement the system exists to hold open rather than resolve.
 
-Refusing to acknowledge B over what B acknowledged would also be ruinous
-mechanically. It means walking B's ancestry before every post, and it fragments
-the DAG along each viewer's visibility, so a shared history stops being
-shared — for the sake of enforcing a judgement that was never meant to be
-shared in the first place.
+Refusing to acknowledge B over what B acknowledged would also be ruinous mechanically. It means walking B's ancestry before every message, and it fragments the DAG along each viewer's visibility, so a shared history stops being shared — for the sake of enforcing a judgement that was never meant to be shared in the first place.
 
 ### Walking the chain is reputation-blind
 
-The above only stays harmless because of a rule that is easy to violate by
-accident:
+The above only stays harmless because of a rule that is easy to violate by accident:
 
 **Chain traversal ignores reputation entirely. Only rendering is filtered.**
 
-Every record is content-addressed and independently signed, so a viewer can
-fetch and verify a record whose author they would never display — the server
-has no opinion about who can see whom, and a signature verifies without
-trusting the signer. That is what keeps the walk back to the genesis intact
-across a link through somebody hidden.
+Every record is content-addressed and independently signed, so a viewer can fetch and verify a record whose author they would never display — the server has no opinion about who can see whom, and a signature verifies without trusting the signer. That is what keeps the walk back to the genesis intact across a link through somebody hidden.
 
-If a client ever gates *hash resolution* on visibility rather than gating
-display, the walk stops at the first record it will not show, and the chain
-genuinely does break from that viewer's perspective — not because the structure
-is wrong, but because the client refused to look. Filter at the point of
-rendering, never at the point of fetching.
+If a client ever gates *hash resolution* on visibility rather than gating display, the walk stops at the first record it will not show, and the chain genuinely does break from that viewer's perspective — not because the structure is wrong, but because the client refused to look. Filter at the point of rendering, never at the point of fetching.
 
-The cost is that a viewer's ancestry is not confined to people they can see. A
-full verification back to the genesis pulls in records from strangers and from
-people that viewer has blocked, because both may sit on the path — somebody
-else found them worth acknowledging, which is all it takes. Anyone trading
-completeness for bandwidth is choosing how far back tamper-evidence actually
-reaches.
+The cost is that a viewer's ancestry is not confined to people they can see. A full verification back to the genesis pulls in records from strangers and from people that viewer has blocked, because both may sit on the path — somebody else found them worth acknowledging, which is all it takes. Anyone trading completeness for bandwidth is choosing how far back tamper-evidence actually reaches.
 
-The server does not check any of this. It cannot: it never computes a
-reputation, so it has no opinion about whether an `ack` was well chosen. It
-stores what it is given and serves it back. Verification is the reader's, and
-only a reader running the author's own parameters can even attempt it.
+The server does not check any of this. It cannot: it never computes a reputation, so it has no opinion about whether an `ack` was well chosen. It stores what it is given and serves it back.
 
 ## Attestations
 
-The old public config carried `{friend, reported, net_votes}` per person and
-let every reader run the curve themselves. An attestation carries **scores**:
+Most people never set a rating by hand — friending and reacting move it, and the curve runs once, in the author. Advanced users can set it directly.
 
-```json
-{ "purpose": "reputablechat:attestation:v1",
-  "pubkey":  "...",
-  "revision": 4,
-  "ack":     "<64 hex>",
-  "ts":      1710000000,
-  "scores":  { "<pubkey>": { "reputation": "0.5", "trust": "1" } },
-  "derived": { "hops": 3, "params": "<64 hex>",
-               "scores": { "<pubkey>": "0.0123" } } }
-```
+A trust multiplier exists for the case where a friend is worth reading but has terrible judgement in who *else* to vouch for: set them to 0 and their messages stay visible while their recommendations stop carrying anyone in.
 
-`reputation` is what the author thinks of that person. Most people never set it
-by hand — friending and emoting move it, and the curve that used to run in
-every reader now runs once in the author. Advanced users can set it directly.
+**Multipliers compound along the path.** A 0.5 at hop one and a 0.5 at hop two means everything past the second is worth a quarter. A 0 prunes the branch there — the traversal stops rather than carrying a zero through the remaining hops, which is both correct and cheaper. A negative inverts, which is what "I trust this person to be reliably wrong" means, and it compounds like any other factor, so two negatives in a chain do multiply back to positive. This functionality exists simply because including it is cheap, and not because it will likely see mainstream use.
 
-`trust` is the multiplier on everything that person recommends. It defaults to
-1 for anyone positive and 0 for anyone blocked, so it only needs storing when
-somebody has overridden it. It exists for the case where a friend is worth
-reading but has terrible taste in who *else* to vouch for: set them to 0 and
-their posts stay visible while their recommendations stop carrying spam in.
-
-**Multipliers compound along the path.** A 0.5 at hop one and a 0.5 at hop two
-means everything past the second is worth a quarter. A 0 prunes the branch
-there — the traversal stops rather than carrying a zero through the remaining
-hops, which is both correct and cheaper. A negative inverts, which is what
-"I trust this person to be reliably wrong" means, and it compounds like any
-other factor, so two negatives in a chain do multiply back to positive.
-
-The friend and report lists that used to be public are not here. They moved
-into the private vault. What the network sees is the score that resulted, never
-the act that caused it.
+The friend and report lists are not in an attestation. They are in the private vault: what the network sees is the rating that resulted, never the act that caused it.
 
 ### The derived cache
 
-`derived` is the author's own calculated scores, out to `attestation.published_hops`
-(3 by default). It is not a convenience: it is the **fourth term** of everyone
-else's score, because the walk stops at hop 2 and depth 3 is filled in from
-these summaries rather than reached. See **Why the walk stops at two** in
-[reputation.md](reputation.md).
+`derived` reaches out to `attestation.published_hops` (3 by default), for readers whose walk did not reach that far. See **The derived cache** in [reputation.md](reputation.md).
 
-It is still never an input to a reader's own opinion at depths 0 to 2, which
-are read from direct scores. It carries 0.0009 of the total, cannot make anyone
-Trusted on its own, and exists mainly to lift a well-regarded stranger from
-Blocked to Tolerated.
-
-It carries `params`, a hash of the reputation parameters it was computed under,
-because without that it would be worse than useless. Reputation is subjective
-and configuration is per-user: the author may have a different `k`, a different
-curve, `show_unrated` on. A reader whose parameters hash differently has to
-recompute and the cache saves them nothing. A reader who took the numbers
-anyway would silently adopt a stranger's settings.
-
-This is the one place the project publishes a computed score, and
-[reputation.md](reputation.md) argues against exactly that — a published score
-goes stale the moment the curve is retuned. The `params` hash is what contains
-the damage: stale numbers are *detectably* stale rather than quietly wrong.
-
-## Adjustments
-
-Re-signing and re-uploading a whole attestation every time someone emotes a
-comment would be absurd — the file grows with every person you have ever rated,
-and an emote changes one number in it.
-
-So between republishes, each change is its own small record:
-
-```json
-{ "purpose": "reputablechat:adjustment:v1",
-  "pubkey":  "...",
-  "base_revision": 4,
-  "seq":     7,
-  "target":  "<pubkey>",
-  "reputation": "0.5032",
-  "trust":   "1",
-  "ack":     "<64 hex>",
-  "ts":      1710000000 }
-```
-
-`base_revision` names the attestation it amends and `seq` orders it within that
-run, so a reader takes the snapshot and replays the adjustments on top in a
-fixed order. Both are inside the signature, so the server cannot reorder them.
-
-An **emote record is already its own adjustment** — it names the author, the
-message and the reaction, and the author's score for that person follows from
-it. Adjustments exist for the changes that have no other public record:
-friending, reporting, and a hand-set score or multiplier. Those acts stay
-private; only their arithmetic result is published.
-
-A full attestation is republished after `attestation.resubmit_after_changes`
-changes or `attestation.resubmit_after_seconds`, whichever comes first, and
-supersedes every adjustment against the previous revision. Only score-changing
-events count toward the tally. Posting a comment is not one — it cannot move a
-number in the file, so counting it would republish for a reason that could not
-have changed anything.
-
-**Nothing is published without something to say.** Both limits are floors on
-when pending changes go out, not schedules: an account with no pending changes
-publishes nothing, and one that was created and never used leaves nothing behind
-but its identity declaration. The clock is only ever read while somebody is
-signed in, so it cannot fire for a dormant account in any case.
-
-Neither limit slows down vouching, and it would be a mistake to read them that
-way. Ten friendships in a row meet the threshold on the spot. The cadence exists
-to stop one attestation being re-signed and re-uploaded per emote — it is not a
-rate limit, and a new account can publish a full set of vouches within a minute
-of being created.
-
-There is no attestation at all until the first one is published, so there is
-nothing for an adjustment to amend until then. Changes before that accumulate in
-the vault, and revision 1 publishes the accumulated set.
-
-## Notices
-
-An official statement signed by a publisher: an outage, a policy, a release,
-the founding statement itself.
-
-```json
-{ "purpose":    "reputablechat:notice:v1",
-  "publisher":  "...",
-  "revision":   4,
-  "kind":       "outage",
-  "title":      "Planned outage",
-  "body":       "02:00-03:00 UTC on Friday.",
-  "supersedes": "<64 hex>",
-  "ack":        "<64 hex>",
-  "note":       null,
-  "ts":         1710000000 }
-```
-
-`kind` comes from a closed list in `config/notices.yml`, served at
-`/api/notice-kinds`, for the same reason emotes are a closed list: an arbitrary
-string would be stored and rendered back to everyone, and a client cannot
-present something it has never heard of. Adding a kind is cheap; removing one
-is not, because notices already signed under it stay on the chain and still
-have to render.
-
-**A correction is a new record, never an edit.** `supersedes` names the notice
-being replaced. A mutated record would no longer match its signature, and the
-whole point of a notice is that what was said is still there to be checked — so
-notices accumulate rather than overwrite, and a reader walks back through
-`supersedes` to see what a statement replaced.
-
-`founding` is the kind that supersedes nothing, and the server refuses a
-founding notice that claims to. A chain has one bottom.
-
-The server checks the shape, the signature and the revision, and has no opinion
-about the contents. It does not know what a policy is — only that this
-publisher has not used this number before.
-
-## Releases
-
-A release record pins a version of the client:
-
-```json
-{ "purpose":   "reputablechat:release:v1",
-  "publisher": "<Tim's pubkey>",
-  "revision":  12,
-  "label":     "0.4.0",
-  "files":     { "index.html": "<64 hex>", "js/app.js": "<64 hex>" },
-  "notes":     "...",
-  "ack":       "<64 hex>",
-  "ts":        1710000000 }
-```
-
-It is a **manifest**, not an archive. A zip would have been the obvious thing
-and is the wrong thing: entry order, timestamps and compression level all land
-in the bytes, so the same source tree hashes differently on two machines, and a
-hash that depends on who built it cannot prove anything. A manifest of
-`path → sha256` is reproducible from a clean checkout by anyone. Files live in
-the content-addressed asset store, so an unchanged file costs nothing across
-releases — the 29 KB Argon2 build is stored once, forever.
-
-Publishing every release to the chain means the operator cannot serve one
-person different JavaScript from everyone else without it being visible. That
-is the whole point; the version history is a pleasant side effect.
-
-Releases are cut when one is published, not per commit. The chain is not the
-repository.
-
-**Tim is the only publisher for now.** The record carries `publisher` so that a
-per-user trusted-developer setting can arrive later without re-signing
-anything, but nothing today consults it.
+A reader reaching for it has run out of its own reach and uses it to cheaply extend their reach. 
 
 ### Not built: fetching a record by hash
 
-There is no route that resolves a record hash to its record. Messages are
-served per room, and `ack` names records that may be in another room, another
-kind, or from somebody the viewer never fetched. Walking the chain at all needs
-`GET` by hash, and it has to serve any record to anyone, for the reason above.
+There is no route that resolves a record hash to its record. Each kind is served by its own route, and `ack` names records that may be of another kind, or from somebody the viewer never fetched. Walking the chain at all needs `GET` by hash, and it has to serve any record to anyone, for the reason above.
 
-### Not built: actually loading one
+### Not built: loading the client from a release
 
-The client still loads its UI from the server the ordinary way. A release
-record is published and verifiable, and nothing executes off the chain yet.
+The client still loads its UI from the server the ordinary way, and a release does not yet say which files make up the client.
 
-That last step is deliberately not taken, because it is not the small step it
-looks like. The private key lives in this origin's IndexedDB, and anything
-served from this origin can use it. An old release loaded at the same address
-would have full use of the current key, so pinning a version that shipped a
-signing bug hands that bug back — and "load this old version, it was better" is
-an easy thing to talk somebody into.
+Loading one is deliberately not the small step it looks like. The private key lives in this origin's IndexedDB, and anything served from this origin can use it. An old release loaded at the same address would have full use of the current key, so pinning a version that shipped a signing bug hands that bug back — and "load this old version, it was better" is an easy thing to talk somebody into.
 
 The options, when it comes to it:
 
-- **Revocation and a floor.** A publisher-signed record makes known-bad
-  versions unloadable. Cheap, covers the realistic case, and leaves the
-  publisher deciding what you may run — which dents the point.
-- **One origin per version** (`v12.chat.example`). Genuine isolation: the old
-  version has no key at all and must ask the main origin to sign, which can
-  show the user what it is signing. Needs wildcard DNS and TLS and a postMessage
-  bridge.
+- **Revocation and a floor.** A signed record makes known-bad versions unloadable. Cheap, covers the realistic case, and leaves the signer deciding what you may run — which dents the point.
+- **One origin per version** (`v12.chat.example`). Genuine isolation: the old version has no key at all and must ask the main origin to sign, which can show the user what it is signing. Needs wildcard DNS and TLS and a postMessage bridge.
 - **No rail.** Pin whatever you like behind a warning.
 
-Serving each version as ordinary static files from a content-addressed path
-keeps `script-src 'self'` intact either way. Evaluating a bundle out of a JSON
-blob would need `unsafe-eval`, and that CSP line is precisely what keeps
-injected script from reaching the private key — so that approach is closed
-whatever else is decided.
+Serving each version as ordinary static files from a content-addressed path keeps `script-src 'self'` intact either way. Evaluating a bundle out of a JSON blob would need `unsafe-eval`, and that CSP line is precisely what keeps injected script from reaching the private key — so that approach is closed whatever else is decided.
 
 ## What the server does with all this
 
-The same as it did before, which is as little as possible. It verifies a
-signature, rejects a rollback by revision, stores a row, and serves the bytes
-back unchanged. It does not validate an `ack`, does not know what a reputation
-is, and cannot tell a well-chosen reference from a bad one.
+As little as possible. It verifies a signature, stores a row, and serves the bytes back unchanged. It does not know what a reputation is, and cannot tell a well-chosen reference from a bad one.
 
-Storing rows rather than files is the balance this project wants: a record is
-cheap to regenerate and expensive to store a million times over, and the
-determinism that makes regeneration safe is already load-bearing for other
-reasons.
+Storing rows rather than files is the balance this project wants: a record is cheap to regenerate and expensive to store a million times over, and the determinism that makes regeneration safe is already load-bearing for other reasons.

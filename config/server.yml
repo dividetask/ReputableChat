@@ -5,12 +5,25 @@
 # inject a value without editing a file baked into an image; this file is the
 # default for everything else.
 
-# The public URL this server is reached at.
+# The addresses this server is reached at. Optional, and unset by default.
 #
-# It travels inside the signed login payload, so it must match the origin the
-# browser signs or every login is rejected as a bad signature. Change it when
-# you deploy -- the default is what puma serves locally.
-origin: "http://localhost:9292"
+# Unset, the server takes its address from each request, so the same code runs
+# at any domain or IP with nothing to configure. Behind a reverse proxy the
+# proxy must pass the browser's Host and scheme; Caddy does by default, and
+# nginx needs:
+#
+#   proxy_set_header Host $host;
+#   proxy_set_header X-Forwarded-Proto $scheme;
+#
+# Set, logins are accepted only when signed for one of the addresses listed --
+# one, or a list, or in ORIGIN separated by commas. That also stops a malicious
+# server relaying a terminal client's login (script/tim.rb) to this one, which
+# an unset origin cannot; browsers are no worse off either way. A browser at an
+# address not listed is told which address to use.
+#
+# origin:
+#   - "https://chat.example.org"
+#   - "http://203.0.113.7:9292"
 
 database_url: "sqlite://data/reputablechat.db"
 image_root: "data/images"
@@ -39,8 +52,13 @@ limits:
   vault_bytes: 1048576
   image_bytes: 262144
   message_bytes: 4000
+  # An attestation holds an entry per person its author has an opinion about, so
+  # it is the one record whose size the author decides. Bounded in bytes rather
+  # than in entries: the bytes are what the server has to hold and serve, and a
+  # server can raise this without anybody re-signing anything.
+  attestation_bytes: 4194304
   notice_bytes: 16000
-  note_bytes: 2000
+  note_bytes: 16000
   # Advice rather than a limit: nothing rejects a vault for holding more. It
   # tells a client how many first-seen entries to keep before pruning, since it
   # is the client that has to decide what to drop. Friends and blocked accounts

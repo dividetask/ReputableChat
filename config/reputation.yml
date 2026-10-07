@@ -9,13 +9,15 @@ precision:
 
 constants:
   # Ladder decay. Your own rating is worth (1-k), the whole rest of the network
-  # worth k. Coupled to the vote curve: requires A < k**3 < 4A.
+  # worth k.
   k: "0.1"
 
 ladder:
   max_hops: 7
-  # Traversal also stops here, whichever limit is reached first.
-  max_configs: 5000
+  # The most accounts one walk will reach. Traversal stops at whichever of the
+  # two limits comes first: a positive-only graph still branches, so a hop count
+  # alone does not bound how much gets fetched.
+  max_accounts: 5000
 
 gate:
   # Only configs of people rated above this are read.
@@ -30,7 +32,6 @@ actions:
 
 vote_curve:
   # sign(x) * min(cap, A*x^2 + B*|x|)
-  # A is pinned to (k**3/4, k**3) by the report rule. B > 0 narrows that window.
   cap: "0.5"
   a: "0.0004"
   b: "0"

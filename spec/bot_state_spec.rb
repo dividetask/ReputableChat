@@ -5,9 +5,9 @@ require "reputable_chat/bot/state"
 require "tmpdir"
 
 # What a bot has to remember between runs. Losing any of it has consequences
-# that are quiet rather than loud: a forgotten seq collides with its own
-# history, a forgotten vote list double-reacts, a forgotten seed is an
-# account nobody can ever open again.
+# that are quiet rather than loud: a forgotten vote list double-reacts, a
+# forgotten friend list unfriends everybody at the next attestation, and a
+# forgotten seed is an account nobody can ever open again.
 class BotStateSpec < Minitest::Test
   State = ReputableChat::Bot::State
 
@@ -20,18 +20,16 @@ class BotStateSpec < Minitest::Test
   def test_everything_needed_to_be_the_same_account_survives_a_restart
     with_state do |state, dir|
       state.recycle!(seed: "a b c", pubkey: "KEY", username: "Ana", retire_after_days: 3)
-      state.seq = 7
-      state.prev = "SIG"
       state.revision = 4
+      state.ratings["FRIEND"] = { "friend" => true }
       state.vote("MSG")
       state.save
 
       reloaded = State.load(File.join(dir, "bot.json"), name: "bot")
 
       assert_equal "a b c", reloaded.seed
-      assert_equal 7, reloaded.seq
-      assert_equal "SIG", reloaded.prev
       assert_equal 4, reloaded.revision
+      assert reloaded.ratings.dig("FRIEND", "friend"), "the friend list did not survive the restart"
       assert reloaded.voted?("MSG"), "one vote per message did not survive the restart"
     end
   end
@@ -42,14 +40,14 @@ class BotStateSpec < Minitest::Test
   def test_a_recycled_bot_stops_using_its_old_account_but_does_not_destroy_it
     with_state do |state, _dir|
       state.recycle!(seed: "old seed", pubkey: "OLD", username: "First")
-      state.seq = 9
       state.vote("MSG")
+      state.ratings["FRIEND"] = { "friend" => true }
 
       state.recycle!(seed: "new seed", pubkey: "NEW", username: "Second")
 
       assert_equal "NEW", state.pubkey
-      assert_equal 0, state.seq, "a new account starts its sequence again"
       refute state.voted?("MSG"), "a new account has voted on nothing"
+      assert_empty state.ratings, "a new account has no opinions of its own yet"
       assert_equal %w[OLD], state.retired.map { |r| r["pubkey"] }
       assert_equal "old seed", state.retired.first["seed"]
     end
@@ -96,7 +94,7 @@ class BotStateSpec < Minitest::Test
     end
   end
 
-  # The room only serves the last hundred messages, so remembering thousands
+  # The server only serves the recent messages, so remembering thousands
   # buys nothing and the file would grow without bound.
   def test_what_it_remembers_seeing_stays_bounded
     with_state do |state, _dir|

@@ -7,5 +7,6 @@
   },
   "devDependencies": {
     "playwright-core": "^1.49.0"
-  }
+  },
+  "//": "No \"type\": \"module\" here. It silences a cosmetic Node warning and breaks script/derive_key.mjs, which loads the vendored Argon2 UMD build through createRequire -- under type:module that .js file is treated as ESM and the CommonJS export disappears."
 }

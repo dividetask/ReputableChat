@@ -22,7 +22,7 @@ class NoticeSpec < Minitest::Test
   def setup
     ReputableChat::App.store   = ReputableChat::Store::Database.new("sqlite:/")
     ReputableChat::App.images  = ReputableChat::Store::Images.new(Dir.mktmpdir)
-    ReputableChat::App.origin  = ORIGIN
+    ReputableChat::App.origins  = [ORIGIN]
     ReputableChat::App.genesis = GenesisFixture.build
     @signing = Ed25519::SigningKey.generate
     @pubkey  = Sig.encode(@signing.verify_key.to_bytes)
@@ -51,7 +51,7 @@ class NoticeSpec < Minitest::Test
   def notice_body(revision: 1, kind: "policy", title: "A title", body: "A body.",
                   supersedes: nil)
     ts = Time.now.to_i
-    payload = Payload.notice(publisher: @pubkey, revision: revision, kind: kind,
+    payload = Payload.notice(pubkey: @pubkey, revision: revision, kind: kind,
                              title: title, body: body, ack: ack, issued_at: ts,
                              supersedes: supersedes)
     { "revision" => revision, "kind" => kind, "title" => title, "body" => body,

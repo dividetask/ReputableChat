@@ -91,8 +91,9 @@ export async function deriveFromSeed(phrase, kdf) {
 
 // --- persistence -------------------------------------------------------
 //
-// A CryptoKey survives structured cloning, so the non-extractable key can live
-// in IndexedDB across a page refresh without its bytes ever being exposed.
+// A CryptoKey survives structured cloning, so the non-extractable keys -- the
+// signing key and the vault key -- can live in IndexedDB across a page refresh
+// without their bytes ever being exposed.
 // Memory-only storage would die on every refresh, which is not a log out --
 // this matches "stays until you log off" more literally.
 
@@ -143,8 +144,6 @@ export async function sign(identity, payload) {
 export const PURPOSE = {
   LOGIN: "reputablechat:login:v1",
   MESSAGE: "reputablechat:message:v1",
-  CONFIG: "reputablechat:config:v1",
-  PRIVATE_CONFIG: "reputablechat:private-config:v1",
   EMOTE: "reputablechat:emote:v1",
   IDENTITY: "reputablechat:identity:v1",
   ATTESTATION: "reputablechat:attestation:v1",
@@ -163,26 +162,18 @@ export function loginPayload({ pubkey, nonce, origin, ts }) {
   return { purpose: PURPOSE.LOGIN, pubkey, nonce, origin, ts };
 }
 
-export function messagePayload({ author, room, seq, prev, body, ack, ts, replyTo = null, note = null }) {
-  return { purpose: PURPOSE.MESSAGE, author, room, seq, prev, reply_to: replyTo, ack, note, ts, body };
+export function messagePayload({ pubkey, body, ack, ts, replyTo = null, note = null }) {
+  return { purpose: PURPOSE.MESSAGE, pubkey, reply_to: replyTo, ack, note, ts, body };
 }
 
-export function configPayload({ pubkey, revision, profile, ratings, ts }) {
-  return { purpose: PURPOSE.CONFIG, pubkey, revision, profile, ratings, ts };
-}
-
-export function emotePayload({ author, room, message, emote, ack, ts, note = null }) {
-  return { purpose: PURPOSE.EMOTE, author, room, message, emote, ack, note, ts };
+export function emotePayload({ pubkey, message, emote, ack, ts, note = null }) {
+  return { purpose: PURPOSE.EMOTE, pubkey, message, emote, ack, note, ts };
 }
 
 // `revision` sits outside the ciphertext so the server can reject a rollback
 // on a document it can otherwise make nothing of.
 export function vaultPayload({ pubkey, revision, ciphertext, iv, ts }) {
   return { purpose: PURPOSE.VAULT, pubkey, revision, ciphertext, iv, ts };
-}
-
-export function privateConfigPayload({ pubkey, revision, settings, voted, ts }) {
-  return { purpose: PURPOSE.PRIVATE_CONFIG, pubkey, revision, settings, voted, ts };
 }
 
 // `master_pubkey` and `previous_pubkey` are placeholders for key rotation and
@@ -222,16 +213,16 @@ export function adjustmentPayload({
 // matches its signature, and the point of a notice is that what was said is
 // still there to be checked.
 export function noticePayload({
-  publisher, revision, kind, title, body, ack, ts, supersedes = null, note = null,
+  pubkey, revision, kind, title, body, ack, ts, supersedes = null, note = null,
 }) {
   return {
-    purpose: PURPOSE.NOTICE, publisher, revision, kind, title, body,
+    purpose: PURPOSE.NOTICE, pubkey, revision, kind, title, body,
     supersedes, ack, note, ts,
   };
 }
 
-export function releasePayload({ publisher, revision, label, files, notes, ack, ts, note = null }) {
-  return { purpose: PURPOSE.RELEASE, publisher, revision, label, files, notes, ack, note, ts };
+export function releasePayload({ pubkey, revision, label, files, notes, ack, ts, note = null }) {
+  return { purpose: PURPOSE.RELEASE, pubkey, revision, label, files, notes, ack, note, ts };
 }
 
 // Verifies a blob the server handed back against a public key.

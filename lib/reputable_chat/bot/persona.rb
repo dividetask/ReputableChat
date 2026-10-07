@@ -19,7 +19,6 @@ module ReputableChat
       BRAINS = %w[scripted markov llm].freeze
 
       DEFAULTS = {
-        "room" => "general",
         "bio" => "",
         "brain" => "scripted",
         "lines" => [],
@@ -51,7 +50,7 @@ module ReputableChat
         "timeout_seconds" => 60
       }.freeze
 
-      attr_reader :path, :username, :usernames, :bio, :room, :category, :disposition, :brain, :lines,
+      attr_reader :path, :username, :usernames, :bio, :category, :disposition, :brain, :lines,
                   :emote_bias, :reply_ratio, :friend_per_visit, :show_unrated,
                   :poll_seconds, :recycle_after_days, :seed, :posting, :llm, :starting_friends
 
@@ -71,7 +70,6 @@ module ReputableChat
         @username           = text(settings, "username")
         @usernames          = Array(settings["usernames"]).map(&:to_s).reject(&:empty?)
         @bio                = settings["bio"].to_s
-        @room               = text(settings, "room")
         @disposition        = settings["disposition"].to_s.strip
         @brain              = text(settings, "brain")
         @lines              = Array(settings["lines"]).map(&:to_s).reject(&:empty?)
@@ -140,7 +138,6 @@ module ReputableChat
           raise Invalid, "starting_friends must be a number of zero or more"
         end
         raise Invalid, "a scripted bot needs at least one entry under `lines`" if @brain == "scripted" && @lines.empty?
-        raise Invalid, "room must match [a-z0-9][a-z0-9-]*" unless @room.match?(/\A[a-z0-9][a-z0-9-]{0,63}\z/)
         raise Invalid, "poll_seconds must be at least 2" if @poll_seconds < 2
         raise Invalid, "recycle_after_days must be positive" if @recycle_after_days&.<=(0)
 

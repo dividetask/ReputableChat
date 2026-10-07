@@ -8,6 +8,11 @@
   calls or implementation until the user has replied.
 - Ask often, especially where something is ambiguous or where the user may have
   made a mistake.
+- **Never reuse labels within one response.** The user replies by label, so
+  every numbered or lettered item in a response must be unique across it. Use
+  letters for one list and numbers for another, or continue the numbering
+  (questions start after the last numbered point), so "(3)" can only mean one
+  thing.
 
 ## Do not loop on errors
 
@@ -26,15 +31,20 @@
 ```bash
 bundle exec rake spec       # full suite (browser tests skip without `npm install`)
 npm install                 # once, for the browser tests
-bundle exec rake curve      # print current curve, ladder and safety window
+bundle exec rake curve      # print current curve and ladder
 bundle exec rake dump       # readable dump of the database
-bundle exec rake "dump[messages,reactions]"   # just those sections
+bundle exec rake "dump[messages,emotes]"      # just those sections
 bundle exec rake genesis    # development genesis (already committed)
 RACK_ENV=production bundle exec rake genesis   # production genesis (once, ever)
+bundle exec rake host       # development host account (already committed)
+RACK_ENV=production bundle exec rake host      # a server's production host account
+# Handle, bio and icon: run the script directly with --handle, --bio, --icon.
+bundle exec ruby script/generate_genesis.rb --host --production --handle Ops --icon ops.png
 
-# The genesis account from a terminal, against a running server.
+# The genesis account from a terminal, against a running server; --host signs
+# as the host account instead.
 bundle exec ruby script/tim.rb status             # uses this environment's seed
-bundle exec ruby script/tim.rb post "Planned outage 02:00-03:00 UTC on Friday"
+bundle exec ruby script/tim.rb --host post "Planned outage 02:00-03:00 UTC on Friday"
 bundle exec ruby script/tim.rb visible <pubkey>   # least rating that makes them visible
 bundle exec ruby script/tim.rb friend <pubkey>
 
@@ -67,24 +77,26 @@ inventing a word for something that already has one.
   in process, and is what turns that into a failing test.
   `spec/bot_identity_spec.rb` does the same for key derivation, running the
   browser's own `deriveFromSeed` under node and comparing.
-- **Record hashes.** `cryptography/record.rb` and `public/js/record.js` must agree,
-  and so must `reputation/fingerprint.rb` and `public/js/fingerprint.js`. If they
-  drift, every `ack` points at a record the other side cannot find and no
-  reference resolves. `spec/record_parity_spec.rb` guards both.
+- **Record hashes.** `cryptography/record.rb` and `public/js/record.js` must
+  agree. If they drift, every `ack` points at a record the other side cannot
+  find and no reference resolves. `spec/record_parity_spec.rb` guards it.
 - **The genesis record.** `config/genesis/<environment>.json` is the bottom of
   the chain. Regenerating one orphans every record that acknowledged the old
   one, which is the whole chain. `script/generate_genesis.rb` refuses to
   overwrite either it or the seed beside it.
-- **Two genesis accounts, and only one is secret.**
-  `config/genesis/development.seed` is **committed on purpose** — that identity
-  is public, so a fresh clone can sign as the genesis account without being
-  handed a secret. `config/genesis/production.seed` is gitignored, 0600, and
-  never printed. `.gitignore` ignores every `*.seed` and then un-ignores
-  development's, so a new environment's seed is refused by default rather than
-  committed by omission.
-  A production deployment **refuses to boot on the development genesis**,
+- **Two accounts, two environments each, and only development's are public.**
+  The genesis account is the developer's; the host account
+  (`config/host/`) is a server's own, optional, and must acknowledge the
+  genesis. `config/genesis/development.seed` and `config/host/development.seed`
+  are **committed on purpose** — those identities are public, so a fresh clone
+  can sign as either without being handed a secret. Every other seed is
+  gitignored, 0600, and never printed. `.gitignore` ignores every `*.seed` in
+  both folders and then un-ignores development's, so a new environment's seed
+  is refused by default rather than committed by omission.
+  A production deployment **refuses to boot on either development account**,
   compared by key rather than by filename, because the realistic mistake is
-  copying the record into place rather than misnaming it.
+  copying the record into place rather than misnaming it. The production
+  genesis seed belongs with the developer, never on a server.
   Both hold the seed phrase rather than the derived key, so there is one secret
   to look after rather than two that must not disagree.
 - **The vault key.** `public/js/vault.js` derives it from the Argon2id output
@@ -92,6 +104,38 @@ inventing a word for something that already has one.
   through HKDF. Changing that domain strands every existing vault; changing how
   the identity key is derived strands every existing account, which is why the
   vault key is layered on top rather than alongside.
+- **The vault itself, in two languages.** `public/js/vault.js` and
+  `cryptography/vault.rb` both seal and open vaults -- the browser for everyone,
+  Ruby for the genesis account driven from a terminal. A drift between them
+  fails in the worst way available: each half opens its own vaults perfectly and
+  cannot read the other's, so a friend list appears to vanish and come back
+  depending on which one wrote last. `spec/vault_parity_spec.rb` seals in each
+  and opens in the other, which is the only arrangement that can catch it.
+- **Published score text.** `reputation/decimals.rb` and `toDecimal` in
+  `public/js/reputation.js` must spell the same number the same way, not merely
+  parse each other's. `spec/decimal_parity_spec.rb` guards it.
+- **The login origin.** The browser signs `window.location.origin` into every
+  login. With no `origin` configured -- the default -- the server compares it
+  with the address the request arrived at (`lib/reputable_chat/origin.rb`), so
+  a reverse proxy that drops `Host` or `X-Forwarded-Proto` fails every login.
+  The error names both addresses; keep it that way, since "signature did not
+  verify" alone sends people looking at their seed.
+- **The rules and their examples.** `docs/project/rules/v0.001.md` is the rules
+  in prose and `docs/project/rules/v0.001-examples.md` is the same rules in
+  bytes. Change a rule and the examples go stale in silence: every signature
+  still verifies, so nothing looks wrong. `spec/examples_spec.rb` drives
+  `spec/examples.mjs`, which re-derives each key from the formula the file
+  states, verifies every record, and checks each against the rules it is an
+  example of. `spec/fixtures/examples_broken.md` holds three correctly signed
+  records that each break a rule, because a checker that has quietly stopped
+  looking passes everything.
+- **One home per rule.** A rule written in two places gets edited in one of
+  them, and the two copies then disagree about which records are valid. That
+  happened three times in one afternoon of editing, each time as a paraphrase
+  rather than a copy, which is why none of them read as duplication.
+  `spec/rules_text_spec.rb` holds the table of where each rule lives and fails
+  when one is stated outside its section. Before editing a rule, grep for its
+  distinctive words; when adding one, add it to that table.
 - **The seed derivation domain.** Changing `seed.kdf.domain` in
   `config/reputation.yml` changes every derived key, which strands every
   existing account. It is versioned (`:v1`) so a future change can be handled
@@ -108,6 +152,12 @@ inventing a word for something that already has one.
   are worse than comments, because they look live.
 - Tests name the **rule** they protect, not the method they call. A failing test
   should say what behaviour broke.
+- Reputation records carry **ratings**, not the actions behind them. `friend`,
+  `reported` and `net_votes` live in the author's vault; the curve runs once,
+  where it is authored. Nothing published says what parameters it was computed
+  under -- a reader reaching for a derived cache either takes the number or
+  leaves it, and publishing the parameters would tell everyone the settings a
+  particular reader scores under.
 - The server reads as little of a signed blob as it can, and serves blobs back
   byte-identical.
 - Render user text with `textContent`, never `innerHTML`.

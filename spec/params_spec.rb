@@ -16,6 +16,23 @@ class ParamsSpec < Minitest::Test
     assert_nil P.pubkey(["a" * 43])
   end
 
+  def test_a_decimal_below_one_is_written_with_its_leading_zero
+    assert_equal "0.5", P.decimal("0.5")
+    assert_equal "-0.5", P.decimal("-0.5")
+    assert_nil P.decimal(".5")
+    assert_nil P.decimal("-.5")
+  end
+
+  def test_a_decimal_has_exactly_one_spelling
+    assert_equal "0.5", P.decimal("0.5")
+    assert_equal "0", P.decimal("0")
+    assert_equal "-0.05", P.decimal("-0.05")
+    assert_nil P.decimal("0.50")
+    assert_nil P.decimal("1.0")
+    assert_nil P.decimal("-0")
+    assert_nil P.decimal("00.5")
+  end
+
   def test_strips_and_bounds_strings
     assert_equal "hello", P.string("  hello  ", max: 10)
     assert_nil P.string("", max: 10)
@@ -32,13 +49,6 @@ class ParamsSpec < Minitest::Test
     assert_nil P.string(255.chr.dup.force_encoding("UTF-8"), max: 50)
   end
 
-  def test_room_names_cannot_traverse_paths
-    assert_equal "general", P.room("general")
-    assert_nil P.room("../etc/passwd")
-    assert_nil P.room("Has Caps")
-    assert_nil P.room("")
-  end
-
   def test_integers_are_range_checked
     assert_equal 42, P.integer("42", max: 100)
     assert_nil P.integer("4200", max: 100)
@@ -46,13 +56,17 @@ class ParamsSpec < Minitest::Test
     assert_nil P.integer(-1)
   end
 
-  def test_ratings_shape_is_enforced
-    good = { KEY => { "friend" => true, "reported" => false, "net_votes" => 3 } }
-    assert_equal good, P.ratings(good)
+  # RULE: a signature is not a record hash. They were the same length and the
+  # same shape of text before the chain existed, so anything sending the old
+  # one has to be refused rather than quietly stored as something nothing can
+  # be matched against. Every `ack` in the system rests on this.
+  def test_a_signature_is_not_accepted_as_a_record_hash
+    assert_equal "a" * 64, P.record_hash("a" * 64)
 
-    assert_nil P.ratings({ KEY => { "friend" => "yes" } })
-    assert_nil P.ratings({ "not-a-key" => { "friend" => true, "reported" => false, "net_votes" => 0 } })
-    assert_nil P.ratings("nope")
+    assert_nil P.record_hash("a" * 86), "an Ed25519 signature is not a record hash"
+    assert_nil P.record_hash("z" * 64), "a record hash is hex"
+    assert_nil P.record_hash("a" * 63)
+    assert_nil P.record_hash(nil)
   end
 
   def test_arrays_are_bounded

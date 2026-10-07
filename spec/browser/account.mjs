@@ -41,6 +41,7 @@ try {
   results.genesis_named = (await rows.first().locator(".name").textContent()).trim();
   results.genesis_has_an_image = await rows.first().locator("img.avatar").count() > 0;
   results.whole_key_shown = (await rows.first().locator(".pubkey").textContent()).trim();
+  results.host_named = (await rows.nth(1).locator(".name").textContent()).trim();
 
   // A pasted key gets the generated placeholder, so the list stays consistent.
   const invented = "z".repeat(43);
@@ -48,7 +49,7 @@ try {
   await page.click("#new-friend-add");
   results.friend_rows_after_adding = await rows.count();
   results.added_row_has_a_placeholder =
-    await rows.nth(1).locator("span.avatar.placeholder").count() > 0;
+    await rows.last().locator("span.avatar.placeholder").count() > 0;
 
   // --- creating the account ---------------------------------------------
   const phrase = await page.inputValue("#new-seed-words");
@@ -64,9 +65,66 @@ try {
 
   const friends = page.locator("#friend-list .row");
   results.friends_after_creating = await friends.count();
+  // The order the friends were chosen in, which survives only because the
+  // vault records it: the ratings come back sorted by public key.
+  results.friend_order = await friends.locator(".name").allTextContents();
   results.friend_list_shows_an_image = await friends.first().locator("img.avatar").count() > 0;
   results.friend_list_shows_a_whole_key =
     (await friends.first().locator(".pubkey").textContent()).trim().length;
+
+  // --- a friendship made during the session -----------------------------
+  //
+  // Adding a friend from the profile page reports the bucket they landed in, and
+  // that sentence is the only place a rating made SINCE the last publish can be
+  // seen working. The graph holds each account's published attestation, and the
+  // batch fetch skips anyone already in it -- so the author's own entry there is
+  // their last published one, and a fresh rating reaches the session only
+  // through the local entry rebuildSession writes.
+  const stranger = "y".repeat(43);
+  await page.fill("#add-key", stranger);
+  await page.click("#add-friend");
+  await page.waitForFunction(
+    () => document.querySelector("#profile-status").textContent.trim().length > 0,
+    null, { timeout: 30_000 },
+  );
+  results.added_mid_session = (await page.locator("#profile-status").textContent()).trim();
+
+  // A setting, saved to the vault along with the friendship above. Waiting on
+  // the save itself rather than a fixed delay: the push is debounced.
+  const saved = page.waitForResponse(
+    (response) => response.url().endsWith("/api/vault") && response.request().method() === "PUT",
+    { timeout: 30_000 },
+  );
+  await page.check("#show-unrated");
+  results.vault_saved_before_refresh = (await saved).ok();
+
+  // --- the whole reputation pipeline, as rendered ------------------------
+  //
+  // Clicking a friend's name opens their profile, which states the bucket they
+  // landed in. That sentence is the far end of everything: the vault's private
+  // ratings, the scores derived from them, the author's own entry in the graph,
+  // the ladder and the curve. Nothing shorter catches a break in the middle --
+  // a friend who is somehow still `blocked` renders exactly as well as one who
+  // is trusted, and the source-level tests cannot tell the difference.
+  await friends.first().locator(".name").click();
+  await page.waitForSelector("#profile-view:not(.hidden)", { timeout: 10_000 });
+  results.friend_profile_name = (await page.locator("#profile-name").textContent()).trim();
+  results.friend_bucket = (await page.locator("#profile-bucket").textContent()).trim();
+
+  // --- a refresh ---------------------------------------------------------
+  //
+  // A refresh is not a log off: the remembered keys sign straight back in,
+  // and the vault has to open with them. When only the signing key was
+  // remembered, this came back signed in with every setting and rating gone.
+  await page.reload({ waitUntil: "networkidle" });
+  await page.waitForSelector("#chat:not(.hidden)", { timeout: 30_000 });
+  results.after_refresh_status = (await page.locator("#chat-status").textContent()).trim();
+  await page.click("#my-profile");
+  await page.waitForSelector("#profile-edit:not(.hidden)", { timeout: 10_000 });
+  results.after_refresh_show_unrated = await page.isChecked("#show-unrated");
+  results.after_refresh_friend_keys = (await page.locator("#friend-list .pubkey").allTextContents())
+    .map((key) => key.trim());
+  results.stranger = stranger;
 } catch (error) {
   results.error = `${error}`;
 } finally {

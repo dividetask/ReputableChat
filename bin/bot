@@ -64,7 +64,7 @@ random = options[:seed] ? Random.new(options[:seed]) : Random.new
 
 if options[:explain]
   schedule = persona.schedule(random: random)
-  puts "#{name}: #{%w[a e i o u].include?(persona.category[0]) ? "an" : "a"} #{persona.category} with a #{persona.brain} brain, in ##{persona.room}"
+  puts "#{name}: #{%w[a e i o u].include?(persona.category[0]) ? "an" : "a"} #{persona.category} with a #{persona.brain} brain"
   puts "  #{schedule.summary}"
   puts format("  ~%.1f posts/week, ~%.1f reactions/week, %.0f%% of posts are replies",
               schedule.posts_per_week, schedule.reactions_per_week, persona.reply_ratio * 100)

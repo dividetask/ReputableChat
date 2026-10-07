@@ -33,20 +33,22 @@ class UiRulesSpec < Minitest::Test
   # RULE: a person is shown with their avatar wherever they are named. The
   # friend list was the one place that named somebody without one.
   def test_relations_lists_show_avatars
-    relations = within(app_js, from: "function fillRelations(", lines: 40)
+    relations = within(app_js, from: "function fillRelations(", lines: 60)
 
     assert_includes relations, "avatarFor(pubkey)",
                     "friend and blocked lists must show the avatar, like everywhere else"
   end
 
-  # RULE: the genesis account has a face on the account creation screen, where
-  # no config has been fetched and none can be -- the account doing the looking
-  # does not exist yet. Its icon comes from the declaration already in hand.
-  def test_the_genesis_icon_survives_having_no_fetched_config
+  # RULE: the default friends -- the genesis account and the host account --
+  # have faces on the account creation screen, where nothing has been fetched
+  # and nothing can be. Their icons come from the declarations already in hand.
+  def test_default_friend_icons_survive_having_nothing_fetched
     icon_for = within(app_js, from: "function iconFor(pubkey)", lines: 12)
 
-    assert_includes icon_for, "genesisProfile(state.genesis)",
-                    "the genesis icon must come from its declaration"
+    assert_includes icon_for, "declarationProfile(committedFor(pubkey))",
+                    "a default friend's icon must come from its committed declaration"
+    assert_match(/function committedFor[\s\S]{0,200}state\.genesis, state\.host/, app_js,
+                 "both default friends must be looked up")
     refute_includes app_js, 'avatarFor(pubkey, "", null)',
                     "passing a null icon defeats the lookup the default performs"
   end
@@ -97,7 +99,7 @@ class UiRulesSpec < Minitest::Test
   # somebody checks that who they vouched for is who they meant, and a prefix
   # is exactly what an impersonator would match.
   def test_relations_lists_show_the_whole_key
-    relations = within(app_js, from: "function fillRelations(", lines: 45)
+    relations = within(app_js, from: "function fillRelations(", lines: 60)
 
     assert_includes relations, "key.textContent = pubkey", "the full key must be shown"
     refute_includes relations, "fingerprint(pubkey)", "a prefix is not enough here"
@@ -120,7 +122,7 @@ class UiRulesSpec < Minitest::Test
 
     assert_includes undo, "confirm = true",
                     "the default must be to ask, so a later call site asks by default"
-    assert_includes app_js, "undoReport(message.author, { confirm: false })",
+    assert_includes app_js, "undoReport(message.pubkey, { confirm: false })",
                     "the undo beside a just-blocked message must stay instant"
   end
 end

@@ -13,17 +13,18 @@ module ReputableChat
     # that instance its own account and its own state without a config file of
     # its own.
     #
-    # `seq` matters more than it looks. The server enforces one message per
-    # (author, seq), so a bot that forgets its counter starts colliding with
-    # its own history and every post it makes is rejected.
+    # It also holds the bot's private actions: who it has friended and what it
+    # has already reacted to. Those are private now -- what goes on the chain
+    # is the attestation, which carries only the numbers they come to. The
+    # browser keeps the same things in its vault; a bot keeps them here.
     class State
       # Enough backlog to know what it has already seen without the file
-      # growing without bound. The room only serves the last 100 messages
-      # anyway, so remembering many more than that buys nothing.
+      # growing without bound. The server only serves the most recent
+      # messages anyway, so remembering many more than that buys nothing.
       REMEMBERED = 500
 
       attr_reader :path, :name
-      attr_accessor :seed, :pubkey, :seq, :prev, :revision, :born_at, :ratings,
+      attr_accessor :seed, :pubkey, :revision, :born_at, :ratings,
                     :retire_after_days, :username, :category
 
       def self.load(path, name:)
@@ -36,8 +37,6 @@ module ReputableChat
         @name    = name
         @seed    = data["seed"]
         @pubkey  = data["pubkey"]
-        @seq     = data["seq"] || 0
-        @prev    = data["prev"]
         @revision = data["revision"] || 0
         @born_at = data["born_at"]
         @username = data["username"]
@@ -90,8 +89,6 @@ module ReputableChat
 
         @seed    = seed
         @pubkey  = pubkey
-        @seq     = 0
-        @prev    = nil
         @revision = 0
         @born_at = now
         @username = username
@@ -122,7 +119,7 @@ module ReputableChat
         { "name" => @name, "seed" => @seed, "pubkey" => @pubkey, "born_at" => @born_at,
           "username" => @username, "category" => @category,
           "retire_after_days" => @retire_after_days,
-          "seq" => @seq, "prev" => @prev, "revision" => @revision,
+          "revision" => @revision,
           "ratings" => @ratings, "seen" => @seen, "voted" => @voted, "retired" => @retired }
       end
     end

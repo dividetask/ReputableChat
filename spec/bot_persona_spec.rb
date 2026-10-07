@@ -53,10 +53,6 @@ class BotPersonaSpec < Minitest::Test
     assert_equal long.strip, persona("brain" => "llm", "disposition" => long).disposition
   end
 
-  def test_a_room_the_server_would_reject_is_caught_here
-    assert_raises(Persona::Invalid) { persona("room" => "Not A Room") }
-  end
-
   # A posting block that cannot be satisfied is a broken persona, and this is
   # where it should surface.
   def test_a_contradictory_posting_block_fails_at_load
@@ -73,7 +69,6 @@ class BotPersonaSpec < Minitest::Test
 
       assert_equal "Ana", loaded.username
       assert_equal ["hello"], loaded.lines
-      assert_equal "general", loaded.room
       assert_equal "realperson", loaded.category
     end
   end

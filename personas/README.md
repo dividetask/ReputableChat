@@ -100,7 +100,6 @@ than hours into a run.
 | `username` | — | required; the display name |
 | `usernames` | — | pool to draw from, for bots that recycle |
 | `bio` | `""` | profile line |
-| `room` | `general` | which room to live in |
 | `brain` | `scripted` | `scripted`, `markov` or `llm` |
 | `lines` | `[]` | what a scripted bot says; required for that brain |
 | `disposition` | `""` | this bot's own character, added after the category's briefing |
@@ -185,10 +184,12 @@ Both files under `data/` hold seed phrases and are written `0600`. `data/` is
 gitignored. These are throwaway accounts with no recovery, so never sign
 anything you care about into a bot's seed.
 
-A bot's state file is also where its history lives: its sequence counter, what
-it has already reacted to, and the seed phrase of every account it has
+A bot's state file is also where its private side lives: who it has friended,
+what it has already reacted to, and the seed phrase of every account it has
 abandoned — so you can still log into a retired scammer from the login screen
-and look at what it did.
+and look at what it did. Those actions are private, the way a person's are in
+their vault; what the bot publishes is an attestation carrying the numbers they
+come to.
 
 **Deleting a state file does not delete the account**, it strands it. The bot
 starts fresh with a new key on the next run, and the old one stays in the chain
@@ -204,6 +205,11 @@ log for `away in 11.8h`, and use `--speed` if you do not want to wait.
 
 **Bots post but you cannot see them in the browser.** Expected: you have not
 rated any of them. Friend one, or turn on `show_unrated` in your own profile.
+
+**"that exact record was already stored"** — harmless. There is no sequence
+number any more, so the server catches a repeat by record hash; a bot drew the
+same line with the same ack inside the same second. The next action draws
+again.
 
 **"signature did not verify" on login** — `--origin` does not match the
 server's configured `origin`. The origin travels inside the signed payload, so

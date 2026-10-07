@@ -3,6 +3,8 @@
 require "json"
 require "fileutils"
 require_relative "identity"
+require_relative "view"
+require "bigdecimal"
 require_relative "../config"
 require_relative "../reputation/engine"
 require_relative "../store/memory"
@@ -95,31 +97,31 @@ module ReputableChat
       # the visibility line. Deliberately not a friendship: this says "this
       # account exists", not "I know them", and the difference is the whole
       # of what the vouchers are for.
-      def introduce(voucher:, target:, client:, seed_config:, defaults:)
+      def introduce(voucher:, target:, client:, seed_config:, defaults:, ack:)
         identity = sign_in(voucher, client, seed_config)
-        config   = own_config(client, identity, voucher)
-        ratings = config.fetch("ratings")
-        return :already_rated if ratings.dig(target, "net_votes").to_i >= votes(defaults)
+        state    = own_records(client, identity)
+        scores   = state.fetch(:scores)
+        wanted   = visible_reputation(defaults)
+        return :already_rated if scores.key?(target) && BigDecimal(scores.dig(target, "reputation").to_s).positive?
 
-        ratings[target] = introduction(ratings[target], defaults)
-        client.publish_config(
-          identity: identity, revision: config.fetch("revision") + 1,
-          profile: config.fetch("profile"), ratings: ratings
+        scores[target] = { "reputation" => wanted, "trust" => "1" }
+        client.publish_attestation(
+          identity: identity, revision: state.fetch(:attestation_revision) + 1,
+          scores: scores, derived: View::NO_CACHE, ack: ack
         )
 
         :rated
       end
 
-      # Registers the account and gives it a profile, so that a voucher looks
-      # like an account rather than a bare key when somebody goes looking at
-      # who introduced all these bots.
-      def establish(voucher:, client:, seed_config:)
+      # Declares the account, so a voucher looks like an account rather than a
+      # bare key when somebody goes looking at who introduced all these bots.
+      def establish(voucher:, client:, seed_config:, ack:)
         identity = sign_in(voucher, client, seed_config)
-        config   = own_config(client, identity, voucher)
-        return :ready unless config.fetch("revision").zero?
+        state    = own_records(client, identity)
+        return :ready unless state.fetch(:identity_revision).zero?
 
-        client.publish_config(identity: identity, revision: 1,
-                              profile: config.fetch("profile"), ratings: {})
+        client.publish_identity(identity: identity, revision: 1, handle: voucher.username,
+                                bio: "introduces new test accounts", ack: ack)
         :published
       end
 
@@ -133,34 +135,33 @@ module ReputableChat
         identity
       end
 
-      def introduction(before, defaults)
-        current = before || { "friend" => false, "reported" => false, "net_votes" => 0, "cleared" => false }
+      # The published scores, not the actions behind them. A voucher has no
+      # private state anywhere and does not need any: the only thing anybody
+      # reads is the number.
+      def own_records(client, identity)
+        declaration = parse(client.identity(identity.pubkey))
+        published   = parse(client.attestation(identity.pubkey))
 
-        current.merge("reported" => false, "cleared" => false,
-                      "net_votes" => [current["net_votes"].to_i, votes(defaults)].max)
+        { identity_revision: declaration ? declaration["revision"].to_i : 0,
+          attestation_revision: published ? published["revision"].to_i : 0,
+          scores: published ? (published["scores"] || {}) : {} }
+      end
+
+      def parse(blob)
+        return nil unless blob
+
+        JSON.parse(blob["payload"])
+      rescue JSON::ParserError
+        nil
       end
 
       # Read off the curve under the server's own parameters, so retuning the
       # curve moves it rather than leaving a hardcoded number that used to be
       # enough.
-      def votes(defaults)
-        @votes ||= Reputation::Engine.new(
+      def visible_reputation(defaults)
+        @visible_reputation ||= Reputation::Engine.new(
           config: Config.new(defaults: defaults), store: Store::Memory.new
-        ).minimum_visible_votes
-      end
-
-      def own_config(client, identity, voucher)
-        blob = client.config(identity.pubkey)
-
-        if blob
-          payload = JSON.parse(blob["payload"])
-          { "revision" => payload["revision"].to_i, "profile" => payload["profile"],
-            "ratings" => payload["ratings"] || {} }
-        else
-          { "revision" => 0, "ratings" => {},
-            "profile" => { "username" => voucher.username, "icon" => nil,
-                           "message" => "introduces new test accounts" } }
-        end
+        ).minimum_visible_reputation
       end
     end
   end

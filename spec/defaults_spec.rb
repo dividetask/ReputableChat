@@ -54,6 +54,27 @@ class DefaultsSpec < Minitest::Test
     assert_empty defaults.fetch("no_genesis")
   end
 
+  # RULE: a server with a host account gives a new identity two default
+  # friends, the genesis account and the host account. Both are ordinary
+  # friendships, removable like any other.
+  def test_a_server_with_a_host_account_seeds_both_default_friends
+    seeded = defaults.fetch("newcomer_with_host")
+
+    assert_equal [defaults.fetch("genesis_key"), defaults.fetch("host_key")].sort, seeded.keys.sort
+    seeded.each_value { |rating| assert rating.fetch("friend") }
+  end
+
+  # RULE: a host account is optional. Without one the genesis account is the
+  # only default friend.
+  def test_a_server_without_a_host_account_seeds_the_genesis_alone
+    assert_equal [defaults.fetch("genesis_key")], defaults.fetch("newcomer").keys
+  end
+
+  # RULE: the host account does not vouch for itself either.
+  def test_the_host_account_does_not_friend_itself
+    assert_equal [defaults.fetch("genesis_key")], defaults.fetch("host_itself").keys
+  end
+
   # RULE: the genesis account's name is shown, not a placeholder. Every other
   # name comes from a fetched config and the genesis has none -- it has an
   # identity declaration. Without reading it, the one account everybody trusts
@@ -61,8 +82,8 @@ class DefaultsSpec < Minitest::Test
   def test_the_genesis_handle_is_read_from_its_declaration
     profile = defaults.fetch("genesis_profile")
 
-    assert_equal "Tim", profile.fetch("username")
-    assert_equal "Legally distinct.", profile.fetch("message")
+    assert_equal "Tim", profile.fetch("handle")
+    assert_equal "Legally distinct.", profile.fetch("bio")
   end
 
   # A declaration that cannot be read yields nothing rather than a broken
@@ -73,17 +94,17 @@ class DefaultsSpec < Minitest::Test
     assert_nil defaults.fetch("genesis_profile_missing")
   end
 
-  # RULE: the seeded profile must not beat a config the genesis has since
-  # published. It is a fallback for having nothing, not a pin.
-  def test_the_seeded_profile_is_set_before_the_walk_fetches_configs
+  # RULE: the seeded profile must not beat an identity declaration a default
+  # friend has since published. It is a fallback for having nothing, not a pin.
+  def test_the_seeded_profile_is_set_before_the_walk_fetches_declarations
     app = File.read(File.expand_path("../public/js/app.js", __dir__), encoding: "UTF-8")
-    seeded = app.index("genesisProfile(state.genesis)")
+    seeded = app.index("declarationProfile(record)")
     fetched = app.index("state.profiles.set(blob.pubkey")
 
-    refute_nil seeded, "the genesis profile is never seeded"
-    refute_nil fetched, "configs never populate profiles"
+    refute_nil seeded, "the default friends' profiles are never seeded"
+    refute_nil fetched, "fetched declarations never populate profiles"
     assert_operator seeded, :<, fetched,
-                    "seed the genesis profile before fetched configs overwrite it"
+                    "seed the genesis profile before fetched declarations overwrite it"
   end
 
   # RULE: seeded once, when account creation begins, and never re-applied.
@@ -103,7 +124,7 @@ class DefaultsSpec < Minitest::Test
   # freshly seeded one. Seeding at publish time would quietly put the genesis
   # account back after they took it off.
   def test_registration_publishes_the_list_the_screen_was_left_with
-    register = app_js[/async function registerWith[\s\S]{0,900}?\n\}/]
+    register = app_js[/async function registerWith[\s\S]{0,1800}?\n\}/]
     refute_nil register, "registerWith not found"
 
     assert_includes register, "state.newFriends", "registration must publish the chosen list"

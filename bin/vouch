@@ -57,7 +57,8 @@ puts "#{vouchers.size} voucher#{'s' unless vouchers.size == 1} in #{path}#{added
 
 vouchers.all.each do |voucher|
   state = vouchers.establish(voucher: voucher, client: client_for(options[:server], origin),
-                             seed_config: seed_config)
+                             seed_config: seed_config,
+                             ack: ReputableChat::Genesis.current.hash)
   puts "  #{voucher.username}  #{voucher.pubkey}  #{state}"
 end
 

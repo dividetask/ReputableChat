@@ -5,7 +5,6 @@
 category: "realperson"
 username: "quietmark"
 bio: ""
-room: general
 brain: markov
 
 # The markov brain ignores this and speaks from what it has read; it is kept

@@ -23,7 +23,7 @@ class AppSpec < Minitest::Test
   def setup
     ReputableChat::App.store  = ReputableChat::Store::Database.new("sqlite:/")
     ReputableChat::App.images = ReputableChat::Store::Images.new(Dir.mktmpdir)
-    ReputableChat::App.origin = ORIGIN
+    ReputableChat::App.origins = [ORIGIN]
     ReputableChat::App.genesis = GenesisFixture.build
     @signing = Ed25519::SigningKey.generate
     @pubkey  = Sig.encode(@signing.verify_key.to_bytes)
@@ -81,8 +81,9 @@ class AppSpec < Minitest::Test
     assert_equal 401, last_response.status
   end
 
-  # A signature made for another origin must not authenticate here. This is
-  # what stops one server replaying a harvested login against another.
+  # RULE: with origins configured, a signature made for another origin must
+  # not authenticate here. That is what stops a malicious server relaying a
+  # live login to this one.
   def test_rejects_a_signature_bound_to_another_origin
     nonce = challenge
     ts = Time.now.to_i
@@ -92,6 +93,70 @@ class AppSpec < Minitest::Test
               { "pubkey" => @pubkey, "nonce" => nonce, "ts" => ts, "signature" => sign(elsewhere) }
 
     assert_equal 401, last_response.status
+  end
+
+  # RULE: an operator can list more than one origin, and a login signed for
+  # any of them is accepted.
+  def test_accepts_any_configured_origin
+    ReputableChat::App.origins = [ORIGIN, "https://chat.example.test"]
+
+    assert_equal 200, log_in_as("https://chat.example.test").status
+  end
+
+  # RULE: a mismatch says which origin the server expected and which the page
+  # is at, rather than only that the signature failed.
+  def test_a_wrong_origin_names_both_origins
+    log_in_as("http://192.168.1.10:9292", headers: { "HTTP_ORIGIN" => "http://192.168.1.10:9292" })
+
+    assert_equal 401, last_response.status
+    assert_includes json["error"], ORIGIN
+    assert_includes json["error"], "http://192.168.1.10:9292"
+  end
+
+  # --- login with no origin configured ----------------------------------
+
+  # RULE: a server with no origin configured accepts a login signed for the
+  # address it was reached at, so it runs at any domain or IP unconfigured.
+  def test_unconfigured_server_takes_its_origin_from_the_request
+    ReputableChat::App.origins = []
+
+    assert_equal 200, log_in_as("http://192.168.1.10:9292", headers: { "HTTP_HOST" => "192.168.1.10:9292" }).status
+  end
+
+  def test_unconfigured_server_still_rejects_another_origin
+    ReputableChat::App.origins = []
+
+    log_in_as("http://elsewhere.test", headers: { "HTTP_HOST" => "chat.example.test" })
+
+    assert_equal 401, last_response.status
+  end
+
+  # RULE: behind a reverse proxy the app sees the proxy's connection, so the
+  # origin is rebuilt from X-Forwarded-Proto and X-Forwarded-Host, taking the
+  # first of a list -- the one the outermost proxy, facing the browser, saw.
+  def test_unconfigured_server_believes_the_reverse_proxy
+    ReputableChat::App.origins = []
+    behind_nginx = { "HTTP_HOST" => "127.0.0.1:9292", "HTTP_X_FORWARDED_PROTO" => "https, http",
+                     "HTTP_X_FORWARDED_HOST" => "chat.example.test" }
+
+    assert_equal 200, log_in_as("https://chat.example.test", headers: behind_nginx).status
+  end
+
+  def test_unconfigured_server_with_a_proxy_passing_only_host_and_scheme
+    ReputableChat::App.origins = []
+    behind_nginx = { "HTTP_HOST" => "chat.example.test", "HTTP_X_FORWARDED_PROTO" => "https" }
+
+    assert_equal 200, log_in_as("https://chat.example.test", headers: behind_nginx).status
+  end
+
+  def log_in_as(origin, headers: {})
+    nonce = challenge
+    ts = Time.now.to_i
+    payload = Payload.login(pubkey: @pubkey, nonce: nonce, origin: origin, issued_at: ts)
+    post "/api/session",
+         JSON.generate({ "pubkey" => @pubkey, "nonce" => nonce, "ts" => ts, "signature" => sign(payload) }),
+         { "CONTENT_TYPE" => "application/json" }.merge(headers)
+    last_response
   end
 
   def test_a_challenge_cannot_be_replayed
@@ -123,36 +188,7 @@ class AppSpec < Minitest::Test
     assert_equal 401, last_response.status
   end
 
-  # --- profile and images ------------------------------------------------
-
-  def test_profile_travels_inside_the_signed_config
-    log_in
-    post_json "/api/register", {}
-    target = Sig.encode(Ed25519::SigningKey.generate.verify_key.to_bytes)
-
-    put "/api/config", JSON.generate(config_body(revision: 1, ratings: ratings_for(target))),
-        "CONTENT_TYPE" => "application/json"
-    assert_equal 200, last_response.status
-
-    get "/api/config/#{@pubkey}"
-    payload = JSON.parse(JSON.parse(last_response.body)["config"]["payload"])
-
-    assert_equal "alice", payload.dig("profile", "username")
-    assert Sig.verify(pubkey_b64: @pubkey, signature_b64: JSON.parse(last_response.body)["config"]["signature"],
-                      payload: payload),
-           "the profile must be covered by the signature"
-  end
-
-  def test_rejects_a_profile_that_was_not_signed
-    log_in
-    target = Sig.encode(Ed25519::SigningKey.generate.verify_key.to_bytes)
-    body = config_body(revision: 1, ratings: ratings_for(target))
-    body["profile"] = body["profile"].merge("username" => "mallory")
-
-    put "/api/config", JSON.generate(body), "CONTENT_TYPE" => "application/json"
-
-    assert_equal 400, last_response.status, "changing the profile must break the signature"
-  end
+  # --- images ------------------------------------------------------------
 
   PNG = "\x89PNG\r\n\x1A\n".b + ("x" * 64).b
 
@@ -201,79 +237,16 @@ class AppSpec < Minitest::Test
     assert_equal 404, last_response.status
   end
 
-  # --- config storage ---------------------------------------------------
+  # --- batch fetching -----------------------------------------------------
 
-  PROFILE = { "username" => "alice", "message" => "hello", "icon" => nil }.freeze
-
-  def config_body(revision:, ratings:, key: nil, profile: PROFILE)
-    ts = Time.now.to_i
-    payload = Payload.config(pubkey: @pubkey, revision: revision, profile: profile,
-                             ratings: ratings, issued_at: ts)
-    signature = key ? Sig.encode(key.sign(Canon.bytes(payload))) : sign(payload)
-    { "revision" => revision, "profile" => profile, "ratings" => ratings,
-      "ts" => ts, "signature" => signature }
-  end
-
-  def ratings_for(target, friend: true, reported: false, net_votes: 0)
-    { target => { "friend" => friend, "reported" => reported, "net_votes" => net_votes } }
-  end
-
-  def test_stores_and_serves_a_signed_config
-    log_in
-    target = Sig.encode(Ed25519::SigningKey.generate.verify_key.to_bytes)
-
-    put "/api/config", JSON.generate(config_body(revision: 1, ratings: ratings_for(target))),
-        "CONTENT_TYPE" => "application/json"
-    assert_equal 200, last_response.status
-
-    get "/api/config/#{@pubkey}"
-    stored = json["config"]
-
-    assert_equal 1, stored["revision"]
-    assert Sig.verify(pubkey_b64: @pubkey, signature_b64: stored["signature"],
-                      payload: JSON.parse(stored["payload"])),
-           "the served blob must still verify against the author's key"
-  end
-
-  def test_refuses_an_unsigned_config
-    log_in
-    target = Sig.encode(Ed25519::SigningKey.generate.verify_key.to_bytes)
-    body = config_body(revision: 1, ratings: ratings_for(target), key: Ed25519::SigningKey.generate)
-
-    put "/api/config", JSON.generate(body), "CONTENT_TYPE" => "application/json"
-
-    assert_equal 400, last_response.status
-  end
-
-  # Without the revision check the server could serve an old config to hide a
-  # report, and its signature would still verify perfectly.
-  def test_refuses_a_rollback
-    log_in
-    target = Sig.encode(Ed25519::SigningKey.generate.verify_key.to_bytes)
-
-    put "/api/config", JSON.generate(config_body(revision: 5, ratings: ratings_for(target))),
-        "CONTENT_TYPE" => "application/json"
-    assert_equal 200, last_response.status
-
-    put "/api/config", JSON.generate(config_body(revision: 4, ratings: ratings_for(target))),
-        "CONTENT_TYPE" => "application/json"
-    assert_equal 409, last_response.status
-  end
-
-  def test_rejects_malformed_ratings
-    log_in
-
-    put "/api/config", JSON.generate(config_body(revision: 1, ratings: { "not-a-key" => {} })),
-        "CONTENT_TYPE" => "application/json"
-
-    assert_equal 400, last_response.status
-  end
-
+  # RULE: a batch is bounded. The traversal fetches a whole hop per request, so
+  # the request size is chosen by the client -- an unbounded one would let
+  # anybody ask for the entire table in a single call.
   def test_batch_fetch_is_bounded
     log_in
     too_many = Array.new(300) { Sig.encode(Ed25519::SigningKey.generate.verify_key.to_bytes) }
 
-    post_json "/api/config/batch", { "pubkeys" => too_many }
+    post_json "/api/attestation/batch", { "pubkeys" => too_many }
 
     assert_equal 400, last_response.status
   end
@@ -284,15 +257,14 @@ class AppSpec < Minitest::Test
     log_in
     ts = Time.now.to_i
     target = a_record_hash("target")
-    payload = Payload.message(author: @pubkey, room: "general", seq: 1, prev: nil,
-                              body: "agreed", ack: ack, issued_at: ts, reply_to: target)
+    payload = Payload.message(pubkey: @pubkey, body: "agreed", ack: ack, issued_at: ts, reply_to: target)
 
-    post_json "/api/room/general/message",
-              { "seq" => 1, "prev" => nil, "ack" => ack, "body" => "agreed", "ts" => ts,
+    post_json "/api/message",
+              { "ack" => ack, "body" => "agreed", "ts" => ts,
                 "reply_to" => target, "signature" => sign(payload) }
     assert_equal 200, last_response.status
 
-    get "/api/room/general/messages"
+    get "/api/messages"
     assert_equal target, json["messages"].first["reply_to"]
   end
 
@@ -300,11 +272,10 @@ class AppSpec < Minitest::Test
   def test_rejects_a_reply_whose_target_was_altered
     log_in
     ts = Time.now.to_i
-    payload = Payload.message(author: @pubkey, room: "general", seq: 1, prev: nil,
-                              body: "agreed", ack: ack, issued_at: ts, reply_to: a_record_hash("target"))
+    payload = Payload.message(pubkey: @pubkey, body: "agreed", ack: ack, issued_at: ts, reply_to: a_record_hash("target"))
 
-    post_json "/api/room/general/message",
-              { "seq" => 1, "prev" => nil, "ack" => ack, "body" => "agreed", "ts" => ts,
+    post_json "/api/message",
+              { "ack" => ack, "body" => "agreed", "ts" => ts,
                 "reply_to" => a_record_hash("other"), "signature" => sign(payload) }
 
     assert_equal 400, last_response.status
@@ -313,11 +284,10 @@ class AppSpec < Minitest::Test
   def test_rejects_a_malformed_reply_target
     log_in
     ts = Time.now.to_i
-    payload = Payload.message(author: @pubkey, room: "general", seq: 1, prev: nil,
-                              body: "hi", ack: ack, issued_at: ts, reply_to: "nope")
+    payload = Payload.message(pubkey: @pubkey, body: "hi", ack: ack, issued_at: ts, reply_to: "nope")
 
-    post_json "/api/room/general/message",
-              { "seq" => 1, "prev" => nil, "ack" => ack, "body" => "hi", "ts" => ts,
+    post_json "/api/message",
+              { "ack" => ack, "body" => "hi", "ts" => ts,
                 "reply_to" => "nope", "signature" => sign(payload) }
 
     assert_equal 400, last_response.status
@@ -326,29 +296,15 @@ class AppSpec < Minitest::Test
   def test_stores_a_signed_message
     log_in
     ts = Time.now.to_i
-    payload = Payload.message(author: @pubkey, room: "general", seq: 1, prev: nil,
-                              body: "hello", ack: ack, issued_at: ts)
+    payload = Payload.message(pubkey: @pubkey, body: "hello", ack: ack, issued_at: ts)
 
-    post_json "/api/room/general/message",
-              { "seq" => 1, "prev" => nil, "ack" => ack, "body" => "hello", "ts" => ts, "signature" => sign(payload) }
+    post_json "/api/message",
+              { "ack" => ack, "body" => "hello", "ts" => ts, "signature" => sign(payload) }
     assert_equal 200, last_response.status
 
-    get "/api/room/general/messages"
+    get "/api/messages"
     assert_equal 1, json["messages"].size
-    assert_equal @pubkey, json["messages"].first["author"]
-  end
-
-  # A message signed for one room must not be replantable in another.
-  def test_a_message_cannot_be_moved_between_rooms
-    log_in
-    ts = Time.now.to_i
-    elsewhere = Payload.message(author: @pubkey, room: "other", seq: 1, prev: nil,
-                                body: "hello", ack: ack, issued_at: ts)
-
-    post_json "/api/room/general/message",
-              { "seq" => 1, "prev" => nil, "ack" => ack, "body" => "hello", "ts" => ts, "signature" => sign(elsewhere) }
-
-    assert_equal 400, last_response.status
+    assert_equal @pubkey, json["messages"].first["pubkey"]
   end
 
   # RULE: a message must name what its author had seen. A record with no ack is
@@ -356,11 +312,10 @@ class AppSpec < Minitest::Test
   def test_rejects_a_message_with_no_ack
     log_in
     ts = Time.now.to_i
-    payload = Payload.message(author: @pubkey, room: "general", seq: 1, prev: nil,
-                              body: "hello", ack: ack, issued_at: ts)
+    payload = Payload.message(pubkey: @pubkey, body: "hello", ack: ack, issued_at: ts)
 
-    post_json "/api/room/general/message",
-              { "seq" => 1, "prev" => nil, "body" => "hello", "ts" => ts,
+    post_json "/api/message",
+              { "body" => "hello", "ts" => ts,
                 "signature" => sign(payload) }
 
     assert_equal 400, last_response.status
@@ -369,11 +324,10 @@ class AppSpec < Minitest::Test
   def test_rejects_a_malformed_ack
     log_in
     ts = Time.now.to_i
-    payload = Payload.message(author: @pubkey, room: "general", seq: 1, prev: nil,
-                              body: "hello", ack: "nope", issued_at: ts)
+    payload = Payload.message(pubkey: @pubkey, body: "hello", ack: "nope", issued_at: ts)
 
-    post_json "/api/room/general/message",
-              { "seq" => 1, "prev" => nil, "ack" => "nope", "body" => "hello",
+    post_json "/api/message",
+              { "ack" => "nope", "body" => "hello",
                 "ts" => ts, "signature" => sign(payload) }
 
     assert_equal 400, last_response.status
@@ -384,11 +338,10 @@ class AppSpec < Minitest::Test
   def test_rejects_a_message_whose_ack_was_altered
     log_in
     ts = Time.now.to_i
-    payload = Payload.message(author: @pubkey, room: "general", seq: 1, prev: nil,
-                              body: "hello", ack: ack, issued_at: ts)
+    payload = Payload.message(pubkey: @pubkey, body: "hello", ack: ack, issued_at: ts)
 
-    post_json "/api/room/general/message",
-              { "seq" => 1, "prev" => nil, "ack" => a_record_hash("elsewhere"),
+    post_json "/api/message",
+              { "ack" => a_record_hash("elsewhere"),
                 "body" => "hello", "ts" => ts, "signature" => sign(payload) }
 
     assert_equal 400, last_response.status
@@ -399,15 +352,14 @@ class AppSpec < Minitest::Test
   def test_the_served_hash_is_the_hash_of_the_served_record
     log_in
     ts = Time.now.to_i
-    payload = Payload.message(author: @pubkey, room: "general", seq: 1, prev: nil,
-                              body: "hello", ack: ack, issued_at: ts)
+    payload = Payload.message(pubkey: @pubkey, body: "hello", ack: ack, issued_at: ts)
 
-    post_json "/api/room/general/message",
-              { "seq" => 1, "prev" => nil, "ack" => ack, "body" => "hello",
+    post_json "/api/message",
+              { "ack" => ack, "body" => "hello",
                 "ts" => ts, "signature" => sign(payload) }
     assert_equal 200, last_response.status
 
-    get "/api/room/general/messages"
+    get "/api/messages"
     stored = json["messages"].first
 
     assert_equal ack, stored["ack"]
@@ -427,17 +379,19 @@ class AppSpec < Minitest::Test
     assert_nil JSON.parse(json["payload"])["ack"]
   end
 
-  def test_sequence_numbers_cannot_be_reused
+  # RULE: the identical record cannot be stored twice. There is no sequence
+  # number any more, so the record hash being unique is what catches a repeat --
+  # the same payload and the same signature, sent again.
+  def test_the_same_record_cannot_be_stored_twice
     log_in
     ts = Time.now.to_i
-    payload = Payload.message(author: @pubkey, room: "general", seq: 1, prev: nil,
-                              body: "hello", ack: ack, issued_at: ts)
-    body = { "seq" => 1, "prev" => nil, "ack" => ack, "body" => "hello", "ts" => ts, "signature" => sign(payload) }
+    payload = Payload.message(pubkey: @pubkey, body: "hello", ack: ack, issued_at: ts)
+    body = { "ack" => ack, "body" => "hello", "ts" => ts, "signature" => sign(payload) }
 
-    post_json "/api/room/general/message", body
+    post_json "/api/message", body
     assert_equal 200, last_response.status
 
-    post_json "/api/room/general/message", body
+    post_json "/api/message", body
     assert_equal 409, last_response.status
   end
 
@@ -448,9 +402,9 @@ class AppSpec < Minitest::Test
   FIRST_EMOTE  = ReputableChat::App::ALLOWED_EMOTES.first
   SECOND_EMOTE = ReputableChat::App::ALLOWED_EMOTES[1]
 
-  def emote_body(message:, emote: FIRST_EMOTE, room: "general", key: nil)
+  def emote_body(message:, emote: FIRST_EMOTE, key: nil)
     ts = Time.now.to_i
-    payload = Payload.emote(author: @pubkey, room: room, message: message,
+    payload = Payload.emote(pubkey: @pubkey, message: message,
                             emote: emote, ack: ack, issued_at: ts)
     signature = key ? Sig.encode(key.sign(Canon.bytes(payload))) : sign(payload)
     { "message" => message, "emote" => emote, "ack" => ack, "ts" => ts, "signature" => signature }
@@ -460,44 +414,36 @@ class AppSpec < Minitest::Test
 
   def test_stores_an_emote_and_serves_it_back
     log_in
-    post_json "/api/room/general/emote", emote_body(message: a_message_signature)
+    post_json "/api/emote", emote_body(message: a_message_signature)
     assert_equal 200, last_response.status
 
-    get "/api/room/general/emotes"
+    get "/api/emotes"
     stored = json["emotes"]
 
     assert_equal 1, stored.size
     assert_equal a_message_signature, stored.first["message"]
     assert_equal FIRST_EMOTE, stored.first["emote"]
-    assert_equal @pubkey, stored.first["author"], "the author is needed to show whether you reacted"
+    assert_equal @pubkey, stored.first["pubkey"], "the author is needed to show whether you reacted"
   end
 
-  # One reaction per person per message, enforced server-side rather than
+  # One emote per person per message, enforced server-side rather than
   # trusted from the client.
-  def test_one_reaction_per_person_per_message
+  def test_one_emote_per_person_per_message
     log_in
     body = emote_body(message: a_message_signature)
 
-    post_json "/api/room/general/emote", body
+    post_json "/api/emote", body
     assert_equal 200, last_response.status
 
-    post_json "/api/room/general/emote", emote_body(message: a_message_signature, emote: SECOND_EMOTE)
-    assert_equal 409, last_response.status, "a different emote is still a second reaction"
+    post_json "/api/emote", emote_body(message: a_message_signature, emote: SECOND_EMOTE)
+    assert_equal 409, last_response.status, "a different emote is still a second one"
   end
 
   # An arbitrary string must never be storable, or it renders back to everyone.
   def test_rejects_an_emote_outside_the_published_set
     log_in
 
-    post_json "/api/room/general/emote", emote_body(message: a_message_signature, emote: "<img onerror=x>")
-
-    assert_equal 400, last_response.status
-  end
-
-  def test_rejects_an_emote_signed_for_another_room
-    log_in
-
-    post_json "/api/room/general/emote", emote_body(message: a_message_signature, room: "elsewhere")
+    post_json "/api/emote", emote_body(message: a_message_signature, emote: "<img onerror=x>")
 
     assert_equal 400, last_response.status
   end
@@ -505,28 +451,20 @@ class AppSpec < Minitest::Test
   def test_rejects_an_emote_signed_by_someone_else
     log_in
 
-    post_json "/api/room/general/emote",
+    post_json "/api/emote",
               emote_body(message: a_message_signature, key: Ed25519::SigningKey.generate)
 
     assert_equal 400, last_response.status
   end
 
   def test_emoting_requires_a_session
-    post_json "/api/room/general/emote", emote_body(message: a_message_signature)
+    post_json "/api/emote", emote_body(message: a_message_signature)
 
     assert_equal 401, last_response.status
   end
 
-  def test_rejects_a_bad_room_name
-    log_in
-
-    get "/api/room/..%2Fetc/messages"
-
-    refute_equal 200, last_response.status
-  end
-
   def test_sets_a_strict_content_security_policy
-    get "/api/config/#{@pubkey}"
+    get "/api/identity/#{@pubkey}"
     csp = last_response.headers["Content-Security-Policy"]
 
     assert_includes csp, "default-src 'self'"
@@ -548,7 +486,7 @@ class FrozenAppSpec < Minitest::Test
   FROZEN = Class.new(ReputableChat::App) do
     self.store  = ReputableChat::Store::Database.new("sqlite:/")
     self.images = ReputableChat::Store::Images.new(Dir.mktmpdir)
-    self.origin = "http://example.test"
+    self.origins = ["http://example.test"]
   end.freeze
 
   def app = FROZEN.app
@@ -566,7 +504,7 @@ class FrozenAppSpec < Minitest::Test
   end
 
   def test_serves_emote_polarity
-    get "/api/emotes"
+    get "/api/emote-kinds"
 
     assert_equal 200, last_response.status
     emotes = JSON.parse(last_response.body)

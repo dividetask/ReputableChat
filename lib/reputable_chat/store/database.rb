@@ -47,24 +47,6 @@ module ReputableChat
           Integer  :created_at, null: false
         end
 
-        @db.create_table?(:configs) do
-          String   :pubkey, primary_key: true
-          Integer  :revision, null: false
-          String   :payload, text: true, null: false
-          String   :signature, null: false
-          Integer  :updated_at, null: false
-        end
-
-        # Served only to its owner. The read path takes no pubkey at all -- it
-        # uses the session's -- so asking for someone else's is not expressible.
-        @db.create_table?(:private_configs) do
-          String   :pubkey, primary_key: true
-          Integer  :revision, null: false
-          String   :payload, text: true, null: false
-          String   :signature, null: false
-          Integer  :updated_at, null: false
-        end
-
         # `hash` is the record hash -- what everything else on the chain names
         # this message by. Unique because a repeat means the identical record
         # arrived twice, not that two records collided.
@@ -87,12 +69,12 @@ module ReputableChat
 
         # Notices accumulate rather than replace: a correction is a new record
         # pointing at the old one, and what was said stays on the chain to be
-        # checked. Unique on publisher and revision so a number cannot be
+        # checked. Unique on the signer and revision so a number cannot be
         # reused to slip a second statement in behind the first.
         @db.create_table?(:notices) do
           primary_key :id
           String   :hash, null: false, unique: true
-          String   :publisher, null: false, index: true
+          String   :pubkey, null: false, index: true
           Integer  :revision, null: false
           String   :kind, null: false, index: true
           String   :title, null: false
@@ -101,7 +83,7 @@ module ReputableChat
           String   :payload, text: true, null: false
           String   :signature, null: false
           Integer  :received_at, null: false
-          unique %i[publisher revision]
+          unique %i[pubkey revision]
         end
 
         # One change to an attestation between republishes. Unique on the run
@@ -131,39 +113,37 @@ module ReputableChat
           Integer  :updated_at, null: false
         end
 
+        # No per-author sequence: `hash` being unique is what catches a repeat,
+        # and `ack` is where an author chains their own history if they want to.
         @db.create_table?(:messages) do
           primary_key :id
           String   :hash, null: false, unique: true
-          String   :author, null: false, index: true
-          String   :room, null: false, index: true
-          Integer  :seq, null: false
-          String   :prev
+          String   :pubkey, null: false, index: true
           String   :reply_to
           String   :ack, null: false
           String   :payload, text: true, null: false
           String   :signature, null: false
           Integer  :received_at, null: false
-          unique %i[author seq]
         end
 
-        # One reaction per person per message, enforced here rather than
+        # One emote per person per message, enforced here rather than
         # trusted from the client.
         @db.create_table?(:emotes) do
           primary_key :id
           String   :hash, null: false, unique: true
-          String   :author, null: false
-          String   :room, null: false, index: true
+          String   :pubkey, null: false
           String   :message, null: false, index: true
           String   :emote, null: false
           String   :ack, null: false
           String   :payload, text: true, null: false
           String   :signature, null: false
           Integer  :received_at, null: false
-          unique %i[author message]
+          unique %i[pubkey message]
         end
 
         # create_table? leaves an existing table alone, so a database made
         # before a column existed needs it adding explicitly.
+        refuse_legacy_columns
         add_missing(:messages, reply_to: String, ack: String, hash: String)
         add_missing(:emotes, ack: String, hash: String)
 
@@ -207,32 +187,6 @@ module ReputableChat
         @db[:users].insert(pubkey: pubkey, created_at: now)
       end
 
-      # --- configs ---------------------------------------------------------
-
-      def config_blob(pubkey) = @db[:configs].where(pubkey: pubkey).first
-
-      def config_blobs(pubkeys)
-        @db[:configs].where(pubkey: pubkeys.first(MAX_BATCH)).all
-      end
-
-      # Rejects a stale revision. Without this the server could serve an old
-      # copy of someone's config to hide a report, and the signature on it
-      # would still verify perfectly.
-      def store_config(pubkey:, revision:, payload:, signature:)
-        existing = config_blob(pubkey)
-        return :stale if existing && revision <= existing[:revision]
-
-        row = { pubkey: pubkey, revision: revision, payload: payload,
-                signature: signature, updated_at: now }
-
-        if existing
-          @db[:configs].where(pubkey: pubkey).update(row)
-        else
-          @db[:configs].insert(row)
-        end
-        :ok
-      end
-
       # --- identity declarations and attestations -------------------------------
       #
       # Same shape and same rules, so one pair of methods serves both rather
@@ -266,10 +220,10 @@ module ReputableChat
 
       # --- notices --------------------------------------------------------------
 
-      def store_notice(hash:, publisher:, revision:, kind:, title:, supersedes:, ack:,
+      def store_notice(hash:, pubkey:, revision:, kind:, title:, supersedes:, ack:,
                        payload:, signature:)
         @db[:notices].insert(
-          hash: hash, publisher: publisher, revision: revision, kind: kind, title: title,
+          hash: hash, pubkey: pubkey, revision: revision, kind: kind, title: title,
           supersedes: supersedes, ack: ack, payload: payload, signature: signature,
           received_at: now
         )
@@ -280,15 +234,15 @@ module ReputableChat
 
       # Newest first: a reader wants what is current, and walks back through
       # `supersedes` from there if they want to know what it replaced.
-      def notices(publisher, limit: 100)
-        @db[:notices].where(publisher: publisher)
+      def notices(pubkey, limit: 100)
+        @db[:notices].where(pubkey: pubkey)
                      .order(Sequel.desc(:revision)).limit(limit).all
       end
 
       def notice(hash) = @db[:notices].where(hash: hash).first
 
-      def latest_notice_revision(publisher)
-        @db[:notices].where(publisher: publisher).max(:revision).to_i
+      def latest_notice_revision(pubkey)
+        @db[:notices].where(pubkey: pubkey).max(:revision).to_i
       end
 
       # --- adjustments ---------------------------------------------------------
@@ -314,9 +268,9 @@ module ReputableChat
 
       # --- emotes -------------------------------------------------------------
 
-      def store_emote(hash:, author:, room:, message:, emote:, ack:, payload:, signature:)
+      def store_emote(hash:, pubkey:, message:, emote:, ack:, payload:, signature:)
         @db[:emotes].insert(
-          hash: hash, author: author, room: room, message: message, emote: emote,
+          hash: hash, pubkey: pubkey, message: message, emote: emote,
           ack: ack, payload: payload, signature: signature, received_at: now
         )
         :ok
@@ -324,28 +278,8 @@ module ReputableChat
         :duplicate
       end
 
-      def room_emotes(room, limit: 5_000)
-        @db[:emotes].where(room: room).order(:id).limit(limit)
-                    .select(:author, :message, :emote).all
-      end
-
-      # --- private configs ---------------------------------------------------
-
-      def private_config(pubkey) = @db[:private_configs].where(pubkey: pubkey).first
-
-      def store_private_config(pubkey:, revision:, payload:, signature:)
-        existing = private_config(pubkey)
-        return :stale if existing && revision <= existing[:revision]
-
-        row = { pubkey: pubkey, revision: revision, payload: payload,
-                signature: signature, updated_at: now }
-
-        if existing
-          @db[:private_configs].where(pubkey: pubkey).update(row)
-        else
-          @db[:private_configs].insert(row)
-        end
-        :ok
+      def emotes(limit: 5_000)
+        @db[:emotes].order(:id).limit(limit).select(:pubkey, :message, :emote).all
       end
 
       # --- vaults -------------------------------------------------------------
@@ -369,13 +303,13 @@ module ReputableChat
 
       # --- messages ---------------------------------------------------------
 
-      def last_message_for(author)
-        @db[:messages].where(author: author).order(Sequel.desc(:seq)).first
+      def last_message_for(pubkey)
+        @db[:messages].where(pubkey: pubkey).order(Sequel.desc(:id)).first
       end
 
-      def store_message(hash:, author:, room:, seq:, prev:, ack:, payload:, signature:, reply_to: nil)
+      def store_message(hash:, pubkey:, ack:, payload:, signature:, reply_to: nil)
         @db[:messages].insert(
-          hash: hash, author: author, room: room, seq: seq, prev: prev, ack: ack,
+          hash: hash, pubkey: pubkey, ack: ack,
           reply_to: reply_to, payload: payload, signature: signature, received_at: now
         )
         :ok
@@ -385,8 +319,42 @@ module ReputableChat
 
       def message_by_hash(hash) = @db[:messages].where(hash: hash).first
 
-      def room_messages(room, limit: 100)
-        @db[:messages].where(room: room).order(Sequel.desc(:id)).limit(limit).reverse.all
+      def messages(limit: 100)
+        @db[:messages].order(Sequel.desc(:id)).limit(limit).reverse.all
+      end
+
+      # The account that signed a record is `pubkey` everywhere now; it was
+      # `author` on a message or an emote and `publisher` on a notice, and a
+      # message also carried `seq` and `prev`. The shape check above is
+      # `create_table?`, which leaves an existing table alone, so a database
+      # written before that change keeps the old columns and every insert would
+      # fail on a column that is not there -- or on `seq`, which was NOT NULL.
+      #
+      # This refuses to open such a database rather than rebuilding it. Nothing
+      # is published yet, no deployment depends on these rows, and a table
+      # rebuild in SQLite means recreating constraints by hand around the
+      # columns that are going. That is a lot of machinery whose only job is to
+      # preserve a development database, and machinery in here is what breaks
+      # quietly. A person deletes the file; the code stays simple.
+      LEGACY_COLUMNS = { messages: %i[author seq prev room], emotes: %i[author room],
+                         notices: %i[publisher] }.freeze
+
+      class LegacySchema < StandardError; end
+
+      def refuse_legacy_columns
+        found = LEGACY_COLUMNS.filter_map do |table, legacy|
+          next unless @db.table_exists?(table)
+
+          present = @db[table].columns & legacy
+          "#{table}.#{present.join(", #{table}.")}" unless present.empty?
+        end
+        return if found.empty?
+
+        raise LegacySchema,
+              "this database predates one name for the signing account, or has " \
+              "columns for fields that no longer exist " \
+              "(#{found.join('; ')}). Nothing is published yet, so delete the " \
+              "database file and let it be created again."
       end
 
       # Adds only the columns a table is actually missing, so an existing
