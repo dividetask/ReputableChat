@@ -65,6 +65,16 @@ class RulesTextSpec < Minitest::Test
     (numbers - sections.keys).each { |n| flunk "a rule points at section #{n}, which does not exist" }
   end
 
+  # A merge left conflict markers in this file and every assertion here passed,
+  # because none of them looks at anything but normative sentences and section
+  # numbers. A document that still has both sides of an edit in it says two
+  # things at once, which is the failure the rest of this spec is about.
+  def test_the_document_holds_no_unresolved_merge
+    %w[<<<<<<< ======= >>>>>>>].each do |marker|
+      refute_includes text, "\n#{marker}", "an unresolved merge is still in the document"
+    end
+  end
+
   def test_the_sections_are_numbered_without_a_gap
     assert_equal (1..sections.keys.max).to_a, sections.keys.sort
   end
