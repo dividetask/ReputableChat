@@ -27,7 +27,7 @@ class RulesTextSpec < Minitest::Test
     "the definition of history"      => [/A record's history is/, 1],
     "what makes a record valid"      => [/Whether a record is valid is decided/, 1],
     "the ack limit"                  => [/at most 16, or in a heartbeat/, 2],
-    "which keys a record may sign with" => [/must be signed with one of those keys/, 2],
+    "which keys a record may sign with" => [/must be signed with one of/, 2],
     "the contest"                    => [/contests that change|change replacing it/, 2],
     "who may change the master key"  => [/Signed with the current master key/, 7],
     "when an account is disputed"    => [/An account is disputed, as seen by a record/, 7],
