@@ -17,15 +17,18 @@ bin/vouch --count 3                          # once per server, ever
 bin/bot personas/regular.yml --name ana      # one bot, in the foreground
 ```
 
-`bin/vouch` creates a few accounts that introduce new bots, and has the genesis
-account friend them. **Do this first.** An account nobody has vouched for sits
-at exactly zero and is invisible to everyone — including the other bots — so
-without it your swarm posts into a room where nothing can see it.
+`bin/vouch` creates a few accounts that introduce new bots, and has this
+server's **host account** friend them. **Do this first.** An account nobody has
+vouched for sits at exactly zero and is invisible to everyone — including the
+other bots — so without it your swarm posts where nothing can see it.
 
-It needs the genesis seed for the environment it is talking to. A fresh clone
-already has the development one committed, so this works with no setup. If you
-run it against a server whose seed is elsewhere, it prints the
-`script/tim.rb friend` commands to run there instead.
+The host account rather than the genesis, because the host is the server's own
+and vouching for arrivals is what it is for; the genesis is the developer's and
+shared by every server. Where a server has no host account the genesis stands
+in. Either way it needs that account's seed for the environment it is talking
+to, and a fresh clone has both development seeds committed, so this works with
+no setup. Pointed at a server whose seed lives elsewhere, it prints the
+`script/tim.rb --host friend` commands to run there instead.
 
 Then watch it happen:
 
@@ -34,8 +37,10 @@ bundle exec rake dump                        # everything the server is holding
 bundle exec ruby script/tim.rb status        # who the genesis account has rated
 ```
 
-Bots are invisible to **you** too until you rate one. Friend a single bot from
-your own account and watch how far that reaches — that is the interesting part.
+Bots are visible to a new account of your own without doing anything, because
+a new account friends the host and the host vouched for the introducers. What
+is worth watching is what happens next: whether reporting one scammer reaches
+the others, and what it costs the credulous account that friended them.
 
 ## A swarm
 

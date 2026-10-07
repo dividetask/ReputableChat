@@ -21,28 +21,37 @@ the sybil defense, and it applies to bots as hard as it applies to anybody —
 so a swarm does not get to opt out of it with `show_unrated` and still call the
 test realistic. Somebody visible has to vouch.
 
-Tim cannot do it directly for every bot: the genesis account friending two
-hundred accounts would make it a rubber stamp and nothing downstream would mean
-anything. So `bin/vouch` creates a handful of **voucher** accounts, Tim friends
-those once, and each new bot is introduced by one of them as it is born:
+The **host account** does, because that is what it is for: it is this server's
+own account, and vouching for the people who arrive through it is the job the
+design gives it. Not the genesis account — that one is the developer's and the
+same on every server, so spending it on one server's test scaffolding would
+spend the only name the whole network shares. Where a server has no host
+account the genesis stands in, since one of them has to.
+
+It does not friend every bot directly, either. Two hundred vouches from one
+account makes that account a rubber stamp and nothing downstream means
+anything. So `bin/vouch` creates a handful of **voucher** accounts, the host
+friends those once, and each new bot is introduced by one of them as it is
+born:
 
 ```
-Tim ──friend──▶ voucher ──"this account exists"──▶ bot
+host ──friend──▶ voucher ──"this account exists"──▶ bot
 ```
 
-A bot is then three hops from anyone who rates Tim: **visible, and nowhere near
-trusted**, which is exactly what a brand new account should be. The vouch is
-deliberately not a friendship — it is the least rating that clears the
-visibility line, read off the curve under the server's own parameters, so it
-says "this account exists" rather than "I know them".
+A bot is then three hops from anyone who rates the host, which every new
+account does when it is created: **visible, and nowhere near trusted**, which
+is exactly what a brand new account should be. The vouch is deliberately not a
+friendship — it is the least reputation that clears the visibility line, read
+off the curve under the server's own parameters, so it says "this account
+exists" rather than "I know them".
 
 Vouchers live in `data/bots/vouchers.json`, written 0600 because they are seed
-phrases. If the genesis seed is not on the machine you run `bin/vouch` on, it
-prints the `script/tim.rb friend` commands to run wherever it is.
+phrases. If the host's seed is not on the machine you run `bin/vouch` on, it
+prints the `script/tim.rb --host friend` commands to run wherever it is.
 
-Every bot also friends the genesis account and this server's host account when
-it is born, plus `starting_friends` other bots — a new account arrives with a contact or two, the way a person who
-joined a small server on somebody's recommendation does.
+Every bot also friends the genesis account and the host when it is born, plus
+`starting_friends` other bots — a new account arrives with a contact or two,
+the way a person who joined a small server on somebody's recommendation does.
 
 ## Categories
 

@@ -20,6 +20,7 @@ require "open3"
 require "reputable_chat/bot/client"
 require "reputable_chat/bot/vouchers"
 require "reputable_chat/genesis"
+require "reputable_chat/host"
 require "reputable_chat/operator"
 
 options = {
@@ -62,23 +63,33 @@ vouchers.all.each do |voucher|
   puts "  #{voucher.username}  #{voucher.pubkey}  #{state}"
 end
 
-# Tim has to friend them, or they are as invisible as the bots they introduce.
-# Done here when the genesis seed is on this machine, and printed for a human
-# to run somewhere else when it is not.
+# Somebody visible has to friend them, or they are as invisible as the bots
+# they introduce.
+#
+# The host account where there is one: it is this server's own account, and
+# vouching for the people who arrive through it is what it is for. The genesis
+# account is the developer's and the same on every server, so having it rubber
+# stamp each server's test accounts would spend the one name the whole network
+# shares on local scaffolding.
 puts
-if File.exist?(ReputableChat::Operator.seed_path)
+
+signer = ReputableChat::Host.current ? :host : :genesis
+seed   = ReputableChat::Operator.seed_path(account: signer)
+label  = signer == :host ? "the host account" : "the genesis account"
+
+if File.exist?(seed)
   vouchers.all.each do |voucher|
-    command = ["ruby", "script/tim.rb", "friend", voucher.pubkey,
-               "--url", options[:server], "--origin", origin]
+    command = ["ruby", "script/tim.rb", *("--host" if signer == :host), "friend", voucher.pubkey,
+               "--url", options[:server], "--origin", origin].compact
     _out, err, status = Open3.capture3(*command)
-    puts status.success? ? "  the genesis account friended #{voucher.username}" : "  #{err.strip}"
+    puts status.success? ? "  #{label} friended #{voucher.username}" : "  #{err.strip}"
   end
 else
-  puts "  The genesis seed is not on this machine, so the vouchers are not yet"
-  puts "  visible themselves. Wherever it lives, run:"
+  puts "  #{label.capitalize}'s seed is not on this machine, so the vouchers are"
+  puts "  not yet visible themselves. Wherever it lives, run:"
   puts
   vouchers.all.each do |voucher|
-    puts "    bundle exec ruby script/tim.rb friend #{voucher.pubkey}"
+    puts "    bundle exec ruby script/tim.rb #{'--host ' if signer == :host}friend #{voucher.pubkey}"
   end
 end
 puts
