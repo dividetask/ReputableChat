@@ -140,12 +140,12 @@ and [../docs/project/chain.md](../docs/project/chain.md).
   `config/reputation.yml` changes every derived key, which strands every
   existing account. It is versioned (`:v1`) so a future change can be handled
   deliberately rather than by accident.
-
 - **The seed derivation, in three places.** `seed.kdf` in
   `config/reputation.yml`, `public/js/identity.js` and the agnostic server's
   `../server/lib/agnostic/seed.rb` must derive the same key from the same
   phrase, or one phrase is a different account in each.
-  `spec/compatibility_spec.rb` holds the chat's parameters to the server's.
+  `spec/compatibility_spec.rb` derives the server's development phrase in the
+  chat and expects the key the server's genesis declares.
 
 ## Code conventions
 
@@ -184,7 +184,6 @@ than fails when `node_modules` is absent, because a clone should not need
 `playwright-core` rather than `playwright`: it is a single package with no
 dependency tree, and it uses the Chromium already on the machine instead of
 downloading one. The application itself still ships no JavaScript dependencies.
-
 
 ## Vendored files
 
