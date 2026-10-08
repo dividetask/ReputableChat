@@ -55,6 +55,12 @@ module Agnostic
       klass.genesis = genesis
       klass.settings = settings
       klass.clock = @clock
+      trusted = settings.trusted_proxies
+      # Rack takes a caller's address from X-Forwarded-For only past proxies
+      # this filter trusts. Out of the box it trusts any private address, so
+      # anyone on the same network could claim to be anyone; here it trusts
+      # only the proxies named.
+      Rack::Request.ip_filter = ->(ip) { trusted.include?(ip) }
       klass.limiter = RateLimit.new(per_minute: settings.integer("limits", "sweep_requests_per_minute"), clock: @clock)
       klass.freeze.app
     end
@@ -82,16 +88,35 @@ module Agnostic
     # Before going live -- before its first heartbeat after a restart, too --
     # a server sweeps the chain from the servers it was given at setup,
     # resuming where it stopped.
+    #
+    # Then it looks for a chain split among those servers' latest records. A
+    # split is not something it should settle alone, so it stops: no
+    # heartbeats and no syncs until an administrator has looked
+    # (`rake status`) and said to go on (`rake resume`). It keeps answering
+    # other servers meanwhile.
     def catch_up
-      peers.catch_up(store.peers.select { |p| p[:source] == "settings" && !p[:forgotten] }.map { |p| p[:url] })
+      urls = store.peers.select { |p| p[:source] == "settings" && !p[:forgotten] }.map { |p| p[:url] }
+      peers.catch_up(urls)
+      problems = peers.check_splits(urls)
+      halt(problems) unless problems.empty?
     rescue StandardError => e
       warn "catching up failed: #{e.message}"
     end
 
+    def halted = (json = store.meta("halted")) && !json.empty? ? JSON.parse(json) : nil
+
+    def halt(problems)
+      store.save_meta("halted", JSON.generate("at" => @clock.call, "problems" => problems))
+      warn "STOPPED: a chain split among the servers given at setup. No heartbeats until an " \
+           "administrator runs `rake status` and then `rake resume`.\n  #{problems.join("\n  ")}"
+    end
+
+    def resume = store.save_meta("halted", "")
+
     # Any change in what this server says of other servers is published just
     # before the heartbeat, so the heartbeat carries it to them.
     def beat_and_sync
-      return unless heartbeat.due?
+      return if halted || !heartbeat.due?
 
       ratings.publish
       result = heartbeat.beat

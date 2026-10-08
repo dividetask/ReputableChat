@@ -117,3 +117,10 @@ limits:
   # How many sweep requests one caller may make in any minute; past that it
   # is told how long to wait.
   sweep_requests_per_minute: "60"
+  # The caller is known by the address its request came from. Behind a reverse
+  # proxy that is the proxy's for everyone, so list the proxy here and its
+  # X-Forwarded-For header is believed instead. Only list proxies you run:
+  # anyone listed can claim to be any caller.
+  # trusted_proxies:
+  #   - "127.0.0.1"
+  trusted_proxies: []

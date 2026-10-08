@@ -25,6 +25,37 @@ task :sweep, [:url] do |_task, args|
   puts "#{server.peers.catch_up(urls)} records new here"
 end
 
+desc "Whether this server has stopped for an administrator, and why"
+task :status do
+  $LOAD_PATH.unshift File.expand_path("lib", __dir__)
+  require "agnostic/server"
+  halted = Agnostic::Server.new.halted
+  if halted
+    puts "Stopped at #{Time.at(halted['at']).utc} for a chain split:"
+    halted["problems"].each { |p| puts "  #{p}" }
+    puts "Deal with it -- `rake \"forget[<url>]\"` stops syncing with a server -- then `rake resume`."
+  else
+    puts "Running."
+  end
+end
+
+desc "Go on after a stop for a chain split"
+task :resume do
+  $LOAD_PATH.unshift File.expand_path("lib", __dir__)
+  require "agnostic/server"
+  Agnostic::Server.new.resume
+  puts "Resumed: heartbeats start again at the next one due."
+end
+
+desc "Stop syncing with a server: rake \"forget[https://chain.example.org]\""
+task :forget, [:url] do |_task, args|
+  $LOAD_PATH.unshift File.expand_path("lib", __dir__)
+  require "agnostic/settings"
+  require "agnostic/store"
+  updated = Agnostic::Store.new(Agnostic::Settings.load.database_url).update_peer(args[:url].to_s.chomp("/"), forgotten: true)
+  puts updated.zero? ? "no server #{args[:url]} known" : "forgot #{args[:url]}"
+end
+
 desc "List the servers this one syncs with, or has forgotten"
 task :peers do
   $LOAD_PATH.unshift File.expand_path("lib", __dir__)

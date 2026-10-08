@@ -75,7 +75,8 @@ class SweepSpec < Minitest::Test
     assert_equal seqs.sort, seqs, "a record came before something it acknowledges"
   end
 
-  # Part 3 of a generation is the same records wherever it is asked for.
+  # The same generation, in the same order, from any server holding the
+  # heartbeats -- part for part where the two servers' part sizes agree.
   def test_another_server_holding_the_heartbeats_serves_the_same_parts
     beat
     3.times { |i| note("note #{i}") }
@@ -128,7 +129,7 @@ class SweepSpec < Minitest::Test
 
       real.call(method, address, body)
     end
-    fresh.send(:catch_up)
+    fresh.peers.catch_up(["http://alpha"])
     stopped = fresh.store.meta("sweep:#{@alpha.host.id}").to_i
     assert_operator stopped, :>, 1
     refute_empty hashes(@alpha) - hashes(fresh)
@@ -161,5 +162,83 @@ class SweepSpec < Minitest::Test
 
     refute_empty waited
     assert_empty hashes(@alpha) - hashes(fresh)
+  end
+end
+
+# Behind a reverse proxy every request arrives from the proxy, so the limit
+# would be shared by everyone unless the proxy is named and believed.
+class TrustedProxySpec < Minitest::Test
+  include Servers
+
+  def app_with(proxies)
+    server = boot("alpha", host: { "url" => "http://alpha" })
+    server.settings.instance_variable_get(:@values)["limits"].merge!("sweep_requests_per_minute" => 1,
+                                                                      "trusted_proxies" => proxies)
+    server.app
+  end
+
+  def ask(app, forwarded)
+    Rack::MockRequest.new(app).get("/api/sweep", "REMOTE_ADDR" => "10.0.0.2", "HTTP_X_FORWARDED_FOR" => forwarded).status
+  end
+
+  def test_callers_behind_a_named_proxy_are_limited_one_by_one
+    app = app_with(["10.0.0.2"])
+    assert_equal [200, 200, 429], [ask(app, "203.0.113.1"), ask(app, "203.0.113.2"), ask(app, "203.0.113.1")]
+  end
+
+  def test_a_forwarded_address_from_a_proxy_not_named_is_not_believed
+    app = app_with([])
+    assert_equal [200, 429], [ask(app, "203.0.113.1"), ask(app, "203.0.113.2")]
+  end
+end
+
+# Once caught up, a server looks at each of its servers' latest records for a
+# chain split, and stops for an administrator if it finds one.
+class SplitCheckSpec < Minitest::Test
+  include Servers
+
+  def setup
+    @now = Time.now.to_i
+  end
+
+  def test_no_split_and_the_server_goes_live
+    alpha = boot("alpha", clock: -> { @now }, host: { "url" => "http://alpha" })
+    alpha.beat_and_sync
+    fresh = boot("fresh", peers: ["alpha"], clock: -> { @now })
+    fresh.send(:catch_up)
+
+    assert_nil fresh.halted
+    assert_equal :accepted, fresh.beat_and_sync.status
+  end
+
+  # Relay's heartbeats went 256 past a record that alpha's latest records
+  # still hold: the two servers are on different sides of a split.
+  def test_a_split_stops_the_server_until_an_administrator_resumes_it
+    alpha = boot("alpha", clock: -> { @now }, host: { "url" => "http://alpha" })
+    alpha.beat_and_sync
+    relay = boot("relay", clock: -> { @now }, host: { "url" => "http://relay" })
+    first = relay.host.sign("heartbeat", { "ack" => [relay.host.id], "body" => "", "ts" => @now })
+    relay.ingest.submit(first)
+    alpha.ingest.submit(first)
+    stale = alpha.host.sign("message", { "ack" => [alpha.heartbeat.previous.digest, first.digest].sort,
+                                         "body" => "left behind", "ts" => @now })
+    alpha.ingest.submit(stale)
+    beats = [first]
+    257.times do
+      @now += 480
+      beats << relay.host.sign("heartbeat", { "ack" => [beats.last.digest], "body" => "", "ts" => @now })
+      relay.ingest.submit(beats.last)
+    end
+
+    fresh = boot("fresh", peers: %w[alpha relay], clock: -> { @now })
+    fresh.send(:catch_up)
+
+    refute_nil fresh.halted
+    assert(fresh.halted["problems"].any? { |p| p.include?("orphaned") })
+    assert_nil fresh.beat_and_sync, "a stopped server published a heartbeat"
+
+    fresh.resume
+    assert_nil fresh.halted
+    refute_nil fresh.beat_and_sync
   end
 end

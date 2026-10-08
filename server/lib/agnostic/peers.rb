@@ -4,6 +4,7 @@ require "json"
 require "net/http"
 require "uri"
 require_relative "record"
+require_relative "view"
 
 module Agnostic
   # Exchanging records with other servers, once per heartbeat.
@@ -267,6 +268,47 @@ module Agnostic
         @sleeper.call([e.retry_after.to_i, 1].max)
         retry
       end
+    end
+
+    # --- chain splits ------------------------------------------------------------
+
+    # After catching up: takes each server's latest records -- what nothing on
+    # it acknowledges yet -- with whatever of their history is missing here,
+    # and looks for a chain split (section 10): a server holding a record the
+    # rules refuse for holding both sides of one, or the servers' latest
+    # records, taken together, holding a record and the heartbeat that
+    # orphaned it. Returns what it found, one line each; empty when nothing.
+    def check_splits(urls)
+      problems = []
+      latest = []
+      budget = @settings.integer("peers", "fetch_missing")
+      urls.each do |url|
+        next unless contact(url)
+
+        tips = Array(get(url, "/api/frontier")["records"]).select { |h| Record.hash?(h) }
+        queue = tips.dup
+        while (hash = queue.shift)
+          next if @store.known?(hash)
+
+          if (budget -= 1).negative?
+            problems << "#{url}: more of its latest records than peers.fetch_missing allows to fetch"
+            break
+          end
+          result = @ingest.submit(Record.from_wire(get(url, "/api/records/#{hash}")), source: url)
+          queue.concat(Array(result.missing)) if result.status == :pending
+          orphan = Array(result.problems).find { |p| p.include?("orphaned") }
+          problems << "#{url} holds #{hash}, which #{orphan.sub(/\Athe history/, 'has a history that')}" if orphan
+        end
+        latest.concat(tips.select { |h| @store.known?(h) })
+      rescue StandardError => e
+        failed(url, "split check failed: #{e.message}")
+      end
+
+      view = View.new(store: @store, histories: Histories.new(@store), hashes: @store.closure(latest.uniq),
+                      genesis: @ingest.rules.genesis.digest)
+      together = []
+      @ingest.rules.split(nil, view, together)
+      problems + together.map { |p| "the servers' latest records together: #{p}" }
     end
 
     # --- sync ------------------------------------------------------------------

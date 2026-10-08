@@ -135,7 +135,9 @@ record's history never changes, so every server holding those heartbeats
 reaches the same generations. Within one, records are ordered by depth (one
 past the deepest of their parents in the same generation), then by hash:
 each comes after everything it acknowledges, and the order is the same on
-every server.
+every server. The part size is each server's own, though, so every part of
+one generation is taken from the same server; if that server fails partway,
+the generation starts again from its first part on another.
 
 **The request.** `GET /api/sweep?account=&generation=&part=` names the
 account whose generations are wanted (the answering server's own if left
@@ -143,7 +145,9 @@ out), the generation, and the part. A part holds at most
 `limits.sweep_records` (500). The answer says how many parts the generation
 has, the latest generation of that account the server holds, and the `next`
 part to ask for, or nothing after the last. Each caller may make
-`limits.sweep_requests_per_minute` (60) sweep requests in any minute; past
+`limits.sweep_requests_per_minute` (60) sweep requests in any minute -- a
+caller being the address its request came from, or behind a reverse proxy
+listed in `limits.trusted_proxies`, the address the proxy forwarded -- past
 that it gets a 429 saying how many seconds to wait, and a server catching up
 waits that long and asks again.
 
@@ -155,6 +159,17 @@ next that holds it. Progress is kept per account.
 
 Records no heartbeat of that account holds yet are in no generation; they
 arrive with heartbeats once the server is live.
+
+**Then it looks for a chain split.** Once caught up, the server asks each of
+those servers for its latest records -- what nothing on it acknowledges yet
+-- and fetches whatever of their history it lacks. If one of them holds a
+record the rules refuse for holding both sides of a split, or their latest
+records taken together hold a record and the heartbeat that orphaned it
+(section 10), the server stops: it publishes no heartbeats and syncs with no
+one until an administrator has looked. It keeps answering other servers
+meanwhile. `bundle exec rake status` says why it stopped,
+`bundle exec rake "forget[<url>]"` stops syncing with a server, and
+`bundle exec rake resume` goes on.
 
 ## Which servers
 

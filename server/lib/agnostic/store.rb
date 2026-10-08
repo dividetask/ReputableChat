@@ -151,9 +151,9 @@ module Agnostic
     #
     # Within a generation records are ordered by depth -- one past the
     # deepest of their parents in the same generation -- then by hash. That
-    # puts each after everything it acknowledges, and puts them in the same
-    # order on every server, so part 3 of a generation is the same records
-    # wherever it is asked for.
+    # puts each after everything it acknowledges, in the same order on every
+    # server. Parts are not the same everywhere, though: each server sets its
+    # own part size, so all the parts of one generation come from one server.
     def assign_generations(beat)
       account = beat.account
       sql = <<~SQL

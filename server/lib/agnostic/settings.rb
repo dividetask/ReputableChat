@@ -29,7 +29,7 @@ module Agnostic
         "established" => { "after_seconds" => 31_536_000, "rating" => "0.02" }
       },
       "limits" => { "request_bytes" => 8_388_608, "batch_records" => 500, "page_records" => 500, "sweep_records" => 500,
-                     "sweep_requests_per_minute" => 60 }
+                     "sweep_requests_per_minute" => 60, "trusted_proxies" => [] }
     }.freeze
 
     # The least each number may be. The heartbeat floor is the rules' own.
@@ -87,6 +87,10 @@ module Agnostic
     def genesis_path = File.expand_path(format(dig("genesis"), environment: environment), ROOT)
 
     def peers = Array(dig("peers", "urls")).map { |u| u.to_s.strip.chomp("/") }.reject(&:empty?).uniq
+
+    # Addresses whose X-Forwarded-For is believed: this server's own reverse
+    # proxies, and nobody else's.
+    def trusted_proxies = Array(dig("limits", "trusted_proxies")).map { |a| a.to_s.strip }.reject(&:empty?)
 
     def handle = dig("host", "handle").to_s
 

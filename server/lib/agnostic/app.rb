@@ -94,7 +94,9 @@ module Agnostic
     # an account that publishes heartbeats (store.rb says what a generation
     # is), this server's own unless ?account= names another. A part holds at
     # most limits.sweep_records, each record after everything it acknowledges
-    # and in the same order on every server. "next" names the part after this
+    # and in the same order on every server; the part size is this server's
+    # own, so a caller takes every part of a generation from the same server.
+    # "next" names the part after this
     # one, or the next generation's first, and is null once this server has
     # no later generation of that account. Each caller may ask
     # limits.sweep_requests_per_minute times a minute.
