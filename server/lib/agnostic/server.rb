@@ -42,6 +42,7 @@ module Agnostic
       @heartbeat = Heartbeat.new(store: store, ingest: ingest, host: host, settings: settings, clock: clock)
       @peers = Peers.new(store: store, ingest: ingest, settings: settings, http: http, clock: clock, host: host)
       peers.seed(settings.peers)
+      assign_missed_generations
       @ratings = ServerRatings.new(store: store, ingest: ingest, host: host, settings: settings, clock: clock)
     end
 
@@ -62,6 +63,7 @@ module Agnostic
     # that wants to reach this one.
     def start
       Thread.new do
+        catch_up
         loop do
           begin
             beat_and_sync
@@ -75,6 +77,15 @@ module Agnostic
       self
     end
 
+    # Before going live -- before its first heartbeat after a restart, too --
+    # a server sweeps the chain from the servers it was given at setup, each
+    # once to the end, resuming where it stopped.
+    def catch_up
+      peers.sweep_settings_peers
+    rescue StandardError => e
+      warn "catching up failed: #{e.message}"
+    end
+
     # Any change in what this server says of other servers is published just
     # before the heartbeat, so the heartbeat carries it to them.
     def beat_and_sync
@@ -82,7 +93,10 @@ module Agnostic
 
       ratings.publish
       result = heartbeat.beat
-      peers.sync(heartbeat.previous) if result&.status == :accepted
+      return result unless result&.status == :accepted
+
+      store.assign_generation(heartbeat.previous)
+      peers.sync(heartbeat.previous)
       result
     end
 
@@ -110,6 +124,13 @@ module Agnostic
       end
 
       record
+    end
+
+    # Heartbeats published before generations were kept.
+    def assign_missed_generations
+      store.by_account(host.id, kind: "heartbeat").sort_by(&:beat_index).each do |beat|
+        store.assign_generation(beat)
+      end
     end
 
     def install_genesis

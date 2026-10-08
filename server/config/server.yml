@@ -87,8 +87,8 @@ ratings:
   # an attestation of the host account, holding only ratings that changed.
   # Each is a decimal from -1 to +1.
   #
-  # The trust given with every one of these ratings.
-  trust: "0"
+  # Every one of these carries a trust of 0, and that is not a setting: a
+  # server that reliably heartbeats has earned no say in whose ratings count.
   # A declared address never reached, once the server is forgotten.
   never_reached: "-1"
   # Reached for a while, then forgotten. An account nothing is published about
@@ -111,3 +111,6 @@ limits:
   # Records in one POST, and in one page of GET /api/records.
   batch_records: "500"
   page_records: "500"
+  # Records in one part of a sweep (GET /api/sweep): the most this server
+  # shares with a server catching up in one request.
+  sweep_records: "500"

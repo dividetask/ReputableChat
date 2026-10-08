@@ -70,11 +70,11 @@ class ServerRatingsSpec < Minitest::Test
   end
 
   def test_the_ratings_are_configurable
-    settings = Agnostic::Settings.new({ "ratings" => { "trust" => "0.5", "never_reached" => "-0.5" } }, env: {})
+    settings = Agnostic::Settings.new({ "ratings" => { "trust" => "1", "never_reached" => "-0.5" } }, env: {})
     ratings = Agnostic::ServerRatings.new(store: @alpha.store, ingest: @alpha.ingest, host: @alpha.host, settings: settings,
                                           clock: -> { @now })
     contact(offline: true)
-    assert_equal({ "reputation" => "-0.5", "trust" => "0.5" }, ratings.due[beta])
+    assert_equal({ "reputation" => "-0.5", "trust" => "0" }, ratings.due[beta], "trust is never anything but 0")
   end
 
   # --- withdrawing an address -----------------------------------------------------

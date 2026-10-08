@@ -86,7 +86,12 @@ module Agnostic
       BigDecimal(contact[:successes]) >= ratio * contact[:attempts]
     end
 
-    def trust = setting("trust")
+    # Always 0. This server judges only whether another server stays online,
+    # and saying a server reliably produces heartbeats must not read as
+    # saying its ratings are worth believing.
+    TRUST = "0"
+
+    def trust = TRUST
 
     # A rating as the rules spell a decimal, held between -1 and +1.
     def setting(*keys)

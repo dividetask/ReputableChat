@@ -31,7 +31,6 @@ class PeersSpec < Minitest::Test
     @alpha.heartbeat.beat
     @now += 600
     3.times { |i| @alpha.ingest.submit(@alpha.host.sign("message", { "ack" => [@alpha.store.frontier.last.digest], "body" => "#{i}", "ts" => @now })) }
-    @alpha.peers.instance_variable_get(:@outbox).clear # nothing sent ahead
     @alpha.heartbeat.beat
 
     @alpha.peers.sync(@alpha.heartbeat.previous)
@@ -53,7 +52,6 @@ class PeersSpec < Minitest::Test
   def test_the_peer_is_sent_what_it_says_it_is_missing
     @alpha.heartbeat.beat
     beat = @alpha.heartbeat.previous
-    @alpha.peers.instance_variable_get(:@outbox).clear
 
     @alpha.peers.sync(beat)
     assert @beta.store.known?(beat.digest)

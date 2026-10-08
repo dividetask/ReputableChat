@@ -140,6 +140,36 @@ module Agnostic
       scope.order(:seq).limit(limit).all.map { |row| hydrate(row) }
     end
 
+    # --- generations ------------------------------------------------------------------
+
+    # Generation g is what this server's own heartbeat g brought into its
+    # history: every record that heartbeat holds that no earlier one of its
+    # own did. A record with a generation has ancestors with one too, so the
+    # walk stops at the first it meets.
+    def assign_generation(beat)
+      sql = <<~SQL
+        WITH RECURSIVE h(hash) AS (
+          VALUES ('#{beat.digest}')
+          UNION
+          SELECT acks.parent FROM acks
+            JOIN h ON acks.child = h.hash
+            JOIN records r ON r.hash = acks.parent
+          WHERE r.generation IS NULL
+        )
+        UPDATE records SET generation = #{Integer(beat.beat_index)}
+        WHERE generation IS NULL AND hash IN (SELECT hash FROM h)
+      SQL
+      db.run(sql)
+    end
+
+    def latest_generation = db[:records].max(:generation) || 0
+
+    # One part of a generation, in the order this server accepted the records,
+    # which puts each after everything it acknowledges.
+    def generation_part(generation, part, size)
+      db[:records].where(generation: generation).order(:seq).limit(size, part * size).all.map { |row| hydrate(row) }
+    end
+
     # Records nothing on this server acknowledges yet.
     def frontier
       db[:records].exclude(hash: db[:acks].select(:parent)).order(:seq).all.map { |row| hydrate(row) }
@@ -333,7 +363,11 @@ module Agnostic
         String :url, primary_key: true
         Integer :cursor, null: false, default: 0
       end
+      db.alter_table(:records) { add_column :generation, Integer; add_index :generation } unless
+        db[:records].columns.include?(:generation)
       {
+        sweep_generation: [Integer, { null: false, default: 1 }], sweep_part: [Integer, { null: false, default: 0 }],
+        swept: [TrueClass, { null: false, default: false }],
         host: [String], source: [String, { null: false, default: "settings" }],
         added_at: [Integer, { null: false, default: 0 }], last_success_at: [Integer],
         failures: [Integer, { null: false, default: 0 }], next_attempt_at: [Integer, { null: false, default: 0 }],

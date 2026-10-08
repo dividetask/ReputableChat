@@ -32,6 +32,7 @@ bundle exec rake spec          # the suite
 bundle exec rake setup         # a fresh server: handle, address, other servers
 bundle exec puma               # http://localhost:9292
 bundle exec rake peers         # the servers it syncs with, or has forgotten
+bundle exec rake "sweep[<url>]"  # copy the chain from a server, generation by generation
 bundle exec rake host          # this server's host account
 BACKGROUND=0 bundle exec puma  # the API alone: no heartbeats, no syncing
 PEERS=https://a.example,https://b.example HOST_URL=https://me.example bundle exec puma
@@ -105,14 +106,12 @@ own heartbeat waits on a timer until it is due (`heartbeat.interval_seconds`
 after the last); then it publishes it and right away syncs with every peer in
 turn. It reaches out to no one between its heartbeats:
 
-1. **Send ahead** the records it accepted since the last sync, oldest first,
-   except to the peer they came from. They are all in the heartbeat's
-   history; sending them first only saves the peer asking for them one level
-   at a time.
-2. **Share the heartbeat** with `POST /api/sync`.
-3. **The peer asks for what it is missing.** To check the heartbeat it needs
+1. **Share the heartbeat** with `POST /api/sync`, and nothing else unasked:
+   the peer may have seen the rest already.
+2. **The peer asks for what it is missing.** To check the heartbeat it needs
    every record in its history, so it answers with the hashes it does not
-   hold, and is sent them, and asks again, until it holds them all. The ask
+   hold, and is sent them, and asks again -- what it was sent may have
+   ancestors it lacks too -- until it holds them all. The ask
    travels as its answer, not as a request of its own, because the sharing
    server may have no address the peer could reach.
 
@@ -120,7 +119,28 @@ Nothing is pulled the other way: the peer shares its records the same way,
 when it publishes its own heartbeat. So records posted here reach the peers
 with the next heartbeat, not sooner.
 
-**Which servers.** `rake setup` asks a fresh server for the servers it should
+## Catching up
+
+A new server spends some time catching up before it goes live: before its
+first heartbeat it sweeps the chain from each server it was given at setup,
+and only then starts publishing. `bundle exec rake "sweep[<url>]"` sweeps from
+any server by hand.
+
+A sweep asks for the chain in parts (`GET /api/sweep?generation=&part=`).
+Records are grouped into **generations** by the sharing server's own
+heartbeats: generation *g* is every record its heartbeat *g* brought into its
+history that no earlier heartbeat of its own held, so generation 1 is
+everything up to its first. Each part holds at most `limits.sweep_records`
+(500) of one generation, every record after everything it acknowledges, so
+the server catching up can check each one as it arrives. Each answer names
+the next part to ask for, and nothing once the latest generation is done.
+Progress is kept per server, so an interrupted sweep resumes where it
+stopped. Records the sharing server has not yet put in a heartbeat are in no
+generation; they come with that server's next heartbeat instead.
+
+## Which servers
+
+**Setup.** `rake setup` asks a fresh server for the servers it should
 know, and the list may be empty: the server then runs alone until another
 reaches it. Every other server is learned from the records passed along. An
 account that has published a heartbeat and whose latest identity declaration
@@ -180,7 +200,9 @@ address its account declared. Every value is in `ratings:` in
 | anything else | nothing published |
 
 An account a server has published nothing about counts as 0. Each rating
-carries `trust` (0 for now). An attestation holds
+carries a trust of 0, always: that a server reliably produces heartbeats says
+nothing about whether its ratings are worth believing, and publishing any
+other trust would suggest it does. An attestation holds
 only the ratings that changed since the last one, so most heartbeats publish
 none. It is signed just before a heartbeat, which then carries it.
 
@@ -195,6 +217,7 @@ none. It is signed just before a heartbeat, which then carries it.
 | `GET /api/records/<hash>` | one record, or 404 |
 | `GET /api/frontier` | hashes of the records nothing here acknowledges |
 | `POST /api/records` | `{"records": [...]}`, or one record on its own |
+| `GET /api/sweep?generation=&part=` | one capped part of one generation, and the `next` part to ask for |
 | `POST /api/sync` | `{"heartbeat": ...}`: a peer's newest heartbeat; 403 when the peer is or becomes ignored |
 
 A record on the wire is `{"payload": "<canonical JSON>", "signature": "<base64url>"}`;

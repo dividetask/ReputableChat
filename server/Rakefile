@@ -15,6 +15,16 @@ task :setup do
   puts "Written to #{Agnostic::Setup.new(settings: Agnostic::Settings.load).run}"
 end
 
+desc "Sweep the chain from a server: rake \"sweep[https://chain.example.org]\""
+task :sweep, [:url] do |_task, args|
+  $LOAD_PATH.unshift File.expand_path("lib", __dir__)
+  require "agnostic/server"
+  server = Agnostic::Server.new
+  url = args[:url].to_s.chomp("/")
+  server.store.add_peer(url, source: "settings", at: Time.now.to_i) unless server.store.peer(url)
+  puts "#{server.peers.sweep(url)} records new here"
+end
+
 desc "List the servers this one syncs with, or has forgotten"
 task :peers do
   $LOAD_PATH.unshift File.expand_path("lib", __dir__)

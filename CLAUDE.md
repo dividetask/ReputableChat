@@ -46,6 +46,7 @@ bundle exec rake spec       # the agnostic server's suite
 bundle exec rake setup      # a fresh server: handle, address, other servers
 bundle exec puma            # http://localhost:9292; PEERS=url,url to sync
 bundle exec rake peers      # servers it syncs with, failing, or forgotten
+bundle exec rake "sweep[<url>]"   # copy the chain from a server
 bundle exec rake host       # this server's host account (made on first boot)
 bundle exec rake ignored    # peers ignored for a clock over 10 minutes off
 bundle exec rake "forgive[<host account id>]"   # stop ignoring one

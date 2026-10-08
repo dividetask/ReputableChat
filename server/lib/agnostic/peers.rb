@@ -10,13 +10,11 @@ module Agnostic
   #
   # Each time this server publishes a heartbeat it syncs with every peer:
   #
-  # 1. Push: send every record accepted here since the last sync, except to
-  #    the peer it came from. A peer that already has one answers "known".
-  # 2. Offer the new heartbeat (POST /api/sync). The peer checks its ts
+  # 1. Share the new heartbeat (POST /api/sync). The peer checks its ts
   #    against its own clock and ignores this server for good if the two are
   #    more than ten minutes apart -- a server whose clock is that far off is
   #    taken to be lying about time.
-  # 3. The peer, checking the heartbeat, asks for every record in its
+  # 2. The peer, checking the heartbeat, asks for every record in its
   #    history it does not hold, and is sent them, until it can check it.
   #    The ask travels as its answer rather than as a request of its own,
   #    because this server may have no address the peer can reach.
@@ -40,11 +38,7 @@ module Agnostic
       @settings = settings
       @host = host
       @http = http || method(:request)
-      @outbox = Queue.new
-      ingest.on_accept do |record, source|
-        @outbox << [record, source]
-        learn(record)
-      end
+      ingest.on_accept { |record, _source| learn(record) }
     end
 
     attr_writer :host
@@ -183,18 +177,55 @@ module Agnostic
       budget
     end
 
+    # --- sweep -----------------------------------------------------------------
+
+    # Copies the chain from a server, generation by generation, part by part,
+    # resuming where the last sweep of it stopped. Returns how many records
+    # were new here.
+    def sweep(url)
+      peer = @store.peer(url)
+      generation = peer ? peer[:sweep_generation] : 1
+      part = peer ? peer[:sweep_part] : 0
+      added = 0
+      loop do
+        body = get(url, "/api/sweep?generation=#{generation}&part=#{part}")
+        Array(body["records"]).each do |wire|
+          added += 1 if @ingest.submit(Record.from_wire(wire), source: url).status == :accepted
+        end
+        following = body["next"]
+        unless following.is_a?(Hash)
+          @store.update_peer(url, swept: true) if peer
+          return added
+        end
+
+        generation = Integer(following["generation"])
+        part = Integer(following["part"])
+        @store.update_peer(url, sweep_generation: generation, sweep_part: part) if peer
+      end
+    end
+
+    # The servers given at setup or in the settings, each swept once.
+    def sweep_settings_peers
+      @store.peers.select { |p| p[:source] == "settings" && !p[:swept] && !p[:forgotten] }.each do |peer|
+        next unless contact(peer[:url])
+
+        count = sweep(peer[:url])
+        reached(peer[:url])
+        warn "caught up from #{peer[:url]}: #{count} records"
+      rescue StandardError => e
+        failed(peer[:url], "sweep failed: #{e.message}")
+      end
+    end
+
     # --- sync ------------------------------------------------------------------
 
     # Called with each heartbeat this server publishes.
+    # Only the heartbeat goes unasked: the peer may have seen everything else
+    # already, so it asks for what it lacks instead.
     def sync(beat)
-      batch = []
-      batch << @outbox.pop until @outbox.empty?
-      batch.reject! { |record, _| record.digest == beat.digest }
-
       urls.each do |url|
         next unless contact(url)
 
-        push(url, batch.reject { |_, source| source == url }.map(&:first))
         body = post(url, "/api/sync", { "heartbeat" => beat.to_wire })
         push_missing(url, body)
         reached(url)
@@ -226,12 +257,6 @@ module Agnostic
 
     def own?(peer) = @host && peer[:host] == @host.id
 
-    def push(url, records)
-      records.each_slice(@settings.integer("limits", "batch_records")) do |slice|
-        push_missing(url, post(url, "/api/records", { "records" => slice.map(&:to_wire) }))
-      end
-    end
-
     # Sends whatever the peer says it is still missing that this server holds
     # -- the mirror of fetch_missing, within the same kind of budget.
     def push_missing(url, body)
@@ -245,8 +270,6 @@ module Agnostic
         body = post(url, "/api/records", { "records" => records.map(&:to_wire) })
       end
     end
-
-    def outbox_size = @outbox.size
 
     private
 
