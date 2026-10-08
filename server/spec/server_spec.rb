@@ -39,12 +39,16 @@ class ServerSpec < Minitest::Test
     assert_match(/nowhere.json/, error.message)
   end
 
-  def test_the_host_account_is_created_once_acknowledges_the_genesis_and_keeps_its_key_private
+  def test_the_host_account_is_made_once_from_two_phrases_kept_private
     server = boot("alpha")
     dir = server.settings.data_dir
-    key_file = File.join(dir, "host.key")
+    working = File.read(File.join(dir, "host.seed"))
+    master = File.read(File.join(dir, "host-master.seed"))
 
-    assert_equal 0o600, File.stat(key_file).mode & 0o777
+    %w[host.seed host-master.seed].each { |f| assert_equal 0o600, File.stat(File.join(dir, f)).mode & 0o777 }
+    refute_equal working, master
+    assert_equal Agnostic::Keys.public_key(Agnostic::Seed.signing_key(working)), server.host.pubkey
+    assert_equal Agnostic::Keys.public_key(Agnostic::Seed.signing_key(master)), server.host.declaration["mpubkey"]
     assert_equal [server.genesis.digest], server.host.declaration.ack
     assert_equal "alpha", server.host.declaration["title"]
 
@@ -52,10 +56,24 @@ class ServerSpec < Minitest::Test
     assert_equal server.host.id, again.host.id
   end
 
-  def test_a_declaration_that_does_not_match_the_key_beside_it_is_refused
+  # The master phrase belongs off the server, so booting must not need it.
+  def test_the_server_boots_without_the_master_phrase
     server = boot("alpha")
-    File.write(File.join(server.settings.data_dir, "host.key"), "#{Agnostic::Keys.encode(Ed25519::SigningKey.generate.to_bytes)}\n")
+    File.delete(File.join(server.settings.data_dir, "host-master.seed"))
+    assert_equal server.host.id, Agnostic::Server.new(settings: server.settings, http: network).host.id
+  end
+
+  def test_a_declaration_that_does_not_match_the_phrase_beside_it_is_refused
+    server = boot("alpha")
+    path = File.join(server.settings.data_dir, "host.seed")
+    File.write(path, "#{Agnostic::Seed.generate}\n")
     assert_raises(RuntimeError) { Agnostic::Server.new(settings: server.settings) }
+  end
+
+  def test_a_lost_working_phrase_stops_the_server_rather_than_making_a_new_account
+    server = boot("alpha")
+    File.delete(File.join(server.settings.data_dir, "host.seed"))
+    assert_raises(Agnostic::HostAccount::MissingSeed) { Agnostic::Server.new(settings: server.settings) }
   end
 
   def test_settings_fall_back_to_defaults_rather_than_zero

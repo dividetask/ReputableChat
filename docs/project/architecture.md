@@ -9,7 +9,7 @@ What follows describes the chat app except where it says otherwise.
 
 ## The server does as little as possible
 
-It never sees a seed, never holds a private key, and never computes a reputation. The one exception is a server's host account: the agnostic server generates one on first boot and keeps its private key on the machine, 0600, because a heartbeat has to be signed by somebody and nobody sits at a browser for it. That key signs heartbeats and nothing else, and it is the server's own account, never anybody else's. What the chat server does:
+It never sees a seed, never holds a private key, and never computes a reputation. The one exception is a server's host account: the agnostic server generates one on first boot and keeps its working seed phrase on the machine, 0600, because a heartbeat has to be signed by somebody and nobody sits at a browser for it. Its master phrase is written beside it once, for the operator to move off the machine. The working key signs heartbeats and nothing else, and it is the server's own account, never anybody else's. What the chat server does:
 
 - hands out single-use login challenges
 - **verifies every signature before storing anything**

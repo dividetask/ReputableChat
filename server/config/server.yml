@@ -9,8 +9,9 @@
 # most likely to inject: DATABASE_URL, DATA_DIR, GENESIS, PEERS (comma
 # separated) and HEARTBEAT_INTERVAL_SECONDS.
 
-# Where the server keeps its database and its host account. That account's key
-# is written here 0600 on first boot and never leaves the machine.
+# Where the server keeps its database and its host account. That account's
+# working and master seed phrases are written here 0600 on first boot; move
+# the master phrase (host-master.seed) off the machine.
 data_dir: "data"
 
 # The genesis record this server's chain starts from. %{environment} is

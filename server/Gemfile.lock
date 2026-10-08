@@ -1,9 +1,25 @@
 GEM
   remote: https://rubygems.org/
   specs:
+    argon2 (2.3.3)
+      ffi (~> 1.15)
+      ffi-compiler (~> 1.0)
     base64 (0.3.0)
     bigdecimal (3.3.1)
     ed25519 (1.4.0)
+    ffi (1.17.4-aarch64-linux-gnu)
+    ffi (1.17.4-aarch64-linux-musl)
+    ffi (1.17.4-arm-linux-gnu)
+    ffi (1.17.4-arm-linux-musl)
+    ffi (1.17.4-arm64-darwin)
+    ffi (1.17.4-x86-linux-gnu)
+    ffi (1.17.4-x86-linux-musl)
+    ffi (1.17.4-x86_64-darwin)
+    ffi (1.17.4-x86_64-linux-gnu)
+    ffi (1.17.4-x86_64-linux-musl)
+    ffi-compiler (1.4.2)
+      ffi (>= 1.15.5)
+      rake
     minitest (5.27.0)
     nio4r (2.7.5)
     puma (8.0.2)
@@ -40,6 +56,7 @@ PLATFORMS
   x86_64-linux-musl
 
 DEPENDENCIES
+  argon2 (~> 2.3)
   base64
   bigdecimal (~> 3.1)
   ed25519 (~> 1.4)

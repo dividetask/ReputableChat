@@ -58,12 +58,24 @@ signs the rules' record shapes.
 
 ## The host account
 
-On first boot the server generates a random Ed25519 key, writes it 0600 to
-`data/<environment>/host.key`, and declares an account whose first identity
-declaration acknowledges the genesis. Its handle and bio come from
-`config/server.yml`. The key is random rather than derived from a seed phrase
-because nobody types it: it belongs to the machine, and losing it means
-declaring a new account rather than recovering this one. It has no master key.
+On first boot the server makes two 12-word seed phrases and writes each 0600
+into `data/<environment>/`:
+
+- `host.seed`, the working phrase. The server signs with it, and refuses to
+  boot without it rather than quietly becoming a new account.
+- `host-master.seed`, the master phrase. Its key is declared as `mpubkey` and
+  the server never reads it again. **Move it off the server**: it is what
+  moves the account to a new working key if this machine's is ever taken, and
+  that only works if it was not taken with it. The server says so on the
+  boot that makes it.
+
+The account's first identity declaration, in `host.json` beside them,
+acknowledges the genesis; its handle and bio come from `config/server.yml`.
+Keys are derived from the phrases exactly as the browser derives them
+(Argon2id under the chat's `seed.kdf` parameters, which a spec holds equal),
+so either phrase can be typed into a client to act as the account.
+`config/bip39-english.txt` is the same wordlist as the chat's, checked by its
+hash.
 
 ## Heartbeats
 

@@ -1,60 +1,70 @@
 # frozen_string_literal: true
 
-require "ed25519"
 require "fileutils"
 require "json"
 require_relative "canonical"
 require_relative "keys"
 require_relative "record"
 require_relative "rules"
+require_relative "seed"
 
 module Agnostic
   # This server's own account, which signs its heartbeats.
   #
-  # Generated on first boot: a fresh Ed25519 key, written 0600 into the data
-  # directory, and a first identity declaration acknowledging the genesis. The
-  # key is random rather than derived from a seed phrase because nobody types
-  # it -- it belongs to this machine, and losing it means declaring a new
-  # account, not recovering this one.
+  # Made on first boot from two new seed phrases, each written 0600 into the
+  # data directory: the working phrase, which the server keeps and signs with,
+  # and the master phrase, whose key the declaration names as mpubkey and which
+  # the server never reads again. The master phrase belongs off the server:
+  # whoever holds it can move the account to a new working key if this
+  # machine's is ever taken, and that only helps if it was not taken with it.
+  #
+  # Both are phrases rather than raw keys, derived the browser's way, so either
+  # can be typed into a client to act as this account.
   class HostAccount
-    KEY_FILE = "host.key"
+    SEED_FILE = "host.seed"
+    MASTER_FILE = "host-master.seed"
     DECLARATION_FILE = "host.json"
+
+    class MissingSeed < StandardError; end
 
     attr_reader :declaration, :signing_key
 
     def self.load_or_create(dir:, genesis:, handle:, bio:, clock: -> { Time.now.to_i })
       FileUtils.mkdir_p(dir)
-      key = read_or_create_key(File.join(dir, KEY_FILE))
+      seed = File.join(dir, SEED_FILE)
       path = File.join(dir, DECLARATION_FILE)
-      declaration = if File.exist?(path)
-                      Record.from_wire(JSON.parse(File.read(path)))
-                    else
-                      declare(key, genesis: genesis, handle: handle, bio: bio, ts: clock.call).tap do |record|
-                        File.write(path, JSON.pretty_generate(record.to_wire))
-                      end
-                    end
+      return new(signing_key: Seed.signing_key(read_seed(seed)), declaration: read(path)) if File.exist?(path)
+
+      key = Seed.signing_key(write_seed(seed, Seed.generate))
+      master = File.join(dir, MASTER_FILE)
+      master_key = Seed.signing_key(write_seed(master, Seed.generate))
+      warn "host account master phrase written to #{master}: move it off this server"
+      declaration = declare(key, master_key, genesis: genesis, handle: handle, bio: bio, ts: clock.call)
+      File.write(path, JSON.pretty_generate(declaration.to_wire))
       new(signing_key: key, declaration: declaration)
     end
 
-    def self.read_or_create_key(path)
-      if File.exist?(path)
-        raw = Keys.decode(File.read(path).strip, Keys::KEY_BYTES)
-        raise "#{path} does not hold a 32-byte base64url key" unless raw
+    def self.read(path) = Record.from_wire(JSON.parse(File.read(path)))
 
-        return Ed25519::SigningKey.new(raw)
-      end
+    def self.read_seed(path)
+      raise MissingSeed, "#{path} is missing, and the host account cannot sign without it" unless File.exist?(path)
 
-      key = Ed25519::SigningKey.generate
-      # Created 0600 before anything is written to it, so the key is never
-      # briefly readable by anyone else on the machine.
-      File.open(path, File::WRONLY | File::CREAT | File::EXCL, 0o600) { |f| f.puts(Keys.encode(key.to_bytes)) }
-      key
+      File.read(path)
     end
 
-    def self.declare(key, genesis:, handle:, bio:, ts:)
+    # Created 0600 before anything is written to it, so a phrase is never
+    # briefly readable by anyone else on the machine, and never over one that
+    # is already there.
+    def self.write_seed(path, phrase)
+      File.open(path, File::WRONLY | File::CREAT | File::EXCL, 0o600) { |f| f.puts(phrase) }
+      phrase
+    end
+
+    def self.declare(key, master_key, genesis:, handle:, bio:, ts:)
       sign(key, {
-             "ack" => [genesis.digest], "body" => bio, "pubkey" => Keys.public_key(key),
-             "title" => handle, "ts" => ts, "type" => "reputablechat:identity:#{Rules::VERSION}"
+             "ack" => [genesis.digest], "body" => bio, "mpubkey" => Keys.public_key(master_key),
+             "pubkey" => Keys.public_key(key), "title" => handle, "ts" => ts,
+             "type" => "reputablechat:identity:#{Rules::VERSION}"
            })
     end
 
@@ -68,7 +78,7 @@ module Agnostic
       @declaration = declaration
       return if declaration["pubkey"] == pubkey
 
-      raise "the account declaration in the data directory was not made with the key beside it"
+      raise "the host account declaration in the data directory was not made with the phrase beside it"
     end
 
     def id = declaration.digest
@@ -82,6 +92,6 @@ module Agnostic
                                 ))
     end
 
-    def to_h = { "id" => id, "pubkey" => pubkey, "declaration" => declaration.to_wire }
+    def to_h = { "id" => id, "pubkey" => pubkey, "mpubkey" => declaration["mpubkey"], "declaration" => declaration.to_wire }
   end
 end

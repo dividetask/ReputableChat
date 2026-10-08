@@ -16,3 +16,4 @@ group :development, :test do
   gem "rack-test", "~> 2.2"
   gem "rake", "~> 13.0"
 end
+gem "argon2", "~> 2.3"

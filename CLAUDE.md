@@ -150,10 +150,14 @@ inventing a word for something that already has one.
   differ. That is deliberate: a published rules file is never edited. Before
   launch, the fix is a new development genesis, which orphans every
   development record that acknowledged the old one.
-- **The server's host account key** is generated on first boot into
-  `server/data/<environment>/host.key`, 0600, beside its declaration. Losing
-  either means a new account; the server refuses to boot when they do not
-  match.
+- **The server's host account phrases** are generated on first boot into
+  `server/data/<environment>/`: `host.seed` (working) and `host-master.seed`
+  (master, to be moved off the server; never read again), both 0600, beside
+  the declaration `host.json`. The server refuses to boot without the working
+  phrase or when it does not match the declaration. `server/lib/agnostic/seed.rb`
+  derives keys the browser's way, and `server/spec/seed_spec.rb` holds its KDF
+  parameters equal to `seed.kdf` in `config/reputation.yml` -- change one
+  without the other and the same phrase is two different accounts.
 - **One home per rule.** A rule written in two places gets edited in one of
   them, and the two copies then disagree about which records are valid. That
   happened three times in one afternoon of editing, each time as a paraphrase
@@ -209,5 +213,6 @@ downloading one. The application itself still ships no JavaScript dependencies.
 - `public/js/vendor-argon2.umd.min.js` — hash-wasm 4.12.0, `dist/argon2.umd.min.js`,
   from the npm registry. sha256
   `dcec617a2e1b700fa132d1583a186cb70611113395e869f2dd6cc82b415d3094`.
-- `config/bip39-english.txt` — canonical BIP39 English wordlist, sha256
+- `config/bip39-english.txt` and `server/config/bip39-english.txt` — canonical
+  BIP39 English wordlist, the same file in both apps, sha256
   `2f5eed53a4727b4bf8880d8f3f199efc90e58503646d9ff8eff3a2ed3b24dbda`.
