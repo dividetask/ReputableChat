@@ -16,11 +16,26 @@ class PeersSpec < Minitest::Test
 
   def hashes(server) = server.store.since(0, limit: 1_000).map(&:digest)
 
-  def test_a_heartbeat_syncs_both_ways
+  # The server that shares a heartbeat is asked for its history; it asks the
+  # other for nothing, which shares its own records with its own heartbeat.
+  def test_sharing_a_heartbeat_gives_the_peer_its_whole_history_and_takes_nothing
     @alpha.beat_and_sync
-
     assert_empty hashes(@alpha) - hashes(@beta), "beta lacks what alpha holds"
-    assert_empty hashes(@beta) - hashes(@alpha), "alpha did not pull what beta holds"
+    refute @alpha.store.known?(@beta.host.id), "alpha pulled from beta"
+
+    @beta.beat_and_sync
+    assert_empty hashes(@beta) - hashes(@alpha)
+  end
+
+  def test_the_peer_asks_for_every_record_of_the_history_it_lacks
+    @alpha.heartbeat.beat
+    @now += 600
+    3.times { |i| @alpha.ingest.submit(@alpha.host.sign("message", { "ack" => [@alpha.store.frontier.last.digest], "body" => "#{i}", "ts" => @now })) }
+    @alpha.heartbeat.beat
+
+    @alpha.peers.sync(@alpha.heartbeat.previous)
+    assert @beta.store.known?(@alpha.heartbeat.previous.digest)
+    assert_empty hashes(@alpha) - hashes(@beta)
   end
 
   def test_records_accepted_between_heartbeats_are_pushed_with_the_next_one
@@ -37,7 +52,6 @@ class PeersSpec < Minitest::Test
   def test_the_peer_is_sent_what_it_says_it_is_missing
     @alpha.heartbeat.beat
     beat = @alpha.heartbeat.previous
-    @alpha.peers.instance_variable_get(:@outbox).clear
 
     @alpha.peers.sync(beat)
     assert @beta.store.known?(beat.digest)

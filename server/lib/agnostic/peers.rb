@@ -10,37 +10,141 @@ module Agnostic
   #
   # Each time this server publishes a heartbeat it syncs with every peer:
   #
-  # 1. Push: send every record accepted here since the last sync, except to
-  #    the peer it came from. A peer that already has one answers "known".
-  # 2. Offer the new heartbeat (POST /api/sync). The peer checks its ts
+  # 1. Share the new heartbeat (POST /api/sync). The peer checks its ts
   #    against its own clock and ignores this server for good if the two are
   #    more than ten minutes apart -- a server whose clock is that far off is
   #    taken to be lying about time.
-  # 3. Send whatever the peer answers it is still missing.
-  # 4. Pull: ask the peer for what it accepted since the last time, in the
-  #    order it accepted them, which puts every record after what it
-  #    acknowledges. A record that arrives ahead of an ancestor is held, and
-  #    the missing ancestors fetched from that peer by hash.
+  # 2. The peer, checking the heartbeat, asks for every record in its
+  #    history it does not hold, and is sent them, until it can check it.
+  #    The ask travels as its answer rather than as a request of its own,
+  #    because this server may have no address the peer can reach.
+  #
+  # Nothing is pulled from the peer: it shares its records the same way, when
+  # it publishes its own heartbeat. pull_all remains, for catching up by hand.
   #
   # A peer whose host account this server ignores is skipped.
+  #
+  # Which servers: those named at setup or in the settings, and those learned
+  # from records -- an account that publishes heartbeats and declares a url is
+  # a server, and it is synced with once it answers at that url as that
+  # account. A server that cannot be reached is tried less and less often,
+  # and forgotten once it has gone peers.forget_after_seconds without being
+  # reached; hearing from it again brings it back.
   class Peers
-    def initialize(store:, ingest:, settings:, http: nil, clock: -> { Time.now.to_i })
+    def initialize(store:, ingest:, settings:, http: nil, clock: -> { Time.now.to_i }, host: nil,
+                   sleeper: ->(seconds) { sleep seconds })
+      @sleeper = sleeper
       @clock = clock
       @store = store
       @ingest = ingest
       @settings = settings
+      @host = host
       @http = http || method(:request)
-      @outbox = Queue.new
-      ingest.on_accept { |record, source| @outbox << [record, source] }
+      ingest.on_accept { |record, _source| learn(record) }
     end
 
-    def urls = @settings.peers
+    attr_writer :host
+
+    # The servers due a contact now.
+    def urls
+      now = @clock.call
+      @store.peers.reject { |p| p[:forgotten] || p[:next_attempt_at] > now || own?(p) }.map { |p| p[:url] }
+    end
+
+    # Servers named in the settings or at setup. Ones already known keep
+    # their state, so a forgotten one stays forgotten across restarts.
+    def seed(urls) = urls.each { |url| @store.add_peer(url, source: "settings", at: @clock.call) unless @store.peer(url) }
+
+    # --- learning about servers -------------------------------------------------
+
+    # An account is a server once it has published a heartbeat; its url is the
+    # one its latest identity declaration names.
+    def learn(record)
+      return unless %w[identity heartbeat].include?(record.kind)
+      return if @host && record.account == @host.id
+
+      account = record.account
+      return unless record.heartbeat? || @store.by_account(account, kind: "heartbeat").any?
+
+      declaration = record.kind == "identity" ? record : @store.by_account(account, kind: "identity").max_by(&:seq)
+      url = declaration && Peers.url(declaration["url"])
+      # The latest declaration is the account's address: one that names none,
+      # or another, withdraws the addresses it named before.
+      @store.withdraw_peers(account, except: url) if record.kind == "identity"
+      # A new declaration brings a forgotten server back; its heartbeats alone
+      # do not, or one that is unreachable at its url would be retried at full
+      # pace for as long as its heartbeats travel through others.
+      return unless url && room_for?(url)
+
+      @store.add_peer(url, source: "learned", host: account, at: @clock.call, revive: record.kind == "identity")
+    end
+
+    # At most peers.max_learned learned servers are synced with. Past that, a
+    # newly learned one is skipped; one already known stays.
+    def room_for?(url)
+      existing = @store.peer(url)
+      return true if existing && !existing[:forgotten]
+
+      @store.peers.count { |p| p[:source] == "learned" && !p[:forgotten] } < @settings.integer("peers", "max_learned")
+    end
+
+    def self.url(value)
+      return unless value.is_a?(String)
+
+      uri = URI.parse(value)
+      %w[http https].include?(uri.scheme) && uri.host ? value.chomp("/") : nil
+    rescue URI::InvalidURIError
+      nil
+    end
+
+    # --- reachability -----------------------------------------------------------
+
+    # Each failure waits longer before the next try: retry.first_seconds, times
+    # retry.multiplier for each failure after the first, at most
+    # retry.max_seconds.
+    def retry_delay(failures)
+      first = @settings.integer("peers", "retry", "first_seconds")
+      factor = @settings.decimal("peers", "retry", "multiplier", minimum: 1)
+      most = @settings.integer("peers", "retry", "max_seconds")
+      [(first * (factor**(failures - 1))).to_i, most].min
+    end
+
+    def reached(url)
+      @store.update_peer(url, failures: 0, next_attempt_at: 0, last_success_at: @clock.call)
+      host = @store.peer_host(url)
+      @store.record_contact(host, success: true, at: @clock.call) if host
+    end
+
+    def failed(url, reason)
+      peer = @store.peer(url)
+      return unless peer
+
+      now = @clock.call
+      failures = peer[:failures] + 1
+      silent_since = peer[:last_success_at] || peer[:added_at]
+      forget = now - silent_since >= @settings.integer("peers", "forget_after_seconds")
+      @store.update_peer(url, failures: failures, next_attempt_at: now + retry_delay(failures), forgotten: forget)
+      if peer[:host]
+        @store.record_contact(peer[:host], success: false, at: now)
+        @store.mark_offline(peer[:host]) if forget
+      end
+      warn "#{url}: #{reason}#{forget ? '; not reached in too long, so forgotten' : ''}"
+    end
 
     # --- pull -------------------------------------------------------------------
 
-    def pull_all = urls.each { |url| pull(url) unless ignored_peer?(url) }
+    def pull_all
+      urls.each do |url|
+        next unless contact(url)
 
-    def pull(url)
+        pull(url, raise_errors: true)
+        reached(url)
+      rescue StandardError => e
+        failed(url, "pull failed: #{e.message}")
+      end
+    end
+
+    def pull(url, raise_errors: false)
       page = @settings.integer("limits", "page_records")
       budget = @settings.integer("peers", "fetch_missing")
       loop do
@@ -55,6 +159,8 @@ module Agnostic
         break if records.size < page
       end
     rescue StandardError => e
+      raise if raise_errors
+
       warn "pull from #{url} failed: #{e.message}"
     end
 
@@ -73,39 +179,135 @@ module Agnostic
       budget
     end
 
+    # --- catching up -----------------------------------------------------------
+
+    # A request a server answered with an error status.
+    class HttpError < StandardError
+      attr_reader :status, :retry_after
+
+      def initialize(message, status:, retry_after: nil)
+        super(message)
+        @status = status
+        @retry_after = retry_after
+      end
+    end
+
+    # Sweeps the chain before going live, from several servers at once.
+    #
+    # Generations are counted by one account that publishes heartbeats -- the
+    # first server's own -- so they mean the same on every server holding its
+    # heartbeats, and each server can be asked for different ones. Up to one
+    # generation per server is fetched in parallel; they are checked in order,
+    # each record after everything it acknowledges. Progress is kept per
+    # account, so a sweep resumes where it stopped. Returns how many records
+    # were new here.
+    def catch_up(urls)
+      sources = urls.select { |url| contact(url) }
+      return 0 if sources.empty?
+
+      account = get(sources.first, "/api")["host"]
+      reach = sources.to_h { |url| [url, latest_generation(url, account)] }.select { |_, latest| latest }
+      top = reach.values.max.to_i
+      generation = (@store.meta("sweep:#{account}") || "1").to_i
+      added = 0
+      while generation <= top
+        batch = (generation..[generation + reach.size - 1, top].min).to_a
+        threads = batch.each_with_index.map do |g, i|
+          holders = reach.keys.rotate(i).select { |url| reach[url] >= g }
+          Thread.new { fetch_generation(account, g, holders) }
+        end
+        batch.zip(threads.map(&:value)).each do |g, records|
+          return added unless records
+
+          added += records.count { |wire| @ingest.submit(Record.from_wire(wire), source: :sweep).status == :accepted }
+          @store.save_meta("sweep:#{account}", g + 1)
+        end
+        generation = batch.last + 1
+      end
+      reach.each_key { |url| reached(url) }
+      added
+    end
+
+    def latest_generation(url, account)
+      Integer(sweep_request(url, account, 1, 0)["latest"])
+    rescue StandardError => e
+      failed(url, "sweep failed: #{e.message}")
+      nil
+    end
+
+    # Every part of one generation, from the first of these servers that
+    # gives all of it; nil when none does.
+    def fetch_generation(account, generation, holders)
+      holders.each do |url|
+        records = []
+        part = 0
+        loop do
+          body = sweep_request(url, account, generation, part)
+          records.concat(Array(body["records"]))
+          following = body["next"]
+          break unless following.is_a?(Hash) && following["generation"] == generation
+
+          part = Integer(following["part"])
+        end
+        return records
+      rescue StandardError => e
+        warn "#{url}: generation #{generation} of #{account} failed: #{e.message}"
+      end
+      nil
+    end
+
+    # Waits as long as a server asks, a few times, when it is asked too often.
+    def sweep_request(url, account, generation, part)
+      attempts = 0
+      begin
+        get(url, "/api/sweep?account=#{account}&generation=#{generation}&part=#{part}")
+      rescue HttpError => e
+        raise unless e.status == 429 && (attempts += 1) <= 3
+
+        @sleeper.call([e.retry_after.to_i, 1].max)
+        retry
+      end
+    end
+
     # --- sync ------------------------------------------------------------------
 
     # Called with each heartbeat this server publishes.
+    # Only the heartbeat goes unasked: the peer may have seen everything else
+    # already, so it asks for what it lacks instead.
     def sync(beat)
-      batch = []
-      batch << @outbox.pop until @outbox.empty?
-      batch.reject! { |record, _| record.digest == beat.digest }
-
       urls.each do |url|
-        next if ignored_peer?(url)
+        next unless contact(url)
 
-        push(url, batch.reject { |_, source| source == url }.map(&:first))
         body = post(url, "/api/sync", { "heartbeat" => beat.to_wire })
         push_missing(url, body)
-        pull(url)
+        reached(url)
       rescue StandardError => e
-        warn "sync with #{url} failed: #{e.message}"
+        failed(url, "sync failed: #{e.message}")
       end
     end
 
-    # A peer is known by the host account it reports; the account, not the
-    # address, is what gets ignored.
-    def ignored_peer?(url)
+    # Asks the server at url who it is. A peer is known by its host account,
+    # which is what gets ignored; a learned one must answer as the account
+    # whose declaration named the url. False when it is not to be synced
+    # with, a failure when it could not be reached.
+    def contact(url)
       host = get(url, "/api")["host"]
+      known = @store.peer_host(url)
+      if known && host != known
+        failed(url, "answers as #{host}, not as #{known}, whose declaration named it")
+        return false
+      end
+
       @store.save_peer_host(url, host) if Record.hash?(host)
-      host && @store.ignored?(host, at: @clock.call)
+      return false if @host && host == @host.id
+
+      !(host && @store.ignored?(host, at: @clock.call))
+    rescue StandardError => e
+      failed(url, "unreachable: #{e.message}")
+      false
     end
 
-    def push(url, records)
-      records.each_slice(@settings.integer("limits", "batch_records")) do |slice|
-        push_missing(url, post(url, "/api/records", { "records" => slice.map(&:to_wire) }))
-      end
-    end
+    def own?(peer) = @host && peer[:host] == @host.id
 
     # Sends whatever the peer says it is still missing that this server holds
     # -- the mirror of fetch_missing, within the same kind of budget.
@@ -120,8 +322,6 @@ module Agnostic
         body = post(url, "/api/records", { "records" => records.map(&:to_wire) })
       end
     end
-
-    def outbox_size = @outbox.size
 
     private
 
@@ -141,7 +341,10 @@ module Agnostic
           request.body = JSON.generate(body)
         end
         response = http.request(request)
-        raise "#{method.upcase} #{address} answered #{response.code}" unless response.is_a?(Net::HTTPSuccess)
+        unless response.is_a?(Net::HTTPSuccess)
+          raise HttpError.new("#{method.upcase} #{address} answered #{response.code}",
+                              status: response.code.to_i, retry_after: response["retry-after"])
+        end
 
         JSON.parse(response.body)
       end

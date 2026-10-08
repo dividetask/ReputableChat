@@ -12,7 +12,9 @@ require_relative "heartbeat"
 require_relative "ingest"
 require_relative "peers"
 require_relative "record"
+require_relative "rate_limit"
 require_relative "rules"
+require_relative "server_ratings"
 require_relative "settings"
 require_relative "store"
 
@@ -31,7 +33,7 @@ module Agnostic
 
     class BootError < StandardError; end
 
-    attr_reader :settings, :store, :rules, :ingest, :host, :heartbeat, :peers, :genesis
+    attr_reader :settings, :store, :rules, :ingest, :host, :heartbeat, :peers, :genesis, :ratings
 
     def initialize(settings: Settings.load, clock: -> { Time.now.to_i }, http: nil)
       @settings = settings
@@ -44,7 +46,10 @@ module Agnostic
       @ingest = Ingest.new(store: store, rules: rules, settings: settings, clock: clock)
       @host = declare_host
       @heartbeat = Heartbeat.new(store: store, ingest: ingest, host: host, settings: settings, clock: clock)
-      @peers = Peers.new(store: store, ingest: ingest, settings: settings, http: http, clock: clock)
+      @peers = Peers.new(store: store, ingest: ingest, settings: settings, http: http, clock: clock, host: host)
+      peers.seed(settings.peers)
+      assign_missed_generations
+      @ratings = ServerRatings.new(store: store, ingest: ingest, host: host, settings: settings, clock: clock)
     end
 
     def app
@@ -56,19 +61,49 @@ module Agnostic
       klass.settings = settings
       klass.clock = @clock
       klass.accounts = Accounts.new(store: store, genesis: genesis)
+      klass.limiter = RateLimit.new(per_minute: settings.integer("limits", "sweep_requests_per_minute"), clock: @clock)
       klass.freeze.app
     end
 
-    # Each heartbeat is followed by a sync with every peer.
+    # Heartbeats at the configured interval, each followed at once by a sync
+    # with every server. The timer thread waits between them and this server
+    # contacts no one meanwhile; the API stays up throughout, for any server
+    # that wants to reach this one.
     def start
-      every(30) { beat_and_sync }
-      every(300) { ingest.expire }
+      Thread.new do
+        catch_up
+        loop do
+          begin
+            beat_and_sync
+          rescue StandardError => e
+            warn "#{e.class}: #{e.message}"
+          end
+          sleep [heartbeat.seconds_until_due, 1].max
+        end
+      end
+      every(settings.integer("pending", "sweep_seconds")) { ingest.expire }
       self
     end
 
+    # Before going live -- before its first heartbeat after a restart, too --
+    # a server sweeps the chain from the servers it was given at setup,
+    # resuming where it stopped.
+    def catch_up
+      peers.catch_up(store.peers.select { |p| p[:source] == "settings" && !p[:forgotten] }.map { |p| p[:url] })
+    rescue StandardError => e
+      warn "catching up failed: #{e.message}"
+    end
+
+    # Any change in what this server says of other servers is published just
+    # before the heartbeat, so the heartbeat carries it to them.
     def beat_and_sync
+      return unless heartbeat.due?
+
+      ratings.publish
       result = heartbeat.beat
-      peers.sync(heartbeat.previous) if result&.status == :accepted
+      return result unless result&.status == :accepted
+
+      peers.sync(heartbeat.previous)
       result
     end
 
@@ -98,6 +133,14 @@ module Agnostic
       record
     end
 
+    # Heartbeats stored before generations were kept, oldest first.
+    def assign_missed_generations
+      store.db[:records].where(kind: "heartbeat").order(:seq).all.each do |row|
+        beat = store.fetch(row[:hash])
+        store.assign_generations(beat) unless store.generations_assigned?(beat)
+      end
+    end
+
     def install_genesis
       verdict = rules.check(genesis)
       raise BootError, "the genesis is not valid: #{verdict.problems.join('; ')}" unless verdict.valid?
@@ -107,7 +150,8 @@ module Agnostic
 
     def declare_host
       check_url
-      host = HostAccount.load_or_create(dir: settings.data_dir, genesis: genesis, profile: profile, clock: @clock)
+      host = HostAccount.load_or_create(dir: settings.data_dir, genesis: genesis, profile: profile,
+                                       words: settings.integer("host", "seed_words"), clock: @clock)
       submit_declaration(host.declaration)
       redeclare(host)
       host

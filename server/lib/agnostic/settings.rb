@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "bigdecimal"
 require "yaml"
 
 module Agnostic
@@ -13,24 +14,44 @@ module Agnostic
       "data_dir" => "data",
       "database_url" => nil,
       "genesis" => "config/genesis/%{environment}.json",
-      "host" => { "handle" => "Agnostic server", "bio" => "", "url" => nil },
+      "host" => { "handle" => "Agnostic server", "bio" => "", "url" => nil, "seed_words" => 12 },
       "heartbeat" => { "interval_seconds" => 600 },
       "records" => { "max_future_seconds" => 600 },
-      "pending" => { "max_records" => 10_000, "max_age_seconds" => 3_600 },
+      "pending" => { "max_records" => 10_000, "max_age_seconds" => 3_600, "sweep_seconds" => 300 },
       "peers" => {
-        "urls" => [], "max_clock_skew_seconds" => 600, "ignore_seconds" => 604_800, "fetch_missing" => 1_000, "timeout_seconds" => 10
+        "urls" => [], "max_clock_skew_seconds" => 600, "ignore_seconds" => 604_800,
+        "forget_after_seconds" => 604_800, "max_learned" => 100,
+        "retry" => { "first_seconds" => 600, "multiplier" => "2", "max_seconds" => 86_400 }, "fetch_missing" => 1_000, "timeout_seconds" => 10
       },
-      "limits" => { "request_bytes" => 8_388_608, "batch_records" => 500, "page_records" => 500 }
+      "ratings" => {
+        "never_reached" => "-1", "went_offline" => "-0.01", "reliable_ratio" => "0.9",
+        "reliable" => { "after_seconds" => 10_368_000, "rating" => "0.01" },
+        "established" => { "after_seconds" => 31_536_000, "rating" => "0.02" }
+      },
+      "limits" => { "request_bytes" => 8_388_608, "batch_records" => 500, "page_records" => 500, "sweep_records" => 500,
+                     "sweep_requests_per_minute" => 60 }
     }.freeze
 
     # The least each number may be. The heartbeat floor is the rules' own.
-    MINIMUMS = { %w[heartbeat interval_seconds] => 480 }.freeze
+    # The least each number may be. The heartbeat floor is the rules' own; the
+    # seed floor is the chat's, below which a phrase is guessable.
+    MINIMUMS = { %w[heartbeat interval_seconds] => 480, %w[host seed_words] => 8 }.freeze
 
     attr_reader :environment
 
+    LOCAL = "settings.yml"
+
+    # config/server.yml, then what `rake setup` wrote for this server into
+    # its data directory, which is not committed.
     def self.load(path: PATH, env: ENV)
       file = File.exist?(path) ? (YAML.safe_load_file(path) || {}) : {}
+      local = File.join(new(file, env: env).data_dir, LOCAL)
+      file = deep_merge(file, YAML.safe_load_file(local) || {}) if File.exist?(local)
       new(file, env: env)
+    end
+
+    def self.deep_merge(a, b)
+      a.merge(b) { |_, x, y| x.is_a?(Hash) && y.is_a?(Hash) ? deep_merge(x, y) : y }
     end
 
     def initialize(file = {}, env: ENV)
@@ -47,6 +68,16 @@ module Agnostic
       parsed = Integer(dig(*keys).to_s, exception: false)
       parsed = default unless parsed&.positive?
       [parsed, MINIMUMS.fetch(keys, 0)].max
+    end
+
+    # A decimal setting, never below its minimum.
+    def decimal(*keys, minimum:)
+      value = begin
+        BigDecimal(dig(*keys).to_s)
+      rescue ArgumentError, TypeError
+        nil
+      end
+      value && value >= minimum ? value : BigDecimal(DEFAULTS.dig(*keys).to_s)
     end
 
     def data_dir = File.expand_path(File.join(dig("data_dir"), environment), ROOT)

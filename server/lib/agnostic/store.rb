@@ -42,6 +42,7 @@ module Agnostic
         rows(:endorsements, record, record.endorse) { |h| { record: record.digest, endorsed: h } }
         spent = Array(record.transfer&.fetch("in", nil))
         rows(:spends, record, spent) { |h| { record: record.digest, output: h, account: record.account } }
+        assign_generations(record) if record.heartbeat?
       end
       record
     end
@@ -140,6 +141,63 @@ module Agnostic
       scope.order(:seq).limit(limit).all.map { |row| hydrate(row) }
     end
 
+    # --- generations ------------------------------------------------------------------
+
+    # Generations belong to an account that publishes heartbeats: its
+    # generation g is every record its heartbeat g brought into its history
+    # that none of its earlier heartbeats held. A record's history never
+    # changes, so every server holding those heartbeats reaches the same
+    # generations, and a server catching up can take them from any of them.
+    #
+    # Within a generation records are ordered by depth -- one past the
+    # deepest of their parents in the same generation -- then by hash. That
+    # puts each after everything it acknowledges, and puts them in the same
+    # order on every server, so part 3 of a generation is the same records
+    # wherever it is asked for.
+    def assign_generations(beat)
+      account = beat.account
+      sql = <<~SQL
+        WITH RECURSIVE h(hash) AS (
+          VALUES ('#{beat.digest}')
+          UNION
+          SELECT acks.parent FROM acks
+            JOIN h ON acks.child = h.hash
+          WHERE NOT EXISTS (
+            SELECT 1 FROM generations g WHERE g.account = #{db.literal(account)} AND g.record = acks.parent
+          )
+        )
+        SELECT hash FROM h
+      SQL
+      fresh = db.fetch(sql).map { |row| row[:hash] }.to_set
+      depth = {}
+      parents = fresh.each_slice(500).flat_map { |slice| db[:acks].where(child: slice).select_map(%i[child parent]) }
+                     .group_by(&:first).transform_values { |pairs| pairs.map(&:last).select { |h| fresh.include?(h) } }
+      order = db[:records].where(hash: fresh.to_a).order(:seq).select_map(:hash)
+      order.each { |h| depth[h] = (parents.fetch(h, []).map { |p| depth.fetch(p) }.max || -1) + 1 }
+      rows = order.sort_by { |h| [depth[h], h] }.each_with_index.map do |h, i|
+        { account: account, record: h, generation: beat.beat_index, position: i }
+      end
+      db[:generations].insert_ignore.multi_insert(rows)
+    end
+
+    def generations_assigned?(beat) = !db[:generations].where(account: beat.account, record: beat.digest).empty?
+
+    def latest_generation(account) = db[:generations].where(account: account).max(:generation) || 0
+
+    def generation_size(account, generation) = db[:generations].where(account: account, generation: generation).count
+
+    def generation_part(account, generation, part, size)
+      hashes = db[:generations].where(account: account, generation: generation).order(:position)
+                               .limit(size, part * size).select_map(:record)
+      rows = db[:records].where(hash: hashes).all.to_h { |row| [row[:hash], row] }
+      hashes.map { |h| hydrate(rows.fetch(h)) }
+    end
+
+    # Accounts whose generations this server can serve, and how far.
+    def generation_accounts
+      db[:generations].group_and_count(:account).select_append(Sequel.function(:max, :generation).as(:latest)).all
+    end
+
     # Records nothing on this server acknowledges yet.
     def frontier
       db[:records].exclude(hash: db[:acks].select(:parent)).order(:seq).all.map { |row| hydrate(row) }
@@ -179,7 +237,66 @@ module Agnostic
     def peer_host(url) = db[:peers].where(url: url).get(:host)
 
     def save_peer_host(url, host)
-      db[:peers].insert_conflict(target: :url, update: { host: host }).insert(url: url, cursor: 0, host: host)
+      db[:peers].insert_conflict(target: :url, update: { host: host }).insert(url: url, cursor: 0, host: host, added_at: 0)
+    end
+
+    def peer(url) = db[:peers].where(url: url).first
+
+    def peers = db[:peers].order(:added_at, :url).all
+
+    # A server to sync with: named at setup, in the settings, or learned from
+    # a declaration passed along by another server. A server already known is
+    # left as it is, unless it had been forgotten, which hearing of it again
+    # undoes.
+    def add_peer(url, source:, at:, host: nil, revive: true)
+      existing = peer(url)
+      if existing
+        update_peer(url, forgotten: false, failures: 0, next_attempt_at: 0, added_at: at) if revive && existing[:forgotten]
+        update_peer(url, host: host) if host && existing[:host].nil?
+        return
+      end
+
+      db[:peers].insert(url: url, cursor: 0, host: host, source: source, added_at: at)
+    end
+
+    def update_peer(url, **values) = db[:peers].where(url: url).update(values)
+
+    # Servers with this host account, after it contacted this one itself.
+    def peer_alive(host, at:)
+      db[:peers].where(host: host).update(failures: 0, next_attempt_at: 0, forgotten: false, last_success_at: at)
+    end
+
+    # Stop trying an account's addresses, all of them or all but one.
+    def withdraw_peers(host, except: nil)
+      scope = db[:peers].where(host: host)
+      scope = scope.exclude(url: except) if except
+      scope.update(forgotten: true)
+    end
+
+    # --- how reachable each server account has been ---------------------------------
+
+    def contact(account) = db[:contacts].where(account: account).first
+
+    def contacts = db[:contacts].order(:account).all
+
+    def record_contact(account, success:, at:)
+      db[:contacts].insert_ignore.insert(account: account, first_tried_at: at)
+      row = db[:contacts].where(account: account)
+      if success
+        row.update(attempts: Sequel[:attempts] + 1, successes: Sequel[:successes] + 1, last_success_at: at, offline: false)
+        row.where(first_success_at: nil).update(first_success_at: at)
+      else
+        row.update(attempts: Sequel[:attempts] + 1)
+      end
+    end
+
+    # Forgotten for being unreachable, as opposed to having withdrawn its url.
+    def mark_offline(account) = db[:contacts].where(account: account).update(offline: true)
+
+    def published_rating(account) = db[:published_ratings].where(account: account).first
+
+    def save_published_rating(account, reputation:, trust:, at:)
+      db[:published_ratings].insert_conflict(:replace).insert(account: account, reputation: reputation, trust: trust, at: at)
     end
 
     # --- servers this one ignores -------------------------------------------------
@@ -274,7 +391,37 @@ module Agnostic
         String :url, primary_key: true
         Integer :cursor, null: false, default: 0
       end
-      db.alter_table(:peers) { add_column :host, String } unless db[:peers].columns.include?(:host)
+      db.create_table?(:generations) do
+        String :account, null: false
+        String :record, null: false
+        Integer :generation, null: false
+        Integer :position, null: false
+        primary_key %i[account record]
+        index %i[account generation position]
+      end
+      {
+        host: [String], source: [String, { null: false, default: "settings" }],
+        added_at: [Integer, { null: false, default: 0 }], last_success_at: [Integer],
+        failures: [Integer, { null: false, default: 0 }], next_attempt_at: [Integer, { null: false, default: 0 }],
+        forgotten: [TrueClass, { null: false, default: false }]
+      }.each do |column, (type, options)|
+        db.alter_table(:peers) { add_column column, type, **(options || {}) } unless db[:peers].columns.include?(column)
+      end
+      db.create_table?(:contacts) do
+        String :account, primary_key: true
+        Integer :first_tried_at, null: false
+        Integer :attempts, null: false, default: 0
+        Integer :successes, null: false, default: 0
+        Integer :first_success_at
+        Integer :last_success_at
+        TrueClass :offline, null: false, default: false
+      end
+      db.create_table?(:published_ratings) do
+        String :account, primary_key: true
+        String :reputation, null: false
+        String :trust, null: false
+        Integer :at, null: false
+      end
       db.create_table?(:ignored) do
         String :account, primary_key: true
         String :reason, text: true, null: false

@@ -29,6 +29,9 @@ host:
   # by its account. Without one, peers cannot send this server live updates.
   # Changing any of these three publishes a new declaration on the next boot.
   # url: "https://chain.example.org"
+  # Words in each of the host account's seed phrases, made on first boot.
+  # Never fewer than 8, the chat's minimum.
+  seed_words: "12"
 
 heartbeat:
   # The rules set a floor of 480 seconds between one publisher's heartbeats and
@@ -46,20 +49,61 @@ pending:
   # it does. Bounded, so they cannot fill the disk.
   max_records: "10000"
   max_age_seconds: "3600"
+  # How often held records past their age are cleared out.
+  sweep_seconds: "300"
 
 peers:
-  # Other servers to sync with after each heartbeat: pushing what arrived here,
+  # Servers to sync with after each heartbeat: pushing what arrived here,
   # offering the heartbeat, and pulling what they hold. Base URLs, such as
-  # "https://chain.example.org".
+  # "https://chain.example.org". `rake setup` asks for these and writes them
+  # to data/<environment>/settings.yml; any listed here are added to those.
+  # More are learned from the records passed along (server/README.md).
   urls: []
   # A peer's heartbeat whose ts is further than this from this server's clock,
-  # either way, gets the peer ignored for good (rake ignored, rake forgive).
+  # either way, gets the peer ignored (rake ignored, rake forgive).
   max_clock_skew_seconds: "600"
   # How long such a peer is ignored: a week.
   ignore_seconds: "604800"
+  # A server not reached for this long is forgotten, at its next failed try: a
+  # week. A new identity declaration from it, or a sync from it, brings it back.
+  forget_after_seconds: "604800"
+  # At most this many servers learned from records are synced with; past that
+  # a newly learned one is skipped. Those named at setup do not count.
+  max_learned: "100"
+  # The wait before the next try after a failed one: first_seconds after the
+  # first failure, multiplied by multiplier for each failure after that, and
+  # never more than max_seconds. With these: 10 minutes, 20, 40, ... a day.
+  retry:
+    first_seconds: "600"
+    multiplier: "2"
+    max_seconds: "86400"
   # How many missing ancestors one pull may fetch from a peer by hash.
   fetch_missing: "1000"
   timeout_seconds: "10"
+
+ratings:
+  # What this server publishes of other servers, judged only by whether it
+  # could reach them at the address their accounts declared. Published rarely:
+  # an attestation of the host account, holding only ratings that changed.
+  # Each is a decimal from -1 to +1.
+  #
+  # Every one of these carries a trust of 0, and that is not a setting: a
+  # server that reliably heartbeats has earned no say in whose ratings count.
+  # A declared address never reached, once the server is forgotten.
+  never_reached: "-1"
+  # Reached for a while, then forgotten. An account nothing is published about
+  # counts as 0, so going offline costs a little.
+  went_offline: "-0.01"
+  # Reliably online: reached at least this share of the times it was tried...
+  reliable_ratio: "0.9"
+  # ...and this long since it was first reached (120 days, about four months)...
+  reliable:
+    after_seconds: "10368000"
+    rating: "0.01"
+  # ...and a little more after a year.
+  established:
+    after_seconds: "31536000"
+    rating: "0.02"
 
 limits:
   # One POST, in bytes.
@@ -67,3 +111,9 @@ limits:
   # Records in one POST, and in one page of GET /api/records.
   batch_records: "500"
   page_records: "500"
+  # Records in one part of a sweep (GET /api/sweep): the most this server
+  # shares with a server catching up in one request.
+  sweep_records: "500"
+  # How many sweep requests one caller may make in any minute; past that it
+  # is told how long to wait.
+  sweep_requests_per_minute: "60"

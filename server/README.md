@@ -30,7 +30,10 @@ users' records here and reads back what it shows.
 cd server
 bundle install
 bundle exec rake spec          # the suite
+bundle exec rake setup         # a fresh server: handle, address, other servers
 bundle exec puma               # http://localhost:9292
+bundle exec rake peers         # the servers it syncs with, or has forgotten
+bundle exec rake "sweep[<url>,<url>]"  # copy the chain from servers, generation by generation
 bundle exec rake host          # this server's host account
 BACKGROUND=0 bundle exec puma  # the API alone: no heartbeats, no syncing
 PEERS=https://a.example,https://b.example HOST_URL=https://me.example bundle exec puma
@@ -99,17 +102,89 @@ leaves out the side its own account is not on.
 
 ## Syncing
 
-Right after each heartbeat, the server syncs with every peer in turn:
+The server stays online throughout, answering any server that connects. Its
+own heartbeat waits on a timer until it is due (`heartbeat.interval_seconds`
+after the last); then it publishes it and right away syncs with every peer in
+turn. It reaches out to no one between its heartbeats:
 
-1. **Push** every record it accepted since the last sync, except to the peer it
-   came from.
-2. **Offer the heartbeat** with `POST /api/sync`.
-3. **Send what is missing**: the peer answers with the hashes it still needs,
-   and the server sends those it holds.
-4. **Pull** what the peer accepted since the last pull, fetching any missing
-   ancestors from it by hash.
+1. **Share the heartbeat** with `POST /api/sync`, and nothing else unasked:
+   the peer may have seen the rest already.
+2. **The peer asks for what it is missing.** To check the heartbeat it needs
+   every record in its history, so it answers with the hashes it does not
+   hold, and is sent them, and asks again -- what it was sent may have
+   ancestors it lacks too -- until it holds them all. The ask
+   travels as its answer, not as a request of its own, because the sharing
+   server may have no address the peer could reach.
 
-So records posted here reach the peers with the next heartbeat, not sooner.
+Nothing is pulled the other way: the peer shares its records the same way,
+when it publishes its own heartbeat. So records posted here reach the peers
+with the next heartbeat, not sooner.
+
+## Catching up
+
+A new server spends some time catching up before it goes live: before its
+first heartbeat it sweeps the chain from the servers it was given at setup,
+several at once, and only then starts publishing. It does the same after a
+restart, picking up where it stopped. `bundle exec rake "sweep[<url>,<url>]"`
+sweeps by hand.
+
+**Generations.** The chain is swept a generation at a time, and generations
+belong to an account that publishes heartbeats: generation *g* of an account
+is every record its heartbeat *g* brought into its history that none of its
+earlier heartbeats held, so generation 1 is everything up to its first. A
+record's history never changes, so every server holding those heartbeats
+reaches the same generations. Within one, records are ordered by depth (one
+past the deepest of their parents in the same generation), then by hash:
+each comes after everything it acknowledges, and the order is the same on
+every server.
+
+**The request.** `GET /api/sweep?account=&generation=&part=` names the
+account whose generations are wanted (the answering server's own if left
+out), the generation, and the part. A part holds at most
+`limits.sweep_records` (500). The answer says how many parts the generation
+has, the latest generation of that account the server holds, and the `next`
+part to ask for, or nothing after the last. Each caller may make
+`limits.sweep_requests_per_minute` (60) sweep requests in any minute; past
+that it gets a 429 saying how many seconds to wait, and a server catching up
+waits that long and asks again.
+
+**From several servers at once.** A server catching up counts generations by
+the first of its servers' own account, asks each server how far it holds
+them, and fetches up to one generation from each server in parallel, then
+checks them in order. A server that fails on a generation is replaced by the
+next that holds it. Progress is kept per account.
+
+Records no heartbeat of that account holds yet are in no generation; they
+arrive with heartbeats once the server is live.
+
+## Which servers
+
+**Setup.** `rake setup` asks a fresh server for the servers it should
+know, and the list may be empty: the server then runs alone until another
+reaches it. Every other server is learned from the records passed along. An
+account that has published a heartbeat and whose latest identity declaration
+names a `url` is taken for a server, and synced with once it answers at that
+url as that account; one answering as anyone else is a failed try. So a
+server that wants live updates declares its address (`host.url`), and one
+that does not is still synced with by the servers it reaches itself.
+
+**Withdrawing an address.** A server's address is the one its latest
+identity declaration names. A new declaration with no `url` takes it off the
+list and it is no longer contacted; one with a different `url` replaces the
+old address.
+
+**How many.** At most `peers.max_learned` (100) learned servers are synced
+with at once. Past that a newly learned one is skipped until one is
+forgotten; servers named at setup or in the settings do not count.
+
+**Servers that cannot be reached** are tried less and less often: after the
+first failure the next try waits `peers.retry.first_seconds` (10 minutes),
+and each further failure multiplies the wait by `peers.retry.multiplier` (2),
+up to `peers.retry.max_seconds` (a day). A server not reached for
+`peers.forget_after_seconds` (a week) is forgotten at its next failed try. A
+new identity declaration from it, or a sync from it, brings it back; its
+heartbeats arriving through others do not, or a server whose address cannot
+be reached would be tried at full pace for as long as they travel.
 
 **Clocks.** A heartbeat offered for sync was signed a moment ago, so its `ts`
 is the sending server's clock. When it is more than
@@ -122,11 +197,33 @@ forged heartbeat cannot get an honest server ignored. Only the offered
 heartbeat is checked this way; older records sent as missing ancestors are
 not, since being old is what they are.
 
-Ignoring lasts a week (`peers.ignore_seconds`), and covers direct contact
+Ignoring lasts `peers.ignore_seconds`, a week by default, and covers direct contact
 only: the ignored server's records still arrive through other peers, since
 refusing valid records would cut this server off from the network rather than
 it. `bundle exec rake ignored` lists who is ignored, until when and why, and
 `bundle exec rake "forgive[<host account id>]"` stops ignoring one early.
+
+## Rating other servers
+
+Rarely, a server publishes ratings of other servers: an attestation of its
+host account, judged only by whether it could reach each server at the
+address its account declared. Every value is in `ratings:` in
+`config/server.yml`.
+
+| what happened | rating |
+|---|---|
+| never reached, then forgotten | `never_reached`, -1 |
+| reached for a while, then forgotten | `went_offline`, -0.01 |
+| reached at least `reliable_ratio` (90%) of the times tried, 120 days after it was first reached | `reliable.rating`, 0.01 |
+| the same, a year after | `established.rating`, 0.02 |
+| anything else | nothing published |
+
+An account a server has published nothing about counts as 0. Each rating
+carries a trust of 0, always: that a server reliably produces heartbeats says
+nothing about whether its ratings are worth believing, and publishing any
+other trust would suggest it does. An attestation holds
+only the ratings that changed since the last one, so most heartbeats publish
+none. It is signed just before a heartbeat, which then carries it.
 
 ## The API
 
@@ -143,6 +240,7 @@ it. `bundle exec rake ignored` lists who is ignored, until when and why, and
 | `GET /api/keys/<pubkey>` | the account a working key signs for, or null |
 | `GET /api/frontier` | hashes of the records nothing here acknowledges |
 | `POST /api/records` | `{"records": [...]}`, or one record on its own |
+| `GET /api/sweep?account=&generation=&part=` | one capped part of one generation of an account, and the `next` part to ask for; 429 when asked too often |
 | `POST /api/sync` | `{"heartbeat": ...}`: a peer's newest heartbeat; 403 when the peer is or becomes ignored |
 
 A record on the wire is `{"payload": "<canonical JSON>", "signature": "<base64url>"}`;
