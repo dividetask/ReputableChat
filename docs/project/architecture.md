@@ -1,8 +1,15 @@
 # Architecture
 
+There are two servers in this repository, each in its own directory:
+
+- **`server/`, the agnostic server.** It knows records and the rules and nothing about the apps built on them. It checks every record against the rules before acknowledging it, stores and serves records, publishes heartbeats with its host account, and exchanges records with other servers. See [server/README.md](../../server/README.md).
+- **`chat/`, the chat app.** The browser client and the server behind it: login, the vault, images, and the chat UI. It still signs the record shapes that came before the rules.
+
+What follows describes the chat app except where it says otherwise.
+
 ## The server does as little as possible
 
-It never sees a seed, never holds a private key, and never computes a reputation. What it does:
+It never sees a seed, never holds a private key, and never computes a reputation. The one exception is a server's host account: the agnostic server generates one on first boot and keeps its private key on the machine, 0600, because a heartbeat has to be signed by somebody and nobody sits at a browser for it. That key signs heartbeats and nothing else, and it is the server's own account, never anybody else's. What the chat server does:
 
 - hands out single-use login challenges
 - **verifies every signature before storing anything**
@@ -59,20 +66,36 @@ Edits and deletes will be new signed records targeting the original, never mutat
 
 The browser signs bytes and the server verifies bytes, so both must produce the canonical form the rules define, byte for byte.
 
-`lib/reputable_chat/cryptography/canonical.rb` and `public/js/canonical.js` are the two halves. **If they ever disagree by one character, every signature silently stops verifying** — `spec/canonical_parity_spec.rb` runs both over shared fixtures and compares the bytes, and is the thing that catches that.
+`chat/lib/reputable_chat/cryptography/canonical.rb` and `chat/public/js/canonical.js` are the two halves, and `server/lib/agnostic/canonical.rb` is a third, which refuses any payload whose bytes it cannot reproduce exactly. **If they ever disagree by one character, every signature silently stops verifying** — `spec/canonical_parity_spec.rb` runs both over shared fixtures and compares the bytes, and is the thing that catches that.
 
 ## Layout
 
 ```
+docs/project/rules/       the rules, one file per version, and signed examples
+docs/project/apps/        one document per app: what it shows, and what it does with the rest
+
+server/                   the agnostic server -- see server/README.md
+  config/server.yml       heartbeat interval, peers, held-record and request limits (env overrides)
+  config/genesis/<env>.json the genesis in the rules' own format, carrying the rules file
+  lib/agnostic/
+    rules.rb              the rules, enforced: what a record may hold, and what its history must
+    view.rb               the chain as one record sees it: keys, disputes, adjudicators, currency
+    canonical.rb, record.rb, keys.rb, formats.rb   the kinds of value section 1 defines
+    store.rb              records, their acks and indexes, held records, peer cursors
+    ingest.rb             the one way in: accept, hold for missing ancestors, or refuse
+    host_account.rb       this server's account, generated on first boot
+    heartbeat.rb          heartbeats acknowledging the frontier
+    peers.rb              pulling from and pushing to other servers
+    app.rb                the API
+  script/generate_genesis.rb  signs a genesis in the rules' format
+
+chat/                     the chat app; paths below are inside it
 config/genesis/<env>.json the genesis identity declaration; the chain hangs off its hash
 config/host/<env>.json    this server's host account, acknowledging the genesis (optional)
 config/server.yml         optional origin, database and image paths, size limits (env overrides)
 config/reputation.yml     tunable reputation parameters (the defaults layer)
 config/emotes.yml         which reactions count positive, negative, neutral
 config/bip39-english.txt  wordlist; one source of truth, served at /wordlist.txt
-
-docs/project/rules/       the rules, one file per version, and signed examples
-docs/project/apps/        one document per app: what it shows, and what it does with the rest
 
 lib/reputable_chat/
   app.rb                  Roda routes, CSP, sessions
@@ -106,7 +129,7 @@ public/js/
 - The code still signs the shapes that came before the rules — see **Not built** under **Rules** in [chain.md](chain.md).
 - Loading the client from a release. See the end of [chain.md](chain.md).
 - Client-side verification of *other people's* attestations (`session.verify_signatures`). Your own vault is already verified, since detecting tampering is why it is signed.
-- Master keys and key-change notices. The rules define them; nothing implements them.
+- Master keys and key-change notices in the chat app. The rules define them and the agnostic server enforces them; the chat neither signs nor reads them.
 - WebSocket delivery — messages currently poll every 4s
 - Chunking an attestation, which currently grows an entry per person ever rated
-- Federation between servers. The principle it has to keep: a person sees messages whatever server they came from, and is largely unaware which server anyone else uses. What they see is decided by their friend list, never by where somebody's account lives.
+- Moving the chat onto the agnostic server. The agnostic server exchanges records between servers; the chat does not use it yet. The principle it has to keep: a person sees messages whatever server they came from, and is largely unaware which server anyone else uses. What they see is decided by their friend list, never by where somebody's account lives.

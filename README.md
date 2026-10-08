@@ -6,28 +6,33 @@ Every user signs with a keypair. People vouch for each other by friending and re
 
 Every signed record names the most recent records its author had seen, which makes the history a chain: a record cannot be quietly removed, back-dated, or shown to one person and not another. Records are anchored into it only when somebody who clears a reader's own bar acknowledges them, so being unvouched for means being left out — which is also what a sybil cannot buy its way past.
 
-The server is deliberately close to useless. It verifies signatures, stores blobs, and serves them back unchanged. It never sees a seed, never holds a private key, and never computes a reputation, because reputation is subjective and belongs on the machine of the person whose opinion it is.
+The server is deliberately close to useless. It verifies signatures and the rules, stores records, and serves them back unchanged. It never sees a seed, holds no private key but its own host account's, and never computes a reputation, because reputation is subjective and belongs on the machine of the person whose opinion it is.
 
 **Status: early.** Reputation, identity, cryptography and the chain's record shapes are built and tested. The client is being moved onto those records a stage at a time. The chat UI is a working skeleton.
+
+## Layout
+
+- **[`server/`](server/README.md), the agnostic server.** It knows the chain and its rules and nothing about any app: it checks every record against [the rules](docs/project/rules/v0.001.md) before acknowledging it, stores and serves records, publishes heartbeats with its own host account, and exchanges records with other servers.
+- **`chat/`, the chat app**: the browser client and the server behind it.
+- **`docs/`**: the rules and the design, shared by both.
 
 ## Running it
 
 ```bash
-bundle install
-bundle exec rake spec      # test suite
-bundle exec puma           # http://localhost:9292
+cd server && bundle install && bundle exec rake spec && bundle exec puma
+cd chat && bundle install && bundle exec rake spec && bundle exec puma
 ```
 
-`bundle exec rake curve` prints the current curve and ladder.
+Both listen on 9292 by default; give one `-p` to run them side by side. In `chat/`, `bundle exec rake curve` prints the current curve and ladder.
 
 ## Deploying
 
-Server settings live in `config/server.yml`, which documents itself: paths, the optional public origin, and the size limits an operator gets to choose. Every key can be overridden by the matching environment variable for deployments that inject configuration rather than edit files.
+The chat server's settings live in `chat/config/server.yml`, which documents itself: paths, the optional public origin, and the size limits an operator gets to choose. Every key can be overridden by the matching environment variable for deployments that inject configuration rather than edit files.
 
 Two things that bite:
 
 - **Behind a reverse proxy, pass the browser's address through.** No domain or IP needs configuring: the server signs logins in at whatever address it was reached at. Behind a proxy that means the proxy must forward `Host` and `X-Forwarded-Proto` -- Caddy does by default; nginx needs `proxy_set_header Host $host;` and `proxy_set_header X-Forwarded-Proto $scheme;`. Otherwise every login fails, and the error names both addresses. Setting `origin` (or `ORIGIN`) pins the accepted addresses instead, which also stops a malicious server relaying a `tim.rb` login.
-- **`SESSION_SECRET` is environment-only**, because `config/server.yml` is in the repository. Without it a random secret is generated at boot, which is fine locally and signs everyone out on every restart.
+- **`SESSION_SECRET` is environment-only**, because `chat/config/server.yml` is in the repository. Without it a random secret is generated at boot, which is fine locally and signs everyone out on every restart.
 
 The genesis account has to exist before the server will start. `bundle exec rake genesis` makes one; every client needs the same hash before it has fetched anything, so it is committed rather than downloaded.
 
@@ -43,7 +48,7 @@ Full design — and the numbers, which live in config rather than in prose: [glo
 
 ## Security
 
-- Seeds are BIP39 words stretched through Argon2id, sized in `config/reputation.yml` against a documented attack.
+- Seeds are BIP39 words stretched through Argon2id, sized in `chat/config/reputation.yml` against a documented attack.
 - Private keys are non-extractable WebCrypto keys in IndexedDB. The seed is never stored or transmitted.
 - The private vault is encrypted under a separate key derived from the same seed, so the server holds it without being able to read it.
 - **MVP: the client does not verify other people's attestation signatures** (`session.verify_signatures`). Until that is on, a malicious server can fabricate ratings.

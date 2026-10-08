@@ -21,6 +21,18 @@
   user decides how to proceed.
 - Analyze an error before taking any further action.
 
+## Layout
+
+Two apps, each a self-contained Ruby project with its own Gemfile, Rakefile and
+specs; run commands from inside the one you are working on.
+
+- `server/` — the **agnostic server**: checks records against the rules, stores
+  and serves them, heartbeats, and exchanges records with peers. It knows no
+  app. See [server/README.md](server/README.md).
+- `chat/` — the chat app, browser client and its server. **Paths in this file
+  are inside `chat/`** unless they start with `server/` or `docs/`.
+- `docs/` stays at the root: the rules belong to the chain, not to either app.
+
 ## Environment
 
 - Ruby 3.3.6 via rbenv. `rake` and other gem binaries are at
@@ -29,6 +41,12 @@
 - Linux, vim. Node 22 is available and is used by the parity spec.
 
 ```bash
+# In server/
+bundle exec rake spec       # the agnostic server's suite
+bundle exec puma            # http://localhost:9292; PEERS=url,url to sync
+bundle exec rake host       # this server's host account (made on first boot)
+
+# In chat/
 bundle exec rake spec       # full suite (browser tests skip without `npm install`)
 npm install                 # once, for the browser tests
 bundle exec rake curve      # print current curve and ladder
@@ -117,6 +135,25 @@ inventing a word for something that already has one.
   example of. `spec/fixtures/examples_broken.md` holds three correctly signed
   records that each break a rule, because a checker that has quietly stopped
   looking passes everything.
+- **The rules and the server's checks.** `server/lib/agnostic/rules.rb` and
+  `server/lib/agnostic/view.rb` enforce `docs/project/rules/v0.001.md`, and
+  change with it: a rule edited in prose and not in code means the server
+  accepts records the rules call invalid, or refuses valid ones, and every
+  signature still verifies. `server/spec/examples_spec.rb` runs the whole
+  example chain and the broken fixture through the server, so changing a rule
+  and its examples without the code fails there. Where the server reads the
+  rules one way out of several, `server/README.md` says so under **Reading
+  the rules**.
+- **The server's genesis carries the rules file.** The rules field of
+  `server/config/genesis/development.json` is `docs/project/rules/v0.001.md`
+  less its trailing newline, and `server/spec/server_spec.rb` fails if they
+  differ. That is deliberate: a published rules file is never edited. Before
+  launch, the fix is a new development genesis, which orphans every
+  development record that acknowledged the old one.
+- **The server's host account key** is generated on first boot into
+  `server/data/<environment>/host.key`, 0600, beside its declaration. Losing
+  either means a new account; the server refuses to boot when they do not
+  match.
 - **One home per rule.** A rule written in two places gets edited in one of
   them, and the two copies then disagree about which records are valid. That
   happened three times in one afternoon of editing, each time as a paraphrase

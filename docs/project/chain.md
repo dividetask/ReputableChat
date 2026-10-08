@@ -146,9 +146,9 @@ The friend and report lists are not in an attestation. They are in the private v
 
 A reader reaching for it has run out of its own reach and uses it to cheaply extend their reach. 
 
-### Not built: fetching a record by hash
+### Fetching a record by hash
 
-There is no route that resolves a record hash to its record. Each kind is served by its own route, and `ack` names records that may be of another kind, or from somebody the viewer never fetched. Walking the chain at all needs `GET` by hash, and it has to serve any record to anyone, for the reason above.
+The agnostic server resolves any record hash to its record (`GET /api/records/<hash>`), whatever its kind and whoever wrote it, for the reason above: `ack` names records that may be of another kind, or from somebody the viewer never fetched, and walking the chain needs all of them. The chat server still serves each kind by its own route.
 
 ### Not built: loading the client from a release
 
