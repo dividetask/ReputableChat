@@ -119,7 +119,8 @@ inventing a word for something that already has one.
   server, whatever apps it runs. The chat announces itself with it: a notice
   of kind `service` typed `:chat` carrying `url`, on the first boot with an
   address and whenever the address changes (`chain/service.rb`); other chat
-  servers fetch files from it (`file_peers.rb`).
+  servers fetch files from it (`file_peers.rb`; `spec/file_sharing_spec.rb`
+  runs two chat servers, each beside its own agnostic server).
   A production deployment **refuses to boot on the development genesis**,
   compared by key rather than by filename, because the realistic mistake is
   copying the record into place rather than misnaming it. The production

@@ -41,7 +41,14 @@ module ChainServer
   end
 
   def start
-    dir = @dir = Dir.mktmpdir("chat-spec-chain")
+    @dir = Dir.mktmpdir("chat-spec-chain")
+    launch(@dir)
+  end
+
+  # Another agnostic server, for a spec that needs more than one: its own
+  # data and host directories under dir, stopped when the run ends. Its host
+  # account's working seed is at dir/development/host.seed.
+  def launch(dir)
     port = TCPServer.open("127.0.0.1", 0) { |s| s.addr[1] }
     log = File.join(dir, "server.log")
     env = { "RACK_ENV" => "development", "BACKGROUND" => "0", "DATA_DIR" => dir, "HOST_DIR" => dir,
