@@ -100,7 +100,9 @@ leaves out the side its own account is not on.
 
 ## Syncing
 
-Right after each heartbeat, the server syncs with every peer in turn:
+The server sleeps until its next heartbeat is due (`heartbeat.interval_seconds`
+after the last), publishes it, and right away syncs with every peer in turn.
+It contacts no one between heartbeats:
 
 1. **Push** every record it accepted since the last sync, except to the peer it
    came from.
@@ -120,6 +122,11 @@ names a `url` is taken for a server, and synced with once it answers at that
 url as that account; one answering as anyone else is a failed try. So a
 server that wants live updates declares its address (`host.url`), and one
 that does not is still synced with by the servers it reaches itself.
+
+**Withdrawing an address.** A server's address is the one its latest
+identity declaration names. A new declaration with no `url` takes it off the
+list and it is no longer contacted; one with a different `url` replaces the
+old address.
 
 **Servers that cannot be reached** are tried less and less often: after the
 first failure the next try waits `peers.retry.first_seconds` (10 minutes),
@@ -146,6 +153,26 @@ only: the ignored server's records still arrive through other peers, since
 refusing valid records would cut this server off from the network rather than
 it. `bundle exec rake ignored` lists who is ignored, until when and why, and
 `bundle exec rake "forgive[<host account id>]"` stops ignoring one early.
+
+## Rating other servers
+
+Rarely, a server publishes ratings of other servers: an attestation of its
+host account, judged only by whether it could reach each server at the
+address its account declared. Every value is in `ratings:` in
+`config/server.yml`.
+
+| what happened | rating |
+|---|---|
+| never reached, then forgotten | `never_reached`, -1 |
+| reached for a while, then forgotten | `went_offline`, 0 |
+| reached at least `reliable_ratio` (90%) of the times tried, 120 days after it was first reached | `reliable.rating`, 0.01 |
+| the same, a year after | `established.rating`, 0.02 |
+| anything else | nothing published |
+
+Each rating carries `trust` (0), so a server's opinion of a server's
+reachability says nothing about whose ratings to believe. An attestation holds
+only the ratings that changed since the last one, so most heartbeats publish
+none. It is signed just before a heartbeat, which then carries it.
 
 ## The API
 

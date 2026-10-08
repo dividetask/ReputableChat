@@ -208,6 +208,39 @@ module Agnostic
       db[:peers].where(host: host).update(failures: 0, next_attempt_at: 0, forgotten: false, last_success_at: at)
     end
 
+    # Stop trying an account's addresses, all of them or all but one.
+    def withdraw_peers(host, except: nil)
+      scope = db[:peers].where(host: host)
+      scope = scope.exclude(url: except) if except
+      scope.update(forgotten: true)
+    end
+
+    # --- how reachable each server account has been ---------------------------------
+
+    def contact(account) = db[:contacts].where(account: account).first
+
+    def contacts = db[:contacts].order(:account).all
+
+    def record_contact(account, success:, at:)
+      db[:contacts].insert_ignore.insert(account: account, first_tried_at: at)
+      row = db[:contacts].where(account: account)
+      if success
+        row.update(attempts: Sequel[:attempts] + 1, successes: Sequel[:successes] + 1, last_success_at: at, offline: false)
+        row.where(first_success_at: nil).update(first_success_at: at)
+      else
+        row.update(attempts: Sequel[:attempts] + 1)
+      end
+    end
+
+    # Forgotten for being unreachable, as opposed to having withdrawn its url.
+    def mark_offline(account) = db[:contacts].where(account: account).update(offline: true)
+
+    def published_rating(account) = db[:published_ratings].where(account: account).first
+
+    def save_published_rating(account, reputation:, trust:, at:)
+      db[:published_ratings].insert_conflict(:replace).insert(account: account, reputation: reputation, trust: trust, at: at)
+    end
+
     # --- servers this one ignores -------------------------------------------------
 
     def ignored?(account, at:) = !db[:ignored].where(account: account).where { expires_at > at }.empty?
@@ -307,6 +340,21 @@ module Agnostic
         forgotten: [TrueClass, { null: false, default: false }]
       }.each do |column, (type, options)|
         db.alter_table(:peers) { add_column column, type, **(options || {}) } unless db[:peers].columns.include?(column)
+      end
+      db.create_table?(:contacts) do
+        String :account, primary_key: true
+        Integer :first_tried_at, null: false
+        Integer :attempts, null: false, default: 0
+        Integer :successes, null: false, default: 0
+        Integer :first_success_at
+        Integer :last_success_at
+        TrueClass :offline, null: false, default: false
+      end
+      db.create_table?(:published_ratings) do
+        String :account, primary_key: true
+        String :reputation, null: false
+        String :trust, null: false
+        Integer :at, null: false
       end
       db.create_table?(:ignored) do
         String :account, primary_key: true

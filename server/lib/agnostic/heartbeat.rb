@@ -23,6 +23,11 @@ module Agnostic
 
     def previous = @store.by_account(@host.id, kind: "heartbeat").max_by(&:beat_index)
 
+    def seconds_until_due(now = @clock.call)
+      last = previous
+      last ? last.ts + interval - now : 0
+    end
+
     def due?(now = @clock.call)
       last = previous
       last.nil? || now - last.ts >= interval

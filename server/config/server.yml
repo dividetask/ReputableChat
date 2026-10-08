@@ -73,6 +73,29 @@ peers:
   fetch_missing: "1000"
   timeout_seconds: "10"
 
+ratings:
+  # What this server publishes of other servers, judged only by whether it
+  # could reach them at the address their accounts declared. Published rarely:
+  # an attestation of the host account, holding only ratings that changed.
+  # Each is a decimal from -1 to +1.
+  #
+  # The trust given with every one of these ratings.
+  trust: "0"
+  # A declared address never reached, once the server is forgotten.
+  never_reached: "-1"
+  # Reached for a while, then forgotten.
+  went_offline: "0"
+  # Reliably online: reached at least this share of the times it was tried...
+  reliable_ratio: "0.9"
+  # ...and this long since it was first reached (120 days, about four months)...
+  reliable:
+    after_seconds: "10368000"
+    rating: "0.01"
+  # ...and a little more after a year.
+  established:
+    after_seconds: "31536000"
+    rating: "0.02"
+
 limits:
   # One POST, in bytes.
   request_bytes: "8388608"

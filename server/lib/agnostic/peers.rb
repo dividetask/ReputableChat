@@ -70,6 +70,9 @@ module Agnostic
 
       declaration = record.kind == "identity" ? record : @store.by_account(account, kind: "identity").max_by(&:seq)
       url = declaration && Peers.url(declaration["url"])
+      # The latest declaration is the account's address: one that names none,
+      # or another, withdraws the addresses it named before.
+      @store.withdraw_peers(account, except: url) if record.kind == "identity"
       # A new declaration brings a forgotten server back; its heartbeats alone
       # do not, or one that is unreachable at its url would be retried at full
       # pace for as long as its heartbeats travel through others.
@@ -99,6 +102,8 @@ module Agnostic
 
     def reached(url)
       @store.update_peer(url, failures: 0, next_attempt_at: 0, last_success_at: @clock.call)
+      host = @store.peer_host(url)
+      @store.record_contact(host, success: true, at: @clock.call) if host
     end
 
     def failed(url, reason)
@@ -110,12 +115,25 @@ module Agnostic
       silent_since = peer[:last_success_at] || peer[:added_at]
       forget = now - silent_since >= @settings.integer("peers", "forget_after_seconds")
       @store.update_peer(url, failures: failures, next_attempt_at: now + retry_delay(failures), forgotten: forget)
+      if peer[:host]
+        @store.record_contact(peer[:host], success: false, at: now)
+        @store.mark_offline(peer[:host]) if forget
+      end
       warn "#{url}: #{reason}#{forget ? '; not reached in too long, so forgotten' : ''}"
     end
 
     # --- pull -------------------------------------------------------------------
 
-    def pull_all = urls.each { |url| pull(url) if contact(url) }
+    def pull_all
+      urls.each do |url|
+        next unless contact(url)
+
+        pull(url, raise_errors: true)
+        reached(url)
+      rescue StandardError => e
+        failed(url, "pull failed: #{e.message}")
+      end
+    end
 
     def pull(url, raise_errors: false)
       page = @settings.integer("limits", "page_records")

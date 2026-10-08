@@ -23,6 +23,11 @@ module Agnostic
         "forget_after_seconds" => 604_800,
         "retry" => { "first_seconds" => 600, "multiplier" => "2", "max_seconds" => 86_400 }, "fetch_missing" => 1_000, "timeout_seconds" => 10
       },
+      "ratings" => {
+        "trust" => "0", "never_reached" => "-1", "went_offline" => "0", "reliable_ratio" => "0.9",
+        "reliable" => { "after_seconds" => 10_368_000, "rating" => "0.01" },
+        "established" => { "after_seconds" => 31_536_000, "rating" => "0.02" }
+      },
       "limits" => { "request_bytes" => 8_388_608, "batch_records" => 500, "page_records" => 500 }
     }.freeze
 

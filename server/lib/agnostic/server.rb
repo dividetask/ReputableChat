@@ -12,6 +12,7 @@ require_relative "ingest"
 require_relative "peers"
 require_relative "record"
 require_relative "rules"
+require_relative "server_ratings"
 require_relative "settings"
 require_relative "store"
 
@@ -26,7 +27,7 @@ module Agnostic
 
     class BootError < StandardError; end
 
-    attr_reader :settings, :store, :rules, :ingest, :host, :heartbeat, :peers, :genesis
+    attr_reader :settings, :store, :rules, :ingest, :host, :heartbeat, :peers, :genesis, :ratings
 
     def initialize(settings: Settings.load, clock: -> { Time.now.to_i }, http: nil)
       @settings = settings
@@ -41,6 +42,7 @@ module Agnostic
       @heartbeat = Heartbeat.new(store: store, ingest: ingest, host: host, settings: settings, clock: clock)
       @peers = Peers.new(store: store, ingest: ingest, settings: settings, http: http, clock: clock, host: host)
       peers.seed(settings.peers)
+      @ratings = ServerRatings.new(store: store, ingest: ingest, host: host, settings: settings, clock: clock)
     end
 
     def app
@@ -54,14 +56,30 @@ module Agnostic
       klass.freeze.app
     end
 
-    # Each heartbeat is followed by a sync with every peer.
+    # Heartbeats at the configured interval, each followed at once by a sync
+    # with every server. Between them the server waits rather than checking,
+    # and contacts no one.
     def start
-      every(30) { beat_and_sync }
+      Thread.new do
+        loop do
+          begin
+            beat_and_sync
+          rescue StandardError => e
+            warn "#{e.class}: #{e.message}"
+          end
+          sleep [heartbeat.seconds_until_due, 1].max
+        end
+      end
       every(300) { ingest.expire }
       self
     end
 
+    # Any change in what this server says of other servers is published just
+    # before the heartbeat, so the heartbeat carries it to them.
     def beat_and_sync
+      return unless heartbeat.due?
+
+      ratings.publish
       result = heartbeat.beat
       peers.sync(heartbeat.previous) if result&.status == :accepted
       result
