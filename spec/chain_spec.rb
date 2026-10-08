@@ -4,7 +4,8 @@ require_relative "spec_helper"
 require_relative "genesis_fixture"
 require "reputable_chat/cryptography/record"
 require "reputable_chat/cryptography/payload"
-require "reputable_chat/params"
+require "reputable_chat/genesis"
+require "reputable_chat/host"
 require "reputable_chat/cryptography/canonical"
 require "json"
 require "ed25519"
@@ -20,7 +21,7 @@ class ChainSpec < Minitest::Test
   Payload     = ReputableChat::Cryptography::Payload
   Canonical   = ReputableChat::Cryptography::Canonical
 
-  def a_payload(body: "hello") = { "purpose" => "test", "body" => body }
+  def a_payload(body: "hello") = { "type" => "test", "body" => body }
 
   # --- record hashes ----------------------------------------------------
 
@@ -76,12 +77,15 @@ class ChainSpec < Minitest::Test
 
   # --- genesis -----------------------------------------------------------
 
-  # RULE: the genesis is the one record that acknowledges nothing. Everything
-  # else names something, which is what makes the history walkable.
-  def test_the_genesis_acknowledges_nothing
+  # RULE: the genesis is the one record that acknowledges nothing, and it
+  # carries the rules. Everything else names something, which is what makes
+  # the history walkable.
+  def test_the_genesis_acknowledges_nothing_and_carries_the_rules
     genesis = GenesisFixture.build
 
-    assert_nil JSON.parse(genesis.payload)["ack"]
+    assert_equal [], JSON.parse(genesis.payload)["ack"]
+    assert genesis.record.genesis?
+    assert_equal GenesisFixture::RULES, genesis.declaration["rules"]
   end
 
   def test_the_genesis_hash_matches_its_contents
@@ -89,6 +93,7 @@ class ChainSpec < Minitest::Test
 
     assert_equal genesis.hash,
                  Record.digest(payload: genesis.payload, signature: genesis.signature)
+    assert_equal genesis.hash, genesis.account, "a first declaration's hash is its account ID"
   end
 
   # RULE: a genesis is verified as it loads, not trusted. An edited or
@@ -109,38 +114,54 @@ class ChainSpec < Minitest::Test
       genesis, path = GenesisFixture.write(dir)
       impostor = GenesisFixture.build
 
-      # Its own hash still checks out; only the key it claims is wrong.
-      swapped = genesis.to_h.merge("pubkey" => impostor.pubkey)
+      swapped = genesis.to_h.merge("signature" => impostor.signature)
       File.write(path, JSON.generate(swapped))
 
-      assert_raises(ReputableChat::Genesis::Corrupt) { ReputableChat::Genesis.load(path: path) }
+      error = assert_raises(ReputableChat::Genesis::Corrupt) { ReputableChat::Genesis.load(path: path) }
+      assert_match(/verifies against no key/, error.message)
     end
   end
 
-  # RULE: a genesis written against an older payload shape is refused, even
-  # though its signature still verifies perfectly -- the signature covers the
-  # bytes it was made from, and those have not changed. Every record signed
-  # since carries a different field list, and a reader looking for a field this
-  # one lacks would find nil and carry on.
+  # RULE: a genesis that is not a valid record under the rules is refused, even
+  # though its signature verifies perfectly -- the signature covers the bytes
+  # it was made from. A genesis in an older shape is the realistic case.
   def test_a_genesis_written_against_an_older_shape_is_refused
     Dir.mktmpdir do |dir|
-      genesis, path = GenesisFixture.write(dir)
-      stale = JSON.parse(genesis.payload)
-      stale["version"] = stale.delete("revision")
-
-      # Re-signed, so only the shape is wrong and nothing else.
+      path = File.join(dir, "genesis.json")
       signing = Ed25519::SigningKey.generate
-      canonical = Canonical.dump(stale.merge("pubkey" => genesis.pubkey))
+      pubkey = ReputableChat::Cryptography::Signature.encode(signing.verify_key.to_bytes)
+      old = { "purpose" => "reputablechat:identity:v1", "pubkey" => pubkey, "revision" => 1,
+              "handle" => "Tim", "ack" => nil, "ts" => 1 }
+      canonical = Canonical.dump(old)
       signature = ReputableChat::Cryptography::Signature.encode(signing.sign(canonical.b))
-      File.write(path, JSON.generate(
-        "pubkey" => ReputableChat::Cryptography::Signature.encode(signing.verify_key.to_bytes),
-        "payload" => canonical, "signature" => signature,
-        "hash" => Record.digest(payload: canonical, signature: signature)
-      ))
+      File.write(path, JSON.generate("payload" => canonical, "signature" => signature,
+                                     "hash" => Record.digest(payload: canonical, signature: signature)))
 
       error = assert_raises(ReputableChat::Genesis::Corrupt) { ReputableChat::Genesis.load(path: path) }
-      assert_match(/older payload shape/, error.message)
-      assert_match(/revision/, error.message)
+      assert_match(/not a valid record under the rules/, error.message)
+    end
+  end
+
+  # RULE: the committed genesis carries the founding rules, read straight from
+  # their file. If the two differ, the chain and the repository disagree about
+  # what the rules are.
+  def test_the_development_genesis_carries_the_rules_file
+    genesis = ReputableChat::Genesis.load(path: ReputableChat::Genesis.path("development"))
+    rules = File.read(File.expand_path("../docs/project/rules/v0.001.md", __dir__), encoding: "UTF-8").strip
+
+    assert_equal rules, genesis.declaration["rules"],
+                 "docs/project/rules/v0.001.md has changed since the genesis was made"
+  end
+
+  # RULE: an account made for the developer or a server declares a master key
+  # as well as a working key.
+  def test_the_committed_accounts_declare_a_master_key
+    genesis = ReputableChat::Genesis.load(path: ReputableChat::Genesis.path("development"))
+    host = ReputableChat::Host.load(path: ReputableChat::Host.path("development"), genesis: genesis)
+
+    [genesis, host].each do |committed|
+      assert committed.mpubkey, "#{committed.handle} declares no master key"
+      refute_equal committed.pubkey, committed.mpubkey
     end
   end
 
@@ -220,109 +241,22 @@ class ChainSpec < Minitest::Test
 
   # --- payload shapes ----------------------------------------------------
 
-  # RULE: every shared record carries `ack`. A shape that quietly omitted it
-  # would be a record nothing else could anchor to.
-  def test_every_shared_record_shape_carries_an_ack
-    shapes = {
-      "identity" => Payload.identity(pubkey: "k", revision: 1, handle: "t", bio: "", icon: nil,
-                             ack: "a", issued_at: 1),
-      "attestation" => Payload.attestation(pubkey: "k", revision: 1, scores: {}, derived: {},
-                                           ack: "a", issued_at: 1),
-      "adjustment" => Payload.adjustment(pubkey: "k", base_revision: 1, seq: 1, target: "t",
-                                         reputation: "0.5", trust: "1", ack: "a", issued_at: 1),
-      "message" => Payload.message(pubkey: "k", body: "b",
-                                   ack: "a", issued_at: 1),
-      "emote" => Payload.emote(pubkey: "k", message: "m", emote: "+",
-                               ack: "a", issued_at: 1),
-      "release" => Payload.release(pubkey: "k", revision: 1, label: "0.1.0", files: {},
-                                   notes: "", ack: "a", issued_at: 1)
-    }
+  # RULE: a field with no value is left out, not written as null, so a record
+  # has one spelling; and lists the rules require sorted are sorted.
+  def test_payloads_leave_out_absent_fields_and_sort_their_lists
+    payload = Payload.message(id: "i", pubkey: "k", body: "b", ack: %w[b a a], ts: 1)
 
-    shapes.each { |name, payload| assert_equal "a", payload["ack"], "#{name} lost its ack" }
+    refute payload.key?("target")
+    refute payload.values.include?(nil)
+    assert_equal %w[a b], payload["ack"]
+    assert_equal "reputablechat:message:v0.001:chat", payload["type"]
   end
 
-  # RULE: every shared record can carry a note, and it is null unless set.
-  # The slot exists from the start because adding a field later changes the
-  # canonical bytes of every record and invalidates every signature ever made.
-  def test_every_shared_record_shape_carries_a_note_slot
-    shapes.each do |name, payload|
-      assert payload.key?("note"), "#{name} has no note slot"
-      assert_nil payload["note"], "#{name} defaults its note to something other than null"
-    end
-  end
-
-  # RULE: an absent note and an empty one are the same record. Otherwise two
-  # records a reader would call identical would carry different signatures.
-  def test_an_empty_note_is_the_same_record_as_no_note
-    absent = Payload.message(pubkey: "k", body: "b",
-                             ack: "a", issued_at: 1)
-    empty = Payload.message(pubkey: "k", body: "b",
-                            ack: "a", issued_at: 1, note: ReputableChat::Params.note("   "))
-
-    assert_equal Canonical.dump(absent), Canonical.dump(empty)
-  end
-
-  # RULE: the note is inside the signed payload, so it cannot be attached to
-  # somebody else's record or edited after the fact.
-  def test_a_note_changes_the_record
-    without = Payload.message(pubkey: "k", body: "b",
-                              ack: "a", issued_at: 1)
-    with = Payload.message(pubkey: "k", body: "b",
-                           ack: "a", issued_at: 1, note: "for whoever reads this")
-
-    refute_equal Record.digest(payload: without, signature: "AAAA"),
-                 Record.digest(payload: with, signature: "AAAA")
-  end
-
-  # RULE: a note is bounded. It rides inside every record it is set on and is
-  # signed there permanently, so it cannot be a place to park a document.
-  def test_an_oversized_note_is_refused
-    assert_nil ReputableChat::Params.note("x" * (ReputableChat::Params::MAX_NOTE + 1))
-    assert ReputableChat::Params.note("x" * ReputableChat::Params::MAX_NOTE)
-  end
-
-  # Newlines and tabs are allowed -- a note is prose for a person. Everything
-  # else in the control range is not.
-  def test_a_note_may_span_lines_but_carries_no_control_characters
-    assert ReputableChat::Params.note("first line\nsecond line\twith a tab")
-    assert_nil ReputableChat::Params.note("sneaky\x00null")
-  end
-
-  def shapes
-    {
-      "identity" => Payload.identity(pubkey: "k", revision: 1, handle: "t", bio: "", icon: nil,
-                             ack: "a", issued_at: 1),
-      "attestation" => Payload.attestation(pubkey: "k", revision: 1, scores: {}, derived: {},
-                                           ack: "a", issued_at: 1),
-      "adjustment" => Payload.adjustment(pubkey: "k", base_revision: 1, seq: 1, target: "t",
-                                         reputation: "0.5", trust: "1", ack: "a", issued_at: 1),
-      "message" => Payload.message(pubkey: "k", body: "b",
-                                   ack: "a", issued_at: 1),
-      "emote" => Payload.emote(pubkey: "k", message: "m", emote: "+",
-                               ack: "a", issued_at: 1),
-      "release" => Payload.release(pubkey: "k", revision: 1, label: "0.1.0", files: {},
-                                   notes: "", ack: "a", issued_at: 1)
-    }
-  end
-
-  # RULE: the private vault has no ack. Nobody else ever sees it, so there is
-  # nothing to anchor it to and nobody to prove anything to.
+  # RULE: the private vault is not a record on the chain. Nobody else ever sees
+  # it, so there is nothing to anchor it to and nobody to prove anything to.
   def test_the_vault_has_no_ack
     payload = Payload.vault(pubkey: "k", revision: 1, ciphertext: "c", iv: "i", issued_at: 1)
 
     refute payload.key?("ack")
-  end
-
-  # RULE: the key rotation placeholders are in the signed shape from the start.
-  # Adding a field later changes the canonical bytes of every record, which
-  # invalidates every signature ever made.
-  def test_the_key_rotation_placeholders_are_present_and_null
-    payload = Payload.identity(pubkey: "k", revision: 1, handle: "t", bio: "", icon: nil,
-                           ack: nil, issued_at: 1)
-
-    assert payload.key?("master_pubkey")
-    assert payload.key?("previous_pubkey")
-    assert_nil payload["master_pubkey"]
-    assert_nil payload["previous_pubkey"]
   end
 end

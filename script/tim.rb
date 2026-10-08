@@ -4,8 +4,8 @@
 #
 #   bundle exec ruby script/tim.rb status
 #   bundle exec ruby script/tim.rb --host post "Planned outage 02:00-03:00 UTC on Friday"
-#   bundle exec ruby script/tim.rb friend <pubkey>
-#   bundle exec ruby script/tim.rb --host visible <pubkey>
+#   bundle exec ruby script/tim.rb friend <account ID>
+#   bundle exec ruby script/tim.rb --host visible <account ID>
 #
 # Signs as the genesis account (the developer's) by default, and as this
 # server's host account with --host. Nothing enforces who signs what, but by
@@ -37,8 +37,8 @@ require "reputable_chat/operator"
 require "reputable_chat/server_config"
 require "reputable_chat/cryptography/canonical"
 require "reputable_chat/cryptography/payload"
-require "reputable_chat/cryptography/record"
 require "reputable_chat/cryptography/vault"
+require "reputable_chat/chain/record"
 require "reputable_chat/reputation/engine"
 require "reputable_chat/store/memory"
 
@@ -57,7 +57,7 @@ module Tim
   # inside the signature, so it has to be one the server accepts: the address
   # we dial, unless --origin says otherwise.
   class Client
-    attr_reader :pubkey, :vault_key
+    attr_reader :pubkey, :vault_key, :account, :latest
 
     def initialize(url:, origin:, private_key:, pubkey:, vault_key:)
       @base = URI.parse(url)
@@ -76,15 +76,26 @@ module Tim
       body = { "pubkey" => @pubkey, "nonce" => nonce, "ts" => ts, "signature" => sign(payload) }
       result = post_json("/api/session", body)
 
-      register unless result["registered"]
+      # The genesis is every server's root and the host account's declaration
+      # joins a server at boot, so either is known to any server running it.
+      unless result["registered"]
+        raise Failed, "the server knows no account for #{@pubkey}. Is it running the same " \
+                      "genesis and host account as this checkout?"
+      end
+      @account = result["account"]
+      @latest = result["latest"]
       self
     end
 
-    # A valid but unregistered key reaches here the first time the account is
-    # used against a fresh database.
-    def register = post_json("/api/register", {})
-
     def sign(payload) = ReputableChat::Operator.sign(@private_key, payload)
+
+    # Signs a record and sends it. Returns its record hash, and remembers it as
+    # this account's latest, which the next record acknowledges.
+    def publish(payload)
+      canonical = Crypto::Canonical.dump(payload)
+      result = post_json("/api/record", { "payload" => canonical, "signature" => sign(canonical) })
+      @latest = result.fetch("hash")
+    end
 
     def get_json(path) = request(Net::HTTP::Get.new(path))
 
@@ -148,21 +159,21 @@ module Tim
 
     puts
     puts "  Account      #{options[:account] == :host ? 'host' : 'genesis'}"
-    puts "  Handle       #{declaration['handle']}"
-    puts "  Public key   #{client.pubkey}"
+    puts "  Handle       #{declaration['title']}"
+    puts "  Account ID   #{client.account}"
+    puts "  Working key  #{client.pubkey}"
     puts "  Genesis      #{ReputableChat::Genesis.current.hash}"
     puts "  Host         #{ReputableChat::Host.current&.hash || 'none on this server'}"
-    puts "  Identity     revision #{declaration['revision']}"
-    puts "  Attestation  revision #{attestation_revision(client)}, " \
+    puts "  Attestation  #{attestation(client) ? 'published' : 'none yet'}, " \
          "#{ratings.size} #{ratings.size == 1 ? 'rating' : 'ratings'}"
     puts "  Vault        revision #{vault['revision']} (private: the server cannot read it)"
     puts
 
     return puts("  Nobody rated yet.\n\n") if ratings.empty?
 
-    engine = engine_for(client.pubkey, ratings)
+    engine = engine_for(client.account, ratings)
     ratings.each do |target, rating|
-      effective = engine.effective(viewer: client.pubkey, target: target)
+      effective = engine.effective(viewer: client.account, target: target)
       puts format("  %-45s %-9s %s", target, label(rating), effective.round(6).to_s("F"))
     end
     puts
@@ -178,24 +189,16 @@ module Tim
     messages = client.get_json("/api/messages").fetch("messages")
 
     ack = choose_ack(client, messages)
-    ts = Time.now.to_i
+    payload = Payload.message(id: client.account, pubkey: client.pubkey, body: body,
+                              ack: ack, ts: Time.now.to_i)
+    hash = client.publish(payload)
 
-    payload = Payload.message(pubkey: client.pubkey, body: body,
-                              ack: ack, issued_at: ts, note: options[:note])
-    canonical = Crypto::Canonical.dump(payload)
-    signature = client.sign(payload)
-
-    client.post_json("/api/message",
-                     { "ack" => ack, "body" => body, "note" => options[:note],
-                       "ts" => ts, "signature" => signature })
-
-    # The same hash the server derived, from the same two strings.
-    hash = Crypto::Record.digest(payload: canonical, signature: signature)
     puts
     puts "  Posted."
     puts "  Record  #{hash}"
-    puts "  Ack     #{ack}#{ack == ReputableChat::Genesis.current.hash ? '  (genesis)' : ''}"
-    puts "  Note    #{options[:note]}" if options[:note]
+    ack.each do |acked|
+      puts "  Ack     #{acked}#{acked == ReputableChat::Genesis.current.hash ? '  (genesis)' : ''}"
+    end
     puts
   end
 
@@ -204,11 +207,11 @@ module Tim
   # person" without saying "I know them".
   def rate(options, kind)
     target = options[:args].first
-    abort "  usage: #{kind} <pubkey>" unless target
-    abort "  that is not a public key" unless ReputableChat::Params.pubkey(target)
+    abort "  usage: #{kind} <account ID>" unless target
+    abort "  that is not an account ID: a 64-character record hash" unless ReputableChat::Params.record_hash(target)
 
     client = connect(options)
-    abort "  that is this account's own key" if target == client.pubkey
+    abort "  that is this account's own ID" if target == client.account
 
     vault = own_vault(client)
     ratings = vault.fetch("ratings")
@@ -222,12 +225,12 @@ module Tim
     push_vault(client, vault)
     publish_attestation(client, ratings)
 
-    engine = engine_for(client.pubkey, ratings)
+    engine = engine_for(client.account, ratings)
     puts
     puts "  #{target}"
     puts "  #{label(before) || 'unrated'} -> #{label(ratings[target])}"
-    puts "  effective #{engine.effective(viewer: client.pubkey, target: target).round(6).to_s('F')} " \
-         "(#{engine.bucket(viewer: client.pubkey, target: target)})"
+    puts "  effective #{engine.effective(viewer: client.account, target: target).round(6).to_s('F')} " \
+         "(#{engine.bucket(viewer: client.account, target: target)})"
     puts
   end
 
@@ -274,8 +277,8 @@ module Tim
   # declaration: the handle and bio the account was created with are the ones
   # the network sees rather than a placeholder that has to be corrected later.
   def own_identity(client, options)
-    blob = client.get_json("/api/identity/#{client.pubkey}")["identity"]
-    return JSON.parse(committed(options).payload).merge("revision" => 0) if blob.nil?
+    blob = client.get_json("/api/identity/#{client.account}")["identity"]
+    return committed(options).declaration if blob.nil?
 
     JSON.parse(blob["payload"])
   end
@@ -323,25 +326,22 @@ module Tim
 
   # --- the attestation ------------------------------------------------------
 
-  def attestation_revision(client)
-    blob = client.get_json("/api/attestation/#{client.pubkey}")["attestation"]
-    blob ? JSON.parse(blob["payload"])["revision"].to_i : 0
-  end
+  def attestation(client) = client.get_json("/api/attestation/#{client.account}")["attestation"]
 
   # What the vault's private actions come to, as numbers. The curve runs here,
   # once, rather than in every reader -- that is the whole difference between an
   # attestation and the config it replaces.
+  #
+  # No derived: that is the author's calculated reputations for everyone their
+  # walk reached, and this CLI does not walk -- it never fetches anybody else's
+  # attestation. Leaving it out says exactly that, where a hop-0 answer
+  # published as though it were a walk would offer readers a cache that is
+  # wrong rather than absent.
   def publish_attestation(client, ratings)
-    revision = attestation_revision(client) + 1
-    ts = Time.now.to_i
-    body = { "revision" => revision, "scores" => scores_for(ratings),
-             "derived" => derived, "ack" => ReputableChat::Genesis.current.hash, "ts" => ts }
-
-    payload = Payload.attestation(pubkey: client.pubkey, revision: revision,
-                                  scores: body["scores"], derived: body["derived"],
-                                  ack: body["ack"], issued_at: ts, note: nil)
-
-    client.put_json("/api/attestation", body.merge("signature" => client.sign(payload)))
+    messages = client.get_json("/api/messages").fetch("messages")
+    payload = Payload.attestation(id: client.account, pubkey: client.pubkey, scores: scores_for(ratings),
+                                  ack: choose_ack(client, messages), ts: Time.now.to_i)
+    client.publish(payload)
   end
 
   def scores_for(ratings)
@@ -357,13 +357,6 @@ module Tim
     end
   end
 
-  # An empty cache, deliberately. `derived` is the author's own calculated
-  # reputations for everyone their walk reached, and this CLI does not walk --
-  # it never fetches anybody else's attestation. Publishing none says exactly
-  # that, where publishing a hop-0 answer as though it were a walk would offer
-  # readers a cache that is wrong rather than absent.
-  def derived = { "scores" => {} }
-
   # The same text the browser writes for the same number. Shared rather than
   # reimplemented here, because two producers of a signed field that agree on
   # the value and differ on its spelling is a trap rather than a difference.
@@ -373,23 +366,24 @@ module Tim
 
   # --- the chain ----------------------------------------------------------
 
-  # The most recent message whose author clears the bar, falling back to the
-  # genesis. This is a hop-0 answer: the CLI has only its own ratings in hand,
-  # so it is the same number the engine would give with nobody else's config
-  # fetched, not a full walk of the graph.
+  # This account's own latest record, and the most recent message whose author
+  # clears the bar, falling back to the genesis. This is a hop-0 answer: the
+  # CLI has only its own ratings in hand, so it is the same number the engine
+  # would give with nobody else's attestation fetched, not a full walk.
   def choose_ack(client, messages)
     config = ReputableChat::Config.load
     bar = config.decimal("chain.min_reputation_to_acknowledge")
-    engine = engine_for(client.pubkey, own_vault(client).fetch("ratings"))
+    engine = engine_for(client.account, own_vault(client).fetch("ratings"))
 
     hit = messages.reverse.find do |message|
-      next false unless message["hash"]
-      next true if message["pubkey"] == client.pubkey
+      next false if message["state"] == "void"
+      next true if message["account"] == client.account
 
-      engine.effective(viewer: client.pubkey, target: message["pubkey"]) > bar
+      engine.effective(viewer: client.account, target: message["account"]) > bar
     end
 
-    hit ? hit["hash"] : ReputableChat::Genesis.current.hash
+    ack = [hit&.fetch("hash"), client.latest].compact.uniq
+    ack.empty? ? [ReputableChat::Genesis.current.hash] : ack
   end
 
   def engine_for(viewer, ratings)
@@ -440,7 +434,7 @@ module Tim
   def parse(argv)
     settings = ReputableChat::ServerConfig.load
     options = { command: nil, args: [], origin: nil, url: nil,
-                seed_path: nil, note: nil, account: :genesis }
+                seed_path: nil, account: :genesis }
 
     until argv.empty?
       flag = argv.shift
@@ -449,7 +443,6 @@ module Tim
       when "--url"    then options[:url]       = argv.shift.to_s
       when "--seed"   then options[:seed_path] = File.expand_path(argv.shift.to_s)
       when "--host"   then options[:account]   = :host
-      when "--note"   then options[:note]      = ReputableChat::Params.note(argv.shift)
       when "--help", "-h" then usage
       else options[:command] ? options[:args] << flag : options[:command] = flag
       end
@@ -473,15 +466,13 @@ module Tim
 
         status              who the account is, and everyone it has rated
         post <text>         send a message
-        friend <pubkey>     friend somebody
-        visible <pubkey>    lift somebody to the least rating that makes them
+        friend <account>    friend somebody, by account ID
+        visible <account>   lift somebody to the least rating that makes them
                             visible, without claiming to know them
 
       options:
         --host              sign as this server's host account rather than the
                             genesis account
-        --note TEXT         free text signed into the record for anyone reading
-                            the raw chain; the software never reads it
         --url URL           where to reach the server (default: --origin, else the
                             first origin in config/server.yml, else #{DEFAULT_URL})
         --origin ORIGIN     the origin inside the signature (default: the URL)

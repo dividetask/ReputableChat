@@ -186,9 +186,9 @@ button.danger { background: var(--danger); color: #fff; }
 .msg .actions .emote-row.negative { border-top: 1px solid var(--line); padding-top: 2px; }
 .msg .actions .divider { width: 1px; height: 14px; background: var(--line); margin: 0 4px; }
 
-/* A public key shown in full, so it can be read and compared rather than
+/* An account ID shown in full, so it can be read and compared rather than
    trusted. Long, so it wraps rather than pushing the button off the row. */
-.pubkey {
+.account-id {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 11px;
   opacity: 0.7;
@@ -196,6 +196,9 @@ button.danger { background: var(--danger); color: #fff; }
   flex: 1 1 auto;
   min-width: 0;
 }
+
+/* A message whose author's records wait on its adjudicators (rules, section 8). */
+.msg.disputed { opacity: 0.6; font-style: italic; }
 
 .enlargeable { cursor: zoom-in; }
 

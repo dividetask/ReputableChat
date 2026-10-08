@@ -13,8 +13,10 @@ vendor/bundle/
 # run both accounts locally.
 config/genesis/*.seed
 !config/genesis/development.seed
+!config/genesis/development.master.seed
 config/host/*.seed
 !config/host/development.seed
+!config/host/development.master.seed
 
 # Browser tests only. The application itself ships no JavaScript dependencies.
 node_modules/

@@ -4,7 +4,6 @@
 
 import * as canonical from "./canonical.js";
 
-export const DOMAIN = "reputablechat:record:v1";
 const SEPARATOR = "\n";
 const HEX = /^[0-9a-f]{64}$/;
 
@@ -21,7 +20,7 @@ export async function digest(payload, signature) {
   if (body.includes(SEPARATOR)) throw new Error("canonical payload contains a newline");
   if (String(signature).includes(SEPARATOR)) throw new Error("signature contains a newline");
 
-  const input = new TextEncoder().encode([DOMAIN, body, signature].join(SEPARATOR));
+  const input = new TextEncoder().encode([body, signature].join(SEPARATOR));
   const hashed = await crypto.subtle.digest("SHA-256", input);
 
   return [...new Uint8Array(hashed)].map((b) => b.toString(16).padStart(2, "0")).join("");

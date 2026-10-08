@@ -40,19 +40,19 @@ class HostSpec < Minitest::Test
   def test_a_host_account_acknowledges_the_genesis
     host = GenesisFixture.build_host(genesis: @genesis)
 
-    assert_equal @genesis.hash, host.declaration["ack"]
+    assert_equal [@genesis.hash], host.declaration["ack"]
   end
 
   def test_a_host_account_acknowledging_anything_else_is_refused
     other = GenesisFixture.build
-    record = GenesisFixture.host_record(genesis: @genesis, ack: other.hash)
+    record = GenesisFixture.host_record(genesis: @genesis, ack: [other.hash])
 
     error = assert_raises(Host::Corrupt) { Host.new(record, genesis: @genesis) }
     assert_match(/not the genesis/, error.message)
   end
 
   def test_a_host_account_acknowledging_nothing_is_refused
-    record = GenesisFixture.host_record(genesis: @genesis, ack: nil)
+    record = GenesisFixture.host_record(genesis: @genesis, ack: [])
 
     assert_raises(Host::Corrupt) { Host.new(record, genesis: @genesis) }
   end
@@ -121,19 +121,24 @@ class HostSpec < Minitest::Test
     genesis = Genesis.load(path: Genesis.path(Environment::DEVELOPMENT))
     host = Host.load(path: Host.path(Environment::DEVELOPMENT), genesis: genesis)
 
-    assert_equal genesis.hash, host.declaration["ack"]
+    assert_equal [genesis.hash], host.declaration["ack"]
     refute_equal genesis.pubkey, host.pubkey
   end
 
   # RULE: every seed but development's is kept out of git, the host account's
-  # as well as the genesis account's. Development's two are public on purpose.
+  # as well as the genesis account's, master keys' as well as working keys'.
+  # Development's are public on purpose.
   def test_only_development_seeds_are_committed
     %i[genesis host].each do |account|
       production = Operator.path_for(Environment::PRODUCTION, account: account)
       development = Operator.path_for(Environment::DEVELOPMENT, account: account)
 
-      assert ignored?(production), "#{account}'s production seed must be gitignored"
-      refute ignored?(development), "#{account}'s development seed is committed on purpose"
+      [production, production.sub(/\.seed\z/, ".master.seed")].each do |path|
+        assert ignored?(path), "#{path} must be gitignored"
+      end
+      [development, development.sub(/\.seed\z/, ".master.seed")].each do |path|
+        refute ignored?(path), "#{path} is committed on purpose"
+      end
     end
   end
 

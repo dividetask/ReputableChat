@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "bigdecimal"
+require_relative "chain/record"
 
 module ReputableChat
   # Input validation. Everything from a client is checked for type, length and
@@ -44,8 +45,7 @@ module ReputableChat
     def signature(value) = base64url(value, bytes: 64)
 
     # A record hash: SHA-256 of a record's canonical payload and signature.
-    # This is what `ack`, `prev`, `reply_to` and an emote's target are, and it
-    # is the same shape as a content-addressed image name minus the extension.
+    # This is what `ack`, `target` and `endorse` hold, and what an account ID is.
     RECORD_HASH = /\A[0-9a-f]{64}\z/
 
     def record_hash(value)
@@ -62,49 +62,7 @@ module ReputableChat
       mapped.include?(nil) ? nil : mapped
     end
 
-      # A content-addressed image name: the SHA-256 of the bytes plus a sniffed
-    # extension. Nothing else is a legal icon reference.
-    ICON = /\A[0-9a-f]{64}\.(png|jpg|gif|webp)\z/
-
-    def icon(value)
-      return nil unless value.is_a?(String)
-
-      value.match?(ICON) ? value : nil
-    end
-
-    # An emote must be one the server actually publishes, so an arbitrary
-    # string can never be stored and rendered back to everyone.
-    def emote(value, allowed:)
-      return nil unless value.is_a?(String)
-
-      allowed.include?(value) ? value : nil
-    end
-
-    # --- chain records ------------------------------------------------------
-
-    MAX_NOTE    = 16_000
-    MAX_HANDLE  = 64
-    MAX_BIO     = 280
-    MAX_LABEL   = 64
-    MAX_NOTES   = 1_000
-    MAX_FILES   = 500
-    MAX_PATH    = 256
-
-    # A decimal string. Numbers that are signed never travel as JSON numbers:
-    # canonical serialization refuses floats outright, because they have no
-    # single textual form across languages, and the Blocked line is
-    # `effective > 0`, which binary floating point cannot be trusted to land on.
-    # One spelling per number, as the rules require: a whole part ("0.5", not
-    # ".5"), no trailing zero in the fraction ("0.5", not "0.50"), and zero
-    # unsigned ("0", not "-0").
-    DECIMAL = /\A(?!-0\z)-?(0|[1-9]\d{0,6})(\.\d{0,17}[1-9])?\z/
-
-    def decimal(value, min: -1, max: 1)
-      return nil unless value.is_a?(String) && value.match?(DECIMAL)
-
-      number = BigDecimal(value)
-      number.between?(BigDecimal(min.to_s), BigDecimal(max.to_s)) ? value : nil
-    end
+    # --- the vault ---------------------------------------------------------
 
     # The vault's ciphertext. The server cannot check the shape of what is
     # inside, so a byte bound is the only control it has -- and it is what
@@ -123,108 +81,14 @@ module ReputableChat
     # counter construction is safe at.
     def iv(value) = base64url(value, bytes: 12)
 
-    def handle(value) = string(value, max: MAX_HANDLE)
+    # A decimal string in its one spelling, as the rules define it (section 1),
+    # within a range. The pattern is Chain::Record's, so there is one home for
+    # what a decimal looks like.
+    def decimal(value, min: -1, max: 1)
+      return nil unless value.is_a?(String) && value.match?(Chain::Record::DECIMAL) && value != "-0"
 
-    # Free text for a person reading the raw chain, which the software never
-    # interprets. Bounded, because it rides along inside every record it is set
-    # on and is signed there permanently. Absent and empty both mean nil, so
-    # that an empty string and no note cannot produce two different signatures
-    # for what a reader would call the same record.
-    def note(value, max: MAX_NOTE)
-      return nil if value.nil? || value.to_s.strip.empty?
-
-      string(value, max: max)
+      number = BigDecimal(value)
+      number.between?(BigDecimal(min.to_s), BigDecimal(max.to_s)) ? value : nil
     end
-
-    def bio(value)
-      return "" if value.nil? || value.to_s.empty?
-
-      string(value, max: MAX_BIO)
-    end
-
-    # What one person publishes about everyone they have an opinion of:
-    # a reputation and a trust multiplier, both decimal strings.
-    #
-    # The multiplier is clamped to -1..1 rather than left open. Above 1 it would
-    # amplify a branch past the weight the ladder assigned it, and the ladder's
-    # weights summing to (just under) 1 is what keeps an effective score inside
-    # -1..1 without clamping.
-    # No entry cap. How many people somebody has an opinion about is not the
-    # server's business and never bounded anything it cared about; what bounds
-    # an attestation is `attestation_bytes`, checked on the request.
-    def scores(value)
-      return nil unless value.is_a?(Hash)
-
-      value.each do |target, entry|
-        return nil unless pubkey(target)
-        return nil unless entry.is_a?(Hash)
-        return nil unless decimal(entry["reputation"])
-        return nil unless decimal(entry["trust"])
-      end
-
-      value
-    end
-
-    # The author's own calculated reputations, and nothing about how they were
-    # calculated. A reader reaching for this cache has run out of its own reach
-    # and either takes a number or leaves it, so the parameters behind it were
-    # nothing it could act on -- and publishing them would tell everyone the
-    # settings a particular reader scores under.
-    def derived(value)
-      return nil unless value.is_a?(Hash)
-
-      scores = value["scores"]
-      return nil unless scores.is_a?(Hash)
-
-      scores.each do |target, score|
-        return nil unless pubkey(target)
-        return nil unless decimal(score)
-      end
-
-      value
-    end
-
-    # A release manifest: published path => sha256 of the bytes at it. Paths are
-    # relative and cannot climb, since they name files the client will fetch.
-    PATH = %r{\A[a-z0-9][a-z0-9._/-]*\z}i
-
-    def files(value)
-      return nil unless value.is_a?(Hash)
-      return nil if value.empty? || value.size > MAX_FILES
-
-      value.each do |path, digest|
-        return nil unless path.is_a?(String) && path.bytesize <= MAX_PATH
-        return nil unless path.match?(PATH) && !path.include?("..")
-        return nil unless record_hash(digest)
-      end
-
-      value
-    end
-
-    def label(value) = string(value, max: MAX_LABEL)
-
-    MAX_TITLE  = 120
-    MAX_NOTICE = 16_000
-
-    def title(value) = string(value, max: MAX_TITLE)
-
-    # A notice body is the longest thing the chain carries on purpose. The
-    # founding notice is a document, so the bound is generous -- but bounded,
-    # because every record is stored, served and signed forever.
-    def notice_body(value, max: MAX_NOTICE) = string(value, max: max)
-
-    # One of the kinds the server publishes, never an arbitrary string.
-    def notice_kind(value, allowed:)
-      return nil unless value.is_a?(String)
-
-      allowed.include?(value) ? value : nil
-    end
-
-    def notes(value)
-      return "" if value.nil? || value.to_s.empty?
-
-      string(value, max: MAX_NOTES)
-    end
-
   end
 end

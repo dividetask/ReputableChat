@@ -8,7 +8,8 @@ module ReputableChat
     # A record's identity on the chain: the hash of its canonical payload and
     # its signature together.
     #
-    # `ack`, `reply_to` and an emote's `message` field all name one of these.
+    # `ack`, `target` and `endorse` all name one of these, and the first
+    # identity declaration's is the account ID.
     # Never a signature: a signature identifies a payload, while a record hash
     # identifies the whole record, signature included, which is what a link has
     # to cover if it is going to be tamper-evident.
@@ -16,7 +17,6 @@ module ReputableChat
     # Must agree with public/js/record.js -- spec/record_parity_spec.rb is what
     # catches it if it ever does not.
     module Record
-      DOMAIN    = "reputablechat:record:v1"
       SEPARATOR = "\n"
       HEX       = /\A[0-9a-f]{64}\z/
 
@@ -40,9 +40,10 @@ module ReputableChat
         raise MalformedPayload, "canonical payload contains a newline" if canonical.include?(SEPARATOR)
         raise MalformedPayload, "signature contains a newline" if signature.to_s.include?(SEPARATOR)
 
-        Digest::SHA256.hexdigest(
-          [DOMAIN, canonical, signature].join(SEPARATOR).b
-        )
+        # The payload, a newline and the signature, as the rules state it
+        # (section 1). There is no domain prefix: a reader with only the rules
+        # in hand has to be able to compute it.
+        Digest::SHA256.hexdigest([canonical, signature].join(SEPARATOR).b)
       end
 
       def valid?(value) = value.is_a?(String) && value.match?(HEX)

@@ -29,13 +29,16 @@ module ReputableChat
     # Size limits are an operator's decision rather than a property of the
     # protocol, and they are served to clients so nothing has to discover a
     # ceiling by being refused. Each is overridden by its key in upper case.
+    #
+    # They apply to what this server's own clients send. A record another
+    # server passes on is held to the rules alone.
     LIMITS = {
       "vault_bytes" => 1_048_576,
       "image_bytes" => 262_144,
       "message_bytes" => 4_000,
+      "bio_bytes" => 280,
       "notice_bytes" => 16_000,
-      "note_bytes" => 16_000,
-      "attestation_bytes" => 4_194_304,
+      "attestation_bytes" => 1_048_576,
       "seen_entries" => 5_000,
       "vault_sync_seconds" => 3_600
     }.freeze
@@ -55,7 +58,8 @@ module ReputableChat
       end
 
       settings.merge("origin" => Origin.list(settings["origin"]),
-                     "limits" => limits(file["limits"] || {}, env))
+                     "limits" => limits(file["limits"] || {}, env),
+                     "peer_tokens" => peer_tokens(env))
     end
 
     # A limit that is absent, unparseable or not positive falls back to the
@@ -68,6 +72,13 @@ module ReputableChat
 
         [key, parsed&.positive? ? parsed : fallback]
       end
+    end
+
+    # Secrets for the route other servers pass records on through, from
+    # PEER_TOKENS, separated by commas. Never read from the file, which is in
+    # the repository. None means the route is closed.
+    def peer_tokens(env)
+      env["PEER_TOKENS"].to_s.split(",").map(&:strip).reject(&:empty?)
     end
 
     def present(value) = value.is_a?(String) && !value.strip.empty? ? value : nil

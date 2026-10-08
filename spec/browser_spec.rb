@@ -65,7 +65,7 @@ class BrowserSpec < Minitest::Test
     assert_equal "Host", seen.fetch("host_named")
     assert_equal "Tim", seen.fetch("genesis_named")
     assert seen.fetch("genesis_has_an_image"), "the genesis avatar must be its image, not a placeholder"
-    assert_equal 43, seen.fetch("whole_key_shown").length, "the whole key must be shown"
+    assert_equal 64, seen.fetch("whole_key_shown").length, "the whole account ID must be shown"
   end
 
   # RULE: a pasted key still gets an avatar, so the list looks like one list.
@@ -78,11 +78,11 @@ class BrowserSpec < Minitest::Test
   def test_the_chosen_friends_survive_account_creation
     assert_operator seen.fetch("friends_after_creating"), :>=, 1
     assert seen.fetch("friend_list_shows_an_image"), "the friend list must show the avatar"
-    assert_equal 43, seen.fetch("friend_list_shows_a_whole_key")
+    assert_equal 64, seen.fetch("friend_list_shows_a_whole_key")
   end
 
   # RULE: the friend list reads first-added at the top. The ratings come back
-  # from the server sorted by public key, because canonical serialization
+  # from the server sorted by account ID, because canonical serialization
   # sorts, so this order exists only because the vault records it.
   def test_the_friend_list_is_ordered_by_when_they_were_added
     assert_equal "Tim", seen.fetch("friend_order").first.strip,

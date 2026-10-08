@@ -21,14 +21,17 @@
 // And it is seeded ONCE, when the identity is created. Re-adding it whenever
 // it is missing would mean removing it never took, which is the same thing as
 // not being able to remove it.
-export function initialRatings({ genesisPubkey, hostPubkey, ownPubkey }) {
+//
+// Keyed by account ID, like every rating: the record hash of the account's
+// first identity declaration, which for these two is the committed record's.
+export function initialRatings({ genesisAccount, hostAccount, ownAccount }) {
   const ratings = {};
 
   // Neither account vouches for itself. Nobody contributes to their own
   // reputation anywhere else either.
-  for (const pubkey of [genesisPubkey, hostPubkey]) {
-    if (!pubkey || pubkey === ownPubkey) continue;
-    ratings[pubkey] = { friend: true, reported: false, net_votes: 0, cleared: false };
+  for (const account of [genesisAccount, hostAccount]) {
+    if (!account || account === ownAccount) continue;
+    ratings[account] = { friend: true, reported: false, net_votes: 0, cleared: false };
   }
   return ratings;
 }
@@ -53,11 +56,17 @@ export function declarationProfile(record) {
   } catch {
     return null;
   }
-  if (!declaration.handle) return null;
+  return profileOf(declaration);
+}
+
+// The profile an identity declaration gives: its title is the handle, its body
+// the bio, and the first of its files the avatar (rules, section 3).
+export function profileOf(declaration) {
+  if (!declaration?.title) return null;
 
   return {
-    handle: declaration.handle,
-    bio: declaration.bio || "",
-    icon: declaration.icon || null,
+    handle: declaration.title,
+    bio: declaration.body || "",
+    icon: declaration.file?.[0] || null,
   };
 }

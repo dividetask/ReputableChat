@@ -2,9 +2,7 @@
 
 require "json"
 require_relative "environment"
-require_relative "cryptography/payload"
-require_relative "cryptography/record"
-require_relative "cryptography/signature"
+require_relative "chain/record"
 
 module ReputableChat
   # An identity declaration committed to the repository as a file, rather than
@@ -51,8 +49,9 @@ module ReputableChat
         return declaration unless declaration && Environment.production?
         return declaration unless File.exist?(development_path)
 
-        development = JSON.parse(File.read(development_path))["pubkey"]
-        return declaration unless development == declaration.pubkey
+        payload = JSON.parse(JSON.parse(File.read(development_path))["payload"].to_s)
+        development = [payload["pubkey"], payload["mpubkey"]].compact
+        return declaration if (development & declaration.keys).empty?
 
         raise self::WrongEnvironment, development_message
       rescue JSON::ParserError
@@ -60,16 +59,24 @@ module ReputableChat
       end
     end
 
-    attr_reader :pubkey, :payload, :signature, :hash
+    attr_reader :record, :payload, :signature, :hash
 
-    def declaration = @declaration ||= JSON.parse(payload)
+    # The working key and the master key the declaration sets.
+    def pubkey = record["pubkey"]
+    def mpubkey = record["mpubkey"]
+    def keys = [pubkey, mpubkey].compact
 
-    # The icon filename the declaration names, or nil.
-    def icon = declaration["icon"]
+    # A first declaration's record hash is its account ID.
+    def account = hash
 
-    def handle = declaration["handle"]
+    def declaration = record.fields
 
-    def to_h = { "pubkey" => pubkey, "payload" => payload, "signature" => signature, "hash" => hash }
+    # The avatar the declaration names, the first of its files, or nil.
+    def icon = record["file"]&.first
+
+    def handle = record["title"]
+
+    def to_h = { "account" => account, "payload" => payload, "signature" => signature, "hash" => hash }
 
     # Puts the committed bytes into the image store, where every other image
     # lives, so there is one serving path rather than a special case.
@@ -91,11 +98,10 @@ module ReputableChat
 
     private
 
-    def adopt(record, path)
-      @pubkey    = record["pubkey"]
-      @payload   = record["payload"]
-      @signature = record["signature"]
-      @hash      = record["hash"]
+    def adopt(file, path)
+      @payload   = file["payload"]
+      @signature = file["signature"]
+      @hash      = file["hash"]
 
       verify!(path)
     end
@@ -105,42 +111,24 @@ module ReputableChat
     # a slightly different chain and show up only as signatures failing for no
     # visible reason.
     def verify!(path)
-      %w[pubkey payload signature hash].each do |field|
+      %w[payload signature hash].each do |field|
         raise self.class::Corrupt, "#{path} is missing #{field}" if send(field).to_s.empty?
       end
 
-      shape!(path)
+      begin
+        @record = Chain::Record.parse(payload, signature)
+      rescue Chain::Invalid => e
+        raise self.class::Corrupt, "#{path} is not a valid record under the rules: #{e.message}"
+      end
+
+      unless record.first_declaration?
+        raise self.class::Corrupt, "#{path} is not a first identity declaration"
+      end
+      unless record.record_hash == hash
+        raise self.class::Corrupt, "#{path} records hash #{hash} but its contents hash to #{record.record_hash}"
+      end
+
       check_ack!(path)
-
-      recomputed = Cryptography::Record.digest(payload: payload, signature: signature)
-      unless recomputed == hash
-        raise self.class::Corrupt, "#{path} records hash #{hash} but its contents hash to #{recomputed}"
-      end
-
-      return if Cryptography::Signature.verify(
-        pubkey_b64: pubkey, signature_b64: signature, payload: JSON.parse(payload)
-      )
-
-      raise self.class::Corrupt, "the signature on #{path} does not verify against #{pubkey}"
-    end
-
-    # A record written against an older payload shape still verifies -- its
-    # signature covers the bytes it was made from. It is still wrong: a reader
-    # looking for a field it does not carry would find nil and carry on.
-    def shape!(path)
-      unless declaration["purpose"] == Cryptography::Payload::IDENTITY
-        raise self.class::Corrupt, "#{path} is not a #{Cryptography::Payload::IDENTITY} record"
-      end
-
-      expected = Cryptography::Payload.identity(
-        pubkey: pubkey, revision: 1, handle: "x", bio: "", icon: nil, ack: nil, issued_at: 0
-      ).keys.sort
-
-      missing = expected - declaration.keys
-      return if missing.empty?
-
-      raise self.class::Corrupt, "#{path} was written against an older payload shape and is " \
-                                 "missing #{missing.join(', ')}"
     end
   end
 end

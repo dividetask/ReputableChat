@@ -140,33 +140,16 @@ export async function sign(identity, payload) {
   return b64url(signature);
 }
 
+// The two signed shapes that are not records, and that the rules do not
+// govern: the login challenge and the vault.
 export const PURPOSE = {
   LOGIN: "reputablechat:login:v1",
-  MESSAGE: "reputablechat:message:v1",
-  EMOTE: "reputablechat:emote:v1",
-  IDENTITY: "reputablechat:identity:v1",
-  ATTESTATION: "reputablechat:attestation:v1",
-  ADJUSTMENT: "reputablechat:adjustment:v1",
-  RELEASE: "reputablechat:release:v1",
-  NOTICE: "reputablechat:notice:v1",
   VAULT: "reputablechat:vault:v1",
 };
 
 // These must match lib/reputable_chat/cryptography/payload.rb exactly.
-//
-// `note` is free text for a person reading the raw chain. Nothing here or in
-// the server reads it, and nothing branches on it -- render it with
-// textContent, never as markup, like any other text somebody else wrote.
 export function loginPayload({ pubkey, nonce, origin, ts }) {
   return { purpose: PURPOSE.LOGIN, pubkey, nonce, origin, ts };
-}
-
-export function messagePayload({ pubkey, body, ack, ts, replyTo = null, note = null }) {
-  return { purpose: PURPOSE.MESSAGE, pubkey, reply_to: replyTo, ack, note, ts, body };
-}
-
-export function emotePayload({ pubkey, message, emote, ack, ts, note = null }) {
-  return { purpose: PURPOSE.EMOTE, pubkey, message, emote, ack, note, ts };
 }
 
 // `revision` sits outside the ciphertext so the server can reject a rollback
@@ -175,53 +158,65 @@ export function vaultPayload({ pubkey, revision, ciphertext, iv, ts }) {
   return { purpose: PURPOSE.VAULT, pubkey, revision, ciphertext, iv, ts };
 }
 
-// `master_pubkey` and `previous_pubkey` are placeholders for key rotation and
-// are always null for now. They sit in the signed shape from the start because
-// adding a field later changes the canonical bytes of every record, which
-// invalidates every signature ever made.
-export function identityPayload({
-  pubkey, revision, handle, bio, icon, ack, ts,
-  masterPubkey = null, previousPubkey = null, note = null,
-}) {
-  return {
-    purpose: PURPOSE.IDENTITY, pubkey, revision, handle, bio, icon,
-    master_pubkey: masterPubkey, previous_pubkey: previousPubkey, ack, note, ts,
-  };
+// --- chain records -------------------------------------------------------
+//
+// docs/project/rules/v0.001.md says what each field means. A field with no
+// value is left out rather than written as null, so a record has one
+// spelling, and the lists the rules require sorted are sorted here: the chain
+// refuses an unsorted one rather than sorting it, since sorting would change
+// what was signed.
+
+export const RULES_VERSION = "v0.001";
+export const CHAT = "chat";
+
+export const recordType = (kind, app = null) =>
+  ["reputablechat", kind, RULES_VERSION, app].filter(Boolean).join(":");
+
+const SORTED = ["ack", "target", "endorse"];
+
+export function recordPayload(kind, fields, app = null) {
+  const payload = { type: recordType(kind, app) };
+  for (const [name, value] of Object.entries(fields)) {
+    if (value === null || value === undefined) continue;
+    payload[name] = SORTED.includes(name) ? [...new Set(value)].sort() : value;
+  }
+  return payload;
 }
 
-// `scores` maps a pubkey to { reputation, trust }, both decimal STRINGS:
+// `id` is the account ID, absent on the first declaration, whose record hash
+// becomes it. The handle is the title, the bio the body, and the avatar the
+// first file.
+export function identityPayload({ id = null, pubkey, handle, bio = "", avatar = null, ack, ts }) {
+  return recordPayload("identity", {
+    id, pubkey, title: handle, body: bio, file: avatar ? [avatar] : null, ack, ts,
+  });
+}
+
+// `scores` maps an account ID to { reputation, trust }, both decimal STRINGS:
 // canonical serialization refuses floats, and the Blocked line is
 // `reputation > 0`, which binary floating point cannot be trusted to land on.
-// `derived` is a cache and carries the hash of the parameters it was computed
-// under, so a reader can tell whether the numbers mean anything to them.
-export function attestationPayload({ pubkey, revision, scores, derived, ack, ts, note = null }) {
-  return { purpose: PURPOSE.ATTESTATION, pubkey, revision, scores, derived, ack, note, ts };
+// `derived` is the same shape, for accounts further away.
+export function attestationPayload({ id, pubkey, scores, derived = null, ack, ts }) {
+  return recordPayload("attestation", { id, pubkey, scores, derived, body: "", ack, ts });
 }
 
-export function adjustmentPayload({
-  pubkey, baseRevision, seq, target, reputation, trust, ack, ts, note = null,
-}) {
-  return {
-    purpose: PURPOSE.ADJUSTMENT, pubkey, base_revision: baseRevision, seq,
-    target, reputation, trust, ack, note, ts,
-  };
+// A reply names the message it answers in target.
+export function messagePayload({ id, pubkey, body, ack, ts, target = null }) {
+  return recordPayload("message", { id, pubkey, body, ack, ts, target }, CHAT);
 }
 
-// `supersedes` is the notice this one replaces, or null. A correction is a new
-// record pointing at the old one, never an edit -- a mutated record no longer
-// matches its signature, and the point of a notice is that what was said is
-// still there to be checked.
-export function noticePayload({
-  pubkey, revision, kind, title, body, ack, ts, supersedes = null, note = null,
-}) {
-  return {
-    purpose: PURPOSE.NOTICE, pubkey, revision, kind, title, body,
-    supersedes, ack, note, ts,
-  };
+export function reactionPayload({ id, pubkey, body, target, ack, ts }) {
+  return recordPayload("reaction", { id, pubkey, body, target, ack, ts }, CHAT);
 }
 
-export function releasePayload({ pubkey, revision, label, files, notes, ack, ts, note = null }) {
-  return { purpose: PURPOSE.RELEASE, pubkey, revision, label, files, notes, ack, note, ts };
+export function noticePayload({ id, pubkey, kind, body, ack, ts, title = null }) {
+  return recordPayload("notice", { id, pubkey, kind, title, body, ack, ts });
+}
+
+// What the server takes: the payload as the exact canonical string signed,
+// and the signature over it.
+export async function signRecord(identity, payload) {
+  return { payload: canonical.dump(payload), signature: await sign(identity, payload) };
 }
 
 // Verifies a blob the server handed back against a public key.

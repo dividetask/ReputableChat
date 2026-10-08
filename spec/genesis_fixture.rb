@@ -7,8 +7,8 @@ require "reputable_chat/genesis"
 require "reputable_chat/host"
 require "reputable_chat/cryptography/canonical"
 require "reputable_chat/cryptography/payload"
-require "reputable_chat/cryptography/record"
 require "reputable_chat/cryptography/signature"
+require "reputable_chat/cryptography/record"
 
 # A throwaway genesis for the tests.
 #
@@ -19,44 +19,43 @@ require "reputable_chat/cryptography/signature"
 module GenesisFixture
   Crypto = ReputableChat::Cryptography
 
+  RULES = "ReputableChat rules, version 0.001 (a test genesis)"
+
   module_function
 
-  def build(handle: "Tim", icon: nil)
+  # The genesis, and the key that signed it, for a test that signs as it.
+  def build_with_key(handle: "Tim", icon: nil)
     signing = Ed25519::SigningKey.generate
     pubkey  = Crypto::Signature.encode(signing.verify_key.to_bytes)
 
-    payload = Crypto::Payload.identity(
-      pubkey: pubkey, revision: 1, handle: handle, bio: "", icon: icon,
-      ack: nil, issued_at: Time.now.to_i
-    )
-    canonical = Crypto::Canonical.dump(payload)
-    signature = Crypto::Signature.encode(signing.sign(canonical.b))
-
-    ReputableChat::Genesis.new({
-      "pubkey" => pubkey, "payload" => canonical, "signature" => signature,
-      "hash" => Crypto::Record.digest(payload: canonical, signature: signature)
-    })
+    payload = Crypto::Payload.identity(pubkey: pubkey, handle: handle, avatar: icon, ack: [],
+                                       ts: Time.now.to_i, rules: RULES)
+    [ReputableChat::Genesis.new(signed(signing, payload)), signing]
   end
 
-  # A host account acknowledging `genesis`, or whatever `ack` says instead.
-  # `host_record` is the raw hash, for the paths that must see a check refuse it.
-  def host_record(genesis:, ack: genesis.hash, handle: "Host")
-    signing = Ed25519::SigningKey.generate
-    pubkey  = Crypto::Signature.encode(signing.verify_key.to_bytes)
+  def build(**kwargs) = build_with_key(**kwargs).first
 
-    payload = Crypto::Payload.identity(
-      pubkey: pubkey, revision: 1, handle: handle, bio: "", icon: nil,
-      ack: ack, issued_at: Time.now.to_i
-    )
-    canonical = Crypto::Canonical.dump(payload)
-    signature = Crypto::Signature.encode(signing.sign(canonical.b))
-
-    { "pubkey" => pubkey, "payload" => canonical, "signature" => signature,
-      "hash" => Crypto::Record.digest(payload: canonical, signature: signature) }
+  # A host account acknowledging `genesis`, or whatever `ack` says instead,
+  # as the committed file holds it. Raw, for the paths that must see a check
+  # refuse it.
+  def host_record(genesis:, ack: [genesis.hash], handle: "Host", signing: Ed25519::SigningKey.generate)
+    pubkey = Crypto::Signature.encode(signing.verify_key.to_bytes)
+    payload = Crypto::Payload.identity(pubkey: pubkey, handle: handle, ack: ack, ts: Time.now.to_i)
+    signed(signing, payload)
   end
 
   def build_host(genesis:, **kwargs)
     ReputableChat::Host.new(host_record(genesis: genesis, **kwargs), genesis: genesis)
+  end
+
+  def signed(signing, payload)
+    canonical = Crypto::Canonical.dump(payload)
+    signature = Crypto::Signature.encode(signing.sign(canonical.b))
+    # Hashed rather than parsed, so a test can build a record the checks are
+    # meant to refuse.
+    hash = Crypto::Record.digest(payload: canonical, signature: signature)
+
+    { "payload" => canonical, "signature" => signature, "hash" => hash }
   end
 
   # Writes one to disk, for the paths that load rather than receive it.

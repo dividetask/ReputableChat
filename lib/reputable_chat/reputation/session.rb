@@ -28,24 +28,24 @@ module ReputableChat
 
       # Sorts the given users once. Anyone met later is sorted on first sight.
       def build(candidates)
-        candidates.each { |pubkey| bucket_of(pubkey) }
+        candidates.each { |account| bucket_of(account) }
         self
       end
 
       # Always against the walk taken at login, never a fresh one -- that is
       # what makes other people's config changes invisible until next time.
-      def bucket_of(pubkey)
-        @buckets[pubkey] ||= engine.bucket(viewer: viewer, target: pubkey, depths: @depths)
+      def bucket_of(account)
+        @buckets[account] ||= engine.bucket(viewer: viewer, target: account, depths: @depths)
       end
 
-      def trusted   = pubkeys_in(:trusted)
-      def tolerated = pubkeys_in(:tolerated)
-      def blocked   = pubkeys_in(:blocked)
+      def trusted   = accounts_in(:trusted)
+      def tolerated = accounts_in(:tolerated)
+      def blocked   = accounts_in(:blocked)
 
-      def visible?(pubkey) = bucket_of(pubkey) != :blocked
+      def visible?(account) = bucket_of(account) != :blocked
 
       # How far a rater sits from the viewer, or nil if outside the walk.
-      def hops_to(pubkey) = @depths[pubkey]
+      def hops_to(account) = @depths[account]
 
       # Records a report seen during the session and blocks the subject if the
       # thresholds are met.
@@ -115,7 +115,7 @@ module ReputableChat
         frozen
       end
 
-      def pubkeys_in(bucket) = @buckets.select { |_, b| b == bucket }.keys
+      def accounts_in(bucket) = @buckets.select { |_, b| b == bucket }.keys
 
       def config_thresholds
         raw = engine.config.fetch("session.report_blocks")

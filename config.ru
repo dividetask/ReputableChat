@@ -27,5 +27,13 @@ ReputableChat::App.genesis.install_icon(ReputableChat::App.images)
 # the genesis it has to acknowledge.
 ReputableChat::App.host = ReputableChat::Host.current
 ReputableChat::App.host&.install_icon(ReputableChat::App.images)
+ReputableChat::App.peer_tokens = settings.fetch("peer_tokens")
+# The chain: the genesis at its root, the host account's declaration joined to
+# it, and every stored record read back in the order it was accepted.
+ReputableChat::App.book = ReputableChat::Chain::Book.new(
+  ReputableChat::App.store,
+  genesis: ReputableChat::App.genesis.record,
+  host: ReputableChat::App.host&.record
+)
 
 run ReputableChat::App.freeze.app

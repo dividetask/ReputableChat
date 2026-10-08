@@ -40,11 +40,11 @@ try {
   results.friend_rows_before_creating = await rows.count();
   results.genesis_named = (await rows.first().locator(".name").textContent()).trim();
   results.genesis_has_an_image = await rows.first().locator("img.avatar").count() > 0;
-  results.whole_key_shown = (await rows.first().locator(".pubkey").textContent()).trim();
+  results.whole_key_shown = (await rows.first().locator(".account-id").textContent()).trim();
   results.host_named = (await rows.nth(1).locator(".name").textContent()).trim();
 
   // A pasted key gets the generated placeholder, so the list stays consistent.
-  const invented = "z".repeat(43);
+  const invented = "e".repeat(64);
   await page.fill("#new-friend-key", invented);
   await page.click("#new-friend-add");
   results.friend_rows_after_adding = await rows.count();
@@ -66,11 +66,11 @@ try {
   const friends = page.locator("#friend-list .row");
   results.friends_after_creating = await friends.count();
   // The order the friends were chosen in, which survives only because the
-  // vault records it: the ratings come back sorted by public key.
+  // vault records it: the ratings come back sorted by account ID.
   results.friend_order = await friends.locator(".name").allTextContents();
   results.friend_list_shows_an_image = await friends.first().locator("img.avatar").count() > 0;
   results.friend_list_shows_a_whole_key =
-    (await friends.first().locator(".pubkey").textContent()).trim().length;
+    (await friends.first().locator(".account-id").textContent()).trim().length;
 
   // --- a friendship made during the session -----------------------------
   //
@@ -80,7 +80,7 @@ try {
   // batch fetch skips anyone already in it -- so the author's own entry there is
   // their last published one, and a fresh rating reaches the session only
   // through the local entry rebuildSession writes.
-  const stranger = "y".repeat(43);
+  const stranger = "f".repeat(64);
   await page.fill("#add-key", stranger);
   await page.click("#add-friend");
   await page.waitForFunction(

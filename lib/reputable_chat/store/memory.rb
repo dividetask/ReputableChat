@@ -46,8 +46,8 @@ module ReputableChat
         self
       end
 
-      def ratings_by(pubkey) = @ratings[pubkey]
-      def rating(pubkey, subject) = @ratings[pubkey][subject]
+      def ratings_by(account) = @ratings[account]
+      def rating(account, subject) = @ratings[account][subject]
     end
   end
 end

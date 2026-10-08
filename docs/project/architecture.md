@@ -5,9 +5,9 @@
 It never sees a seed, never holds a private key, and never computes a reputation. What it does:
 
 - hands out single-use login challenges
-- **verifies every signature before storing anything**
+- **judges every record against the rules before storing it**, signature included, and refuses the invalid ones (`chain/record.rb` for what a record alone decides, `chain/ledger.rb` for what needs its history)
 - stores signed blobs and serves them back byte-identical
-- validates everything arriving from a client against the rules
+- holds its own clients to stricter terms than the rules: only the records the chat makes, signed by the session's own key, within the limits in `config/server.yml`. Another server passing records on, through a route closed unless `PEER_TOKENS` is set, is held to the rules alone.
 
 Signed blobs go out exactly as they came in. Re-serializing them server-side would only create a way to break signatures.
 
@@ -45,7 +45,7 @@ Logging in signs a challenge from the server. It is not a record and never reach
 
 ## Reactions
 
-The client tallies them per message and **drops reactions from blocked accounts**, so a pile of spam accounts cannot inflate a count. Counts are therefore per-viewer, like everything else here.
+The client tallies them per message, counting each person's latest reaction to it, and **drops reactions from blocked accounts**, so a pile of spam accounts cannot inflate a count. Counts are therefore per-viewer, like everything else here.
 
 A reaction also moves its author's rating of the person reacted to. That rating is private until their next attestation carries the number it came to.
 
@@ -69,6 +69,7 @@ config/host/<env>.json    this server's host account, acknowledging the genesis 
 config/server.yml         optional origin, database and image paths, size limits (env overrides)
 config/reputation.yml     tunable reputation parameters (the defaults layer)
 config/emotes.yml         which reactions count positive, negative, neutral
+config/notices.yml        the notice kinds the chat shows, and takes from its clients
 config/bip39-english.txt  wordlist; one source of truth, served at /wordlist.txt
 
 docs/project/rules/       the rules, one file per version, and signed examples
@@ -84,6 +85,7 @@ lib/reputable_chat/
   genesis.rb              loads and verifies the committed genesis record
   host.rb                 loads and verifies the host account, which must ack the genesis
   dump.rb                 readable view of the database for an operator
+  chain/                  record (one record alone), ledger (its history), book (ledger + database)
   operator.rb             the genesis and host accounts' seed files, and signing from a terminal
   cryptography/           canonical, payload, record, signature, seed, vault
   reputation/             curve, ladder, rating, score, decimals, engine, session
@@ -103,10 +105,11 @@ public/js/
 
 ## Not built yet
 
-- The code still signs the shapes that came before the rules — see **Not built** under **Rules** in [chain.md](chain.md).
 - Loading the client from a release. See the end of [chain.md](chain.md).
 - Client-side verification of *other people's* attestations (`session.verify_signatures`). Your own vault is already verified, since detecting tampering is why it is signed.
-- Master keys and key-change notices. The rules define them; nothing implements them.
+- Master keys and key changes from the browser. The server judges key changes, compromised notices and quorums, and the genesis and host accounts declare master keys, but the browser declares a working key only and has no way to change one.
+- Heartbeats from a server. The server judges them; nothing publishes them.
+- Publishing a release. The server judges one; no tool makes one.
 - WebSocket delivery — messages currently poll every 4s
 - Chunking an attestation, which currently grows an entry per person ever rated
-- Federation between servers. The principle it has to keep: a person sees messages whatever server they came from, and is largely unaware which server anyone else uses. What they see is decided by their friend list, never by where somebody's account lives.
+- Federation between servers. A server takes records another passes on (`POST /api/peer/records`, with a token from `PEER_TOKENS`), but nothing sends them yet. The principle it has to keep: a person sees messages whatever server they came from, and is largely unaware which server anyone else uses. What they see is decided by their friend list, never by where somebody's account lives.

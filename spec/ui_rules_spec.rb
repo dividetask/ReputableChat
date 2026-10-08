@@ -35,7 +35,7 @@ class UiRulesSpec < Minitest::Test
   def test_relations_lists_show_avatars
     relations = within(app_js, from: "function fillRelations(", lines: 60)
 
-    assert_includes relations, "avatarFor(pubkey)",
+    assert_includes relations, "avatarFor(account)",
                     "friend and blocked lists must show the avatar, like everywhere else"
   end
 
@@ -43,13 +43,13 @@ class UiRulesSpec < Minitest::Test
   # have faces on the account creation screen, where nothing has been fetched
   # and nothing can be. Their icons come from the declarations already in hand.
   def test_default_friend_icons_survive_having_nothing_fetched
-    icon_for = within(app_js, from: "function iconFor(pubkey)", lines: 12)
+    icon_for = within(app_js, from: "function iconFor(account)", lines: 12)
 
-    assert_includes icon_for, "declarationProfile(committedFor(pubkey))",
+    assert_includes icon_for, "declarationProfile(committedFor(account))",
                     "a default friend's icon must come from its committed declaration"
     assert_match(/function committedFor[\s\S]{0,200}state\.genesis, state\.host/, app_js,
                  "both default friends must be looked up")
-    refute_includes app_js, 'avatarFor(pubkey, "", null)',
+    refute_includes app_js, 'avatarFor(account, "", null)',
                     "passing a null icon defeats the lookup the default performs"
   end
 
@@ -70,7 +70,7 @@ class UiRulesSpec < Minitest::Test
     opens = within(app_js, from: "function opensProfile(", lines: 18)
     enlarges = within(app_js, from: "function enlarges(", lines: 14)
 
-    assert_includes opens, "showProfile(pubkey)"
+    assert_includes opens, "showProfile(account)"
     assert_includes enlarges, "showLarge(source)"
     assert_match(/const onProfile = extra\.includes\("avatar-large"\)/, app_js,
                  "which behaviour an avatar gets must follow from where it is")
@@ -101,14 +101,14 @@ class UiRulesSpec < Minitest::Test
   def test_relations_lists_show_the_whole_key
     relations = within(app_js, from: "function fillRelations(", lines: 60)
 
-    assert_includes relations, "key.textContent = pubkey", "the full key must be shown"
-    refute_includes relations, "fingerprint(pubkey)", "a prefix is not enough here"
+    assert_includes relations, "key.textContent = account", "the full key must be shown"
+    refute_includes relations, "fingerprint(account)", "a prefix is not enough here"
   end
 
   # RULE: withdrawing a vouch asks first. Unfriending silently drops everything
   # that person vouches for, which is not a thing to do on a stray click.
   def test_unfriending_asks_first
-    unfriend = within(app_js, from: "async function unfriend(pubkey)", lines: 12)
+    unfriend = within(app_js, from: "async function unfriend(account)", lines: 12)
 
     assert_includes unfriend, "confirmAction", "unfriending must confirm"
     assert_match(/if \(!sure\) return/, unfriend, "declining must abandon the change")
@@ -118,11 +118,11 @@ class UiRulesSpec < Minitest::Test
   # The exception is the undo beside a message just blocked, which exists for a
   # misclick: a dialog there would guard the wrong direction.
   def test_unblocking_asks_first_except_when_undoing_a_misclick
-    undo = within(app_js, from: "async function undoReport(pubkey", lines: 14)
+    undo = within(app_js, from: "async function undoReport(account", lines: 14)
 
     assert_includes undo, "confirm = true",
                     "the default must be to ask, so a later call site asks by default"
-    assert_includes app_js, "undoReport(message.pubkey, { confirm: false })",
+    assert_includes app_js, "undoReport(message.account, { confirm: false })",
                     "the undo beside a just-blocked message must stay instant"
   end
 end

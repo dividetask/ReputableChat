@@ -69,7 +69,7 @@ module ReputableChat
     # and every record its server's people make would hang off it rather than
     # off the network's.
     def check_ack!(path)
-      return if declaration["ack"] == @genesis.hash
+      return if declaration["ack"] == [@genesis.hash]
 
       raise Corrupt, "#{path} acknowledges #{declaration['ack'].inspect}, not the genesis " \
                      "#{@genesis.hash}. A host account is generated against the genesis " \

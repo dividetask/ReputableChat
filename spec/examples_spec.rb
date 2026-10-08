@@ -3,6 +3,7 @@
 require_relative "spec_helper"
 require "open3"
 require "tmpdir"
+require "reputable_chat/chain/ledger"
 
 # The example chain is the only place the rules are written down in bytes rather
 # than in prose, so it is the only place a machine can tell when the two have
@@ -72,7 +73,70 @@ class ExamplesSpec < Minitest::Test
     end
   end
 
+  # --- the server's own validator -------------------------------------------
+  #
+  # The checker above is a second implementation, written to read the file. The
+  # one that decides what a server accepts is Chain::Ledger, so the examples go
+  # through that too: every record valid, and each broken one refused for the
+  # rule it breaks.
+
+  # The examples carry releases of 0.002 and 0.003, whose own rules are not
+  # implemented here; a release is still judged by the version it follows.
+  VERSIONS = %w[v0.001 v0.002 v0.003].freeze
+
+  def test_the_server_accepts_every_example
+    records = records_in(read(EXAMPLES))
+    ledger = ReputableChat::Chain::Ledger.new(genesis: records.first, versions: VERSIONS)
+
+    records.drop(1).each do |record|
+      ledger.add(record)
+    rescue ReputableChat::Chain::Invalid => e
+      flunk "the server refuses example #{record.record_hash[0, 8]}: #{e.message}"
+    end
+    assert_equal records.size, ledger.size
+  end
+
+  def test_the_server_refuses_each_broken_example
+    records = records_in(read(EXAMPLES))
+    ledger = ReputableChat::Chain::Ledger.new(genesis: records.first, versions: VERSIONS)
+    records.drop(1).each { |record| ledger.add(record) }
+
+    reasons = read(BROKEN).scan(/```\npayload:   (.+?)\nsignature: (\S+)\nhash:      (\S+)\n```/m).map do |payload, signature, _|
+      ledger.add(ReputableChat::Chain::Record.parse(payload, signature))
+      flunk "the server accepted a broken example"
+    rescue ReputableChat::Chain::Invalid => e
+      e.message
+    end
+
+    assert_match(/at least 480 seconds/, reasons[0])
+    assert_match(/ack is not sorted/, reasons[1])
+    assert_match(/spends 99 and makes 98/, reasons[2])
+  end
+
+  # The states the examples describe in prose: the thief's key change and the
+  # message signed with its key are void, Dana's change is confirmed, and of
+  # Alice's double spend the payment stands and the lunch is void.
+  def test_the_server_reads_the_states_the_examples_describe
+    records = records_in(read(EXAMPLES))
+    ledger = ReputableChat::Chain::Ledger.new(genesis: records.first, versions: VERSIONS)
+    records.drop(1).each { |record| ledger.add(record) }
+    state = ->(prefix) { ledger.state(records.find { |r| r.record_hash.start_with?(prefix) }.record_hash) }
+
+    assert_equal "void", state.call("19ba432b"), "the thief's key change"
+    assert_equal "void", state.call("d99dd7ca"), "the thief's message"
+    assert_equal "confirmed", state.call("86f0baf3"), "Dana's key change"
+    assert_equal "confirmed", state.call("9cb36d78"), "Alice's payment"
+    assert_equal "void", state.call("9cfb8f27"), "Alice's lunch"
+    assert_equal "void", state.call("35eb6dbc"), "the change made with Alice's stolen master key"
+  end
+
   private
+
+  def records_in(text)
+    text.scan(/```\npayload:   (.+?)\nsignature: (\S+)\nhash:      (\S+)\n```/m).map do |payload, signature, _|
+      ReputableChat::Chain::Record.parse(payload, signature)
+    end
+  end
 
   # The default external encoding is not UTF-8 everywhere, and these files are.
   def read(path) = File.read(path, encoding: "UTF-8")

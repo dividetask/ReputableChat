@@ -28,6 +28,11 @@
 database_url: "sqlite://data/reputablechat.db"
 image_root: "data/images"
 
+# PEER_TOKENS is absent for the same reason as SESSION_SECRET below. It is a
+# comma-separated list of secrets; another server presenting one of them as a
+# bearer token may pass on records of any type, which this server then holds to
+# the rules alone rather than to the limits below. Unset, the route is closed.
+
 # SESSION_SECRET is deliberately absent: it is a secret and this file is in the
 # repository. Set it in the environment when you deploy. Without it a random
 # one is generated at boot, which is fine locally but signs everyone out on
@@ -51,14 +56,17 @@ limits:
   # only limit it has -- it cannot count your friends, so it counts your bytes.
   vault_bytes: 1048576
   image_bytes: 262144
+  # The next four are stricter than the rules allow, and apply only to records
+  # this server's own clients send.
   message_bytes: 4000
+  bio_bytes: 280
   # An attestation holds an entry per person its author has an opinion about, so
   # it is the one record whose size the author decides. Bounded in bytes rather
-  # than in entries: the bytes are what the server has to hold and serve, and a
-  # server can raise this without anybody re-signing anything.
-  attestation_bytes: 4194304
+  # than in entries: the bytes are what the server has to hold and serve. The
+  # rules allow 1 MiB of scores and derived together; this counts the whole
+  # record.
+  attestation_bytes: 1048576
   notice_bytes: 16000
-  note_bytes: 16000
   # Advice rather than a limit: nothing rejects a vault for holding more. It
   # tells a client how many first-seen entries to keep before pruning, since it
   # is the client that has to decide what to drop. Friends and blocked accounts

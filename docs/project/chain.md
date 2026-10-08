@@ -10,7 +10,7 @@ What each kind of record is, what its fields mean and what makes it valid is set
 
 The server refuses an `ack` that is out of order rather than sorting it, because sorting it would change what was signed. The private vault is not a record on the chain — see [identity.md](identity.md).
 
-Records are **generated, not stored as files.** The server keeps database rows and builds the record when someone asks for it. That is only safe because the canonical form is deterministic: the same row produces the same bytes and therefore the same hash and the same signature, every time, on any machine. The moment that stops being true the whole structure stops verifying, which is why `spec/canonical_parity_spec.rb` exists and why floats are refused outright.
+Records are **stored as the bytes that arrived**, one database row each, keyed by record hash, and served back unchanged. A payload that is not already in canonical form is refused rather than normalized, because the canonical form is what was signed: the same record produces the same bytes and therefore the same hash and the same signature, every time, on any machine. The moment that stops being true the whole structure stops verifying, which is why `spec/canonical_parity_spec.rb` exists and why floats are refused outright.
 
 ## Record hashes
 
@@ -64,7 +64,7 @@ The failure this is shaped around is a production deployment quietly running the
 
 The script runs the **real** client derivation path under Node: the vendored Argon2id build, the same Argon2id parameters out of `config/reputation.yml`, and WebCrypto Ed25519. It is not a second implementation that could drift from the browser's and strand the account it creates.
 
-It writes the seed beside the record, 0600 in both environments. The production one is never printed — a terminal scrollback, a CI log and a screen share are all places a seed should not turn up. Both hold the phrase rather than the derived key, so it is the same secret a person would type into the UI and there is one thing to look after rather than two that must not disagree.
+It writes two seeds beside the record, 0600 in both environments: `<env>.seed` for the working key and `<env>.master.seed` for the master key, as separate phrases so that the working seed on a machine that signs things does not also give away the master key. The production master seed belongs offline once it is backed up. The production one is never printed — a terminal scrollback, a CI log and a screen share are all places a seed should not turn up. Both hold the phrase rather than the derived key, so it is the same secret a person would type into the UI and there is one thing to look after rather than two that must not disagree.
 
 `script/tim.rb` signs with it, which is how the genesis account posts messages and vouches for new arrivals without somebody sitting at a browser. That file is the one place in this project a private key lives outside a browser, and it is the weakest point in the system: whoever holds it is the genesis account.
 
@@ -146,9 +146,9 @@ The friend and report lists are not in an attestation. They are in the private v
 
 A reader reaching for it has run out of its own reach and uses it to cheaply extend their reach. 
 
-### Not built: fetching a record by hash
+### Fetching a record by hash
 
-There is no route that resolves a record hash to its record. Each kind is served by its own route, and `ack` names records that may be of another kind, or from somebody the viewer never fetched. Walking the chain at all needs `GET` by hash, and it has to serve any record to anyone, for the reason above.
+`GET /api/record/<hash>` resolves any record hash to its record, for anyone. `ack` names records that may be of another kind, or from somebody the viewer never fetched, so walking the chain needs it, and it has to serve any record to anyone, for the reason above.
 
 ### Not built: loading the client from a release
 

@@ -191,7 +191,7 @@ export class Reputation {
 
       if (!byDepth.has(depth)) byDepth.set(depth, []);
       byDepth.get(depth).push({
-        pubkey: rater, rating: weighted, reported: this.reportedBy(rating),
+        account: rater, rating: weighted, reported: this.reportedBy(rating),
       });
     }
 
@@ -240,7 +240,7 @@ export class Reputation {
   }
 }
 
-// What everybody has published about everybody else, keyed by pubkey: one
+// What everybody has published about everybody else, keyed by account: one
 // entry per author, holding the scores from their attestation. The viewer's own
 // entry is the exception -- it holds their vault's actions, because it is the
 // one entry that can contain a rating nobody has published yet. `ratingValue`
@@ -252,28 +252,28 @@ export class Graph {
     this.scores = new Map();
   }
 
-  add(pubkey, ratings) {
-    this.scores.set(pubkey, ratings || {});
+  add(account, ratings) {
+    this.scores.set(account, ratings || {});
   }
 
   // A fixed copy of what the walk reached. Freezing only the walk is not
   // enough -- a rating published later by someone already inside it would
   // still leak through.
-  snapshot(pubkeys) {
+  snapshot(accounts) {
     const frozen = new Graph();
-    for (const pubkey of pubkeys) frozen.add(pubkey, { ...this.ratingsBy(pubkey) });
+    for (const account of accounts) frozen.add(account, { ...this.ratingsBy(account) });
     return frozen;
   }
 
-  has(pubkey) {
-    return this.scores.has(pubkey);
+  has(account) {
+    return this.scores.has(account);
   }
 
-  ratingsBy(pubkey) {
-    return this.scores.get(pubkey) || {};
+  ratingsBy(account) {
+    return this.scores.get(account) || {};
   }
 
-  rating(pubkey, target) {
-    return this.ratingsBy(pubkey)[target] || null;
+  rating(account, target) {
+    return this.ratingsBy(account)[target] || null;
   }
 }

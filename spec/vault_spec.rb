@@ -24,6 +24,8 @@ class VaultSpec < Minitest::Test
     ReputableChat::App.images  = ReputableChat::Store::Images.new(Dir.mktmpdir)
     ReputableChat::App.origins  = [ORIGIN]
     ReputableChat::App.genesis = GenesisFixture.build
+    ReputableChat::App.book = ReputableChat::Chain::Book.new(ReputableChat::App.store,
+                                                             genesis: ReputableChat::App.genesis.record)
     @signing, @pubkey = new_user
     log_in_as(@signing, @pubkey)
   end

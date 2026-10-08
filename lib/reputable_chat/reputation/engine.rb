@@ -167,7 +167,7 @@ module ReputableChat
           # multiplier compounds, so a nought anywhere makes everything past it
           # count for nothing and a negative inverts what they recommend.
           weight = trust.fetch(rater, ONE)
-          { pubkey: rater, rating: value_of(rating) * weight, reported: rating.reported }
+          { account: rater, rating: value_of(rating) * weight, reported: rating.reported }
         end
       end
 

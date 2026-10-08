@@ -8,7 +8,7 @@ Rake::TestTask.new(:spec) do |t|
   t.warning = false
 end
 
-desc "Readable dump of the database (rake dump, or dump[messages] / dump[users,attestations])"
+desc "Readable dump of the database (rake dump, or dump[messages] / dump[identities,attestations])"
 task :dump, [:sections] do |_task, args|
   $LOAD_PATH.unshift "lib"
   require "reputable_chat/dump"
@@ -20,7 +20,7 @@ task :dump, [:sections] do |_task, args|
   puts
 
   store = ReputableChat::Store::Database.new(url)
-  # Rake splits on the commas inside the brackets itself, so dump[users,vaults]
+  # Rake splits on the commas inside the brackets itself, so dump[identities,vaults]
   # arrives as one named argument and one extra rather than as a single string.
   # Reading only the named one silently dumped the first section and dropped the
   # rest, which looks exactly like a section being empty.

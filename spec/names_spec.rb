@@ -13,10 +13,10 @@ require "json"
 class NamesSpec < Minitest::Test
   SCRIPT = File.expand_path("names.mjs", __dir__)
 
-  A = "a" * 43
-  B = "b" * 43
-  C = "c" * 43
-  D = "d" * 43
+  A = "a" * 64
+  B = "b" * 64
+  C = "c" * 64
+  D = "d" * 64
 
   def setup
     skip "node is not installed" unless system("node", "--version", out: File::NULL, err: File::NULL)
@@ -92,12 +92,12 @@ class NamesSpec < Minitest::Test
     assert_empty seen.fetch("forgetting_a_friend")
   end
 
-  # A vault written before friends carried handles holds bare keys. They read
+  # A vault written before friends carried handles holds bare account IDs. They read
   # as friended at the beginning of time, which is what they were.
   def test_an_older_vault_still_loads
     entry = seen.fetch("old_vaults_normalize").first
 
-    assert_equal A, entry.fetch("pubkey")
+    assert_equal A, entry.fetch("account")
     assert_equal 0, entry.fetch("at")
   end
 
@@ -134,7 +134,7 @@ class NamesSpec < Minitest::Test
   # RULE: friends and blocked accounts leave the set. One is ranked above it,
   # the other is never shown, so a record of either is one nothing reads.
   def test_a_sighting_can_be_forgotten
-    assert_equal [B], seen.fetch("forgetting").map { |entry| entry.fetch("pubkey") }
+    assert_equal [B], seen.fetch("forgetting").map { |entry| entry.fetch("account") }
   end
 
   # RULE: over budget, the newest sightings go. Seniority is the entire content
@@ -147,7 +147,7 @@ class NamesSpec < Minitest::Test
   # happened is the whole point of the record.
   def test_merging_keeps_the_earlier_sighting
     merged = seen.fetch("merge_keeps_the_earlier")
-    first = merged.find { |entry| entry.fetch("pubkey") == A }
+    first = merged.find { |entry| entry.fetch("account") == A }
 
     assert_equal 2, first.fetch("at")
     assert_equal 2, merged.length, "the other device's sightings survive"

@@ -4,10 +4,10 @@ import {
   rememberFriend, forgetFriend, refreshFriendHandle, normalizeFriends,
 } from "../public/js/names.js";
 
-const A = "a".repeat(43);
-const B = "b".repeat(43);
-const C = "c".repeat(43);
-const D = "d".repeat(43);
+const A = "a".repeat(64);
+const B = "b".repeat(64);
+const C = "c".repeat(64);
+const D = "d".repeat(64);
 
 const joes = { [A]: "Joe", [B]: "Joe", [C]: "Ada" };
 
@@ -18,13 +18,13 @@ console.log(JSON.stringify({
 
   friend_beats_older_sighting: resolveNames({
     handles: joes,
-    friends: [{ pubkey: B, handle: "Joe", at: 90 }],
-    seen: [{ pubkey: A, handle: "Joe", at: 1 }],
+    friends: [{ account: B, handle: "Joe", at: 90 }],
+    seen: [{ account: A, handle: "Joe", at: 1 }],
   }),
 
   friends_use_claim_age: resolveNames({
     handles: joes,
-    friends: [{ pubkey: A, handle: "Joe", at: 1 }, { pubkey: B, handle: "Joe", at: 5 }],
+    friends: [{ account: A, handle: "Joe", at: 1 }, { account: B, handle: "Joe", at: 5 }],
     seen: [],
   }),
 
@@ -33,7 +33,7 @@ console.log(JSON.stringify({
   newcomer_renames_onto_a_held_handle: resolveNames({
     handles: joes,
     friends: refreshFriendHandle(
-      [{ pubkey: A, handle: "Joe", at: 1 }, { pubkey: B, handle: "Ada", at: 5 }],
+      [{ account: A, handle: "Joe", at: 1 }, { account: B, handle: "Ada", at: 5 }],
       B, "Joe", 99,
     ),
     seen: [],
@@ -42,7 +42,7 @@ console.log(JSON.stringify({
   old_friend_renames_onto_a_newer_one: resolveNames({
     handles: joes,
     friends: refreshFriendHandle(
-      [{ pubkey: A, handle: "Ada", at: 1 }, { pubkey: B, handle: "Joe", at: 5 }],
+      [{ account: A, handle: "Ada", at: 1 }, { account: B, handle: "Joe", at: 5 }],
       A, "Joe", 99,
     ),
     seen: [],
@@ -50,21 +50,21 @@ console.log(JSON.stringify({
 
   // The list order is a different clock and does not move.
   rename_keeps_list_position: refreshFriendHandle(
-    [{ pubkey: A, handle: "Joe", at: 1 }, { pubkey: B, handle: "Ada", at: 5 }],
+    [{ account: A, handle: "Joe", at: 1 }, { account: B, handle: "Ada", at: 5 }],
     A, "Bob", 99,
-  ).map((entry) => entry.pubkey),
+  ).map((entry) => entry.account),
 
   remembering_a_friend: rememberFriend([], A, "Joe", 7),
   remembering_twice_is_once: rememberFriend(
-    [{ pubkey: A, handle: "Joe", at: 7 }], A, "Joe", 99,
+    [{ account: A, handle: "Joe", at: 7 }], A, "Joe", 99,
   ),
-  forgetting_a_friend: forgetFriend([{ pubkey: A, handle: "Joe", at: 7 }], A),
+  forgetting_a_friend: forgetFriend([{ account: A, handle: "Joe", at: 7 }], A),
   old_vaults_normalize: normalizeFriends([A]),
 
   sightings_use_seniority: resolveNames({
     handles: joes,
     friends: [],
-    seen: [{ pubkey: B, handle: "Joe", at: 5 }, { pubkey: A, handle: "Joe", at: 9 }],
+    seen: [{ account: B, handle: "Joe", at: 5 }, { account: A, handle: "Joe", at: 9 }],
   }),
 
   // Neither chosen nor seen: sorts last, so a stranger never takes a name off
@@ -72,26 +72,26 @@ console.log(JSON.stringify({
   stranger_loses: resolveNames({
     handles: { [A]: "Joe", [D]: "Joe" },
     friends: [],
-    seen: [{ pubkey: A, handle: "Joe", at: 1 }],
+    seen: [{ account: A, handle: "Joe", at: 1 }],
   }),
 
   rename_restarts_seniority: recordSighting(
-    [{ pubkey: A, handle: "Joe", at: 1 }], A, "Bob", 50,
+    [{ account: A, handle: "Joe", at: 1 }], A, "Bob", 50,
   ),
   same_handle_keeps_seniority: recordSighting(
-    [{ pubkey: A, handle: "Joe", at: 1 }], A, "Joe", 50,
+    [{ account: A, handle: "Joe", at: 1 }], A, "Joe", 50,
   ),
 
-  forgetting: forget([{ pubkey: A, handle: "Joe", at: 1 }, { pubkey: B, handle: "Ada", at: 2 }], A),
+  forgetting: forget([{ account: A, handle: "Joe", at: 1 }, { account: B, handle: "Ada", at: 2 }], A),
 
   prune_keeps_the_oldest: prune([
-    { pubkey: A, handle: "x", at: 3 },
-    { pubkey: B, handle: "y", at: 1 },
-    { pubkey: C, handle: "z", at: 2 },
+    { account: A, handle: "x", at: 3 },
+    { account: B, handle: "y", at: 1 },
+    { account: C, handle: "z", at: 2 },
   ], 2).map((entry) => entry.at),
 
   merge_keeps_the_earlier: merge(
-    [{ pubkey: A, handle: "Joe", at: 9 }],
-    [{ pubkey: A, handle: "Joe", at: 2 }, { pubkey: B, handle: "Ada", at: 4 }],
+    [{ account: A, handle: "Joe", at: 9 }],
+    [{ account: A, handle: "Joe", at: 2 }, { account: B, handle: "Ada", at: 4 }],
   ),
 }));

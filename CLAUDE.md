@@ -33,7 +33,7 @@ bundle exec rake spec       # full suite (browser tests skip without `npm instal
 npm install                 # once, for the browser tests
 bundle exec rake curve      # print current curve and ladder
 bundle exec rake dump       # readable dump of the database
-bundle exec rake "dump[messages,emotes]"      # just those sections
+bundle exec rake "dump[messages,reactions]"   # just those sections
 bundle exec rake genesis    # development genesis (already committed)
 RACK_ENV=production bundle exec rake genesis   # production genesis (once, ever)
 bundle exec rake host       # development host account (already committed)
@@ -66,7 +66,8 @@ inventing a word for something that already has one.
 - **Signed payload shapes.** `cryptography/payload.rb` and the `*Payload` helpers in
   `public/js/identity.js` must stay in lockstep for the same reason.
 - **Record hashes.** `cryptography/record.rb` and `public/js/record.js` must
-  agree. If they drift, every `ack` points at a record the other side cannot
+  agree, and both must be what the rules say: SHA-256 over the payload, a
+  newline and the signature, with nothing in front. If they drift, every `ack` points at a record the other side cannot
   find and no reference resolves. `spec/record_parity_spec.rb` guards it.
 - **The genesis record.** `config/genesis/<environment>.json` is the bottom of
   the chain. Regenerating one orphans every record that acknowledged the old
@@ -75,9 +76,11 @@ inventing a word for something that already has one.
 - **Two accounts, two environments each, and only development's are public.**
   The genesis account is the developer's; the host account
   (`config/host/`) is a server's own, optional, and must acknowledge the
-  genesis. `config/genesis/development.seed` and `config/host/development.seed`
-  are **committed on purpose** — those identities are public, so a fresh clone
-  can sign as either without being handed a secret. Every other seed is
+  genesis. `config/genesis/development.seed` and `config/host/development.seed`,
+  and the `.master.seed` beside each, are **committed on purpose** — those
+  identities are public, so a fresh clone can sign as either without being
+  handed a secret. Each account has a working key and a master key, from two
+  separate seed phrases. Every other seed is
   gitignored, 0600, and never printed. `.gitignore` ignores every `*.seed` in
   both folders and then un-ignores development's, so a new environment's seed
   is refused by default rather than committed by omission.
@@ -116,7 +119,13 @@ inventing a word for something that already has one.
   states, verifies every record, and checks each against the rules it is an
   example of. `spec/fixtures/examples_broken.md` holds three correctly signed
   records that each break a rule, because a checker that has quietly stopped
-  looking passes everything.
+  looking passes everything. The same spec runs both files through
+  `Chain::Ledger`, the server's own validator, so the examples and the code
+  that decides what a server accepts cannot drift apart either.
+- **The genesis carries the rules file.** The development genesis's `rules`
+  field is `docs/project/rules/v0.001.md`, stripped of surrounding whitespace.
+  Edit that file and `spec/chain_spec.rb` fails until the genesis is
+  regenerated, which orphans everything that acknowledged it.
 - **One home per rule.** A rule written in two places gets edited in one of
   them, and the two copies then disagree about which records are valid. That
   happened three times in one afternoon of editing, each time as a paraphrase

@@ -1,6 +1,5 @@
 {
-  "pubkey": "lhzID3ISWHP9WXdxIEcAtU1P6ubtUZZQo2UKiPbwxlk",
-  "payload": "{\"ack\":\"112c2edcbf67a20661c50dfce16917206be7147f01845323e86a96b7f838eeba\",\"bio\":\"This server's own account\",\"handle\":\"Host\",\"icon\":null,\"master_pubkey\":null,\"note\":null,\"previous_pubkey\":null,\"pubkey\":\"lhzID3ISWHP9WXdxIEcAtU1P6ubtUZZQo2UKiPbwxlk\",\"purpose\":\"reputablechat:identity:v1\",\"revision\":1,\"ts\":1790197973}",
-  "signature": "6eAlRW6E00r82_jcdOrSmf_JIM-zy4lXVxuKdN0JDJt9cVm8R0T9ApQgTyXS81-ZcNiz8ghouPvun4upun5vCA",
-  "hash": "600d4022324d6d9fd9f9735ec55a59af778c3938c7afc2f6e0a2b05301e2e33c"
+  "payload": "{\"ack\":[\"64e2871ebe82b150166fb49980318d5755a1fed92bcfb219c39b17de30f79a10\"],\"body\":\"This server's own account\",\"mpubkey\":\"Etbecvehao8cZrkSVD2cgQ9phPQABXtFY5EJ0LCLid8\",\"pubkey\":\"AedaKoXjgxBTbW6IFdLTpDBwVVO5lFlGX_qdN1SzNqw\",\"title\":\"Host\",\"ts\":1791484571,\"type\":\"reputablechat:identity:v0.001\"}",
+  "signature": "2wuRoc6tIqHF61rMJhiPFBYThRcPsHj4zID97bldYV5nVw-Y0icANQBtkaxOcSf3yPOhxgvMqO-mezlhTFXAAg",
+  "hash": "7885b38c3e1c2ebbda0374751c3165e613998eeb223f62f3a25bda97b9cc080a"
 }
