@@ -29,7 +29,9 @@ module Servers
   def network = @network ||= Network.new({})
 
   # A server at http://<name>, peering with the others named.
-  def boot(name, peers: [], clock: -> { Time.now.to_i }, host: {})
+  # Live at once unless told otherwise, as a server with nothing to catch up
+  # with would be.
+  def boot(name, peers: [], clock: -> { Time.now.to_i }, host: {}, live: true)
     dir = Dir.mktmpdir("agnostic-#{name}")
     (@dirs ||= []) << dir
     settings = Agnostic::Settings.new(
@@ -37,6 +39,7 @@ module Servers
         "peers" => { "urls" => peers.map { |p| "http://#{p}" } } }, env: { "RACK_ENV" => "development" }
     )
     server = Agnostic::Server.new(settings: settings, clock: clock, http: network)
+    server.go_live if live
     network.apps["http://#{name}"] = server.app
     server
   end

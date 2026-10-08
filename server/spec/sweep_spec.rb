@@ -193,7 +193,8 @@ class TrustedProxySpec < Minitest::Test
 end
 
 # Once caught up, a server looks at each of its servers' latest records for a
-# chain split, and stops for an administrator if it finds one.
+# chain split. Until then -- and after a split, until an administrator has
+# picked a side -- it is not live: it has declared nothing and answers no one.
 class SplitCheckSpec < Minitest::Test
   include Servers
 
@@ -201,19 +202,37 @@ class SplitCheckSpec < Minitest::Test
     @now = Time.now.to_i
   end
 
-  def test_no_split_and_the_server_goes_live
+  def status(server) = Rack::MockRequest.new(server.app).get("/api").status
+
+  def test_until_caught_up_a_server_has_no_declaration_and_answers_no_one
     alpha = boot("alpha", clock: -> { @now }, host: { "url" => "http://alpha" })
     alpha.beat_and_sync
-    fresh = boot("fresh", peers: ["alpha"], clock: -> { @now })
-    fresh.send(:catch_up)
+    fresh = boot("fresh", peers: ["alpha"], clock: -> { @now }, live: false)
 
-    assert_nil fresh.halted
+    refute fresh.host.declared?
+    assert_equal 503, status(fresh)
+    assert_nil fresh.beat_and_sync
+
+    fresh.catch_up
+    assert fresh.live?
+    assert_equal 200, status(fresh)
     assert_equal :accepted, fresh.beat_and_sync.status
   end
 
-  # Relay's heartbeats went 256 past a record that alpha's latest records
-  # still hold: the two servers are on different sides of a split.
-  def test_a_split_stops_the_server_until_an_administrator_resumes_it
+  # A declaration acknowledging only the genesis would be left behind by any
+  # server with more than 256 heartbeats, so it acknowledges where the chain is.
+  def test_the_declaration_acknowledges_the_latest_heartbeats_it_caught_up_to
+    alpha = boot("alpha", clock: -> { @now }, host: { "url" => "http://alpha" })
+    alpha.beat_and_sync
+    fresh = boot("fresh", peers: ["alpha"], clock: -> { @now }, live: false)
+    fresh.catch_up
+
+    assert_includes fresh.host.declaration.ack, alpha.heartbeat.previous.digest
+  end
+
+  # Relay's heartbeats went 256 past a record alpha's latest records still
+  # hold: the two servers are on different sides of a split.
+  def split_network
     alpha = boot("alpha", clock: -> { @now }, host: { "url" => "http://alpha" })
     alpha.beat_and_sync
     relay = boot("relay", clock: -> { @now }, host: { "url" => "http://relay" })
@@ -229,16 +248,39 @@ class SplitCheckSpec < Minitest::Test
       beats << relay.host.sign("heartbeat", { "ack" => [beats.last.digest], "body" => "", "ts" => @now })
       relay.ingest.submit(beats.last)
     end
+    [alpha, relay, beats.last]
+  end
 
-    fresh = boot("fresh", peers: %w[alpha relay], clock: -> { @now })
-    fresh.send(:catch_up)
+  def test_a_split_stops_the_server_until_the_administrator_picks_a_side
+    _, relay, newest = split_network
+    fresh = boot("fresh", peers: %w[alpha relay], clock: -> { @now }, live: false)
+    fresh.catch_up
 
-    refute_nil fresh.halted
+    assert_equal :halted, fresh.state
     assert(fresh.halted["problems"].any? { |p| p.include?("orphaned") })
-    assert_nil fresh.beat_and_sync, "a stopped server published a heartbeat"
+    refute fresh.host.declared?
+    assert_equal 503, status(fresh)
+    assert_equal({ "http://alpha" => [:left_behind], "http://relay" => [:went_on] }, fresh.sides)
 
-    fresh.resume
-    assert_nil fresh.halted
-    refute_nil fresh.beat_and_sync
+    fresh.choose("http://relay")
+    fresh.wait_for_choice
+    assert fresh.live?
+    assert fresh.store.peer("http://alpha")[:forgotten], "the server on the other side is still synced with"
+    refute fresh.store.peer("http://relay")[:forgotten]
+    assert_includes fresh.host.declaration.ack, newest.digest
+    assert_equal :accepted, fresh.beat_and_sync.status
+    assert relay.store.known?(fresh.heartbeat.previous.digest)
+  end
+
+  # The same check runs on every start, so a server offline through a split
+  # wakes up stopped rather than picking a side by itself.
+  def test_a_stop_survives_a_restart
+    split_network
+    fresh = boot("fresh", peers: %w[alpha relay], clock: -> { @now }, live: false)
+    fresh.catch_up
+    again = Agnostic::Server.new(settings: fresh.settings, clock: -> { @now }, http: network)
+    again.catch_up
+
+    assert_equal :halted, again.state
   end
 end

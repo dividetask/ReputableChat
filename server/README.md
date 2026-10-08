@@ -72,12 +72,17 @@ into `data/<environment>/`:
   the server never reads it again. **Move it off the server**: it is what
   moves the account to a new working key if this machine's is ever taken, and
   that only works if it was not taken with it. The server says so on the
-  boot that makes it.
+  boot that makes it. Its public key stays behind in `host-master.pub`.
 
-The account's first identity declaration, in `host.json` beside them,
-acknowledges the genesis. Its handle, bio and `url` come from `host:` in
-`config/server.yml`; when any of them changes, the next boot publishes a new
-declaration. The `url` is where other servers reach this one -- a server is
+The account is not declared on first boot. Its first identity declaration,
+written to `host.json` beside them, is made when the server goes live, once
+it has caught up (see **Catching up**), and acknowledges the latest
+heartbeats it caught up to -- at most 16, heartbeats first, the genesis only
+when there is nothing else. A declaration acknowledging nothing newer than
+the genesis would be left behind by any server with more than 256 heartbeats
+(section 10), and could never be joined. Its handle, bio and `url` come from
+`host:` in `config/server.yml`; when any of them changes, going live
+publishes a new declaration. The `url` is where other servers reach this one -- a server is
 known by its account, so a server that wants live updates from its peers
 declares the address they can reach it at.
 Keys are derived from the phrases exactly as the browser derives them
@@ -165,11 +170,24 @@ those servers for its latest records -- what nothing on it acknowledges yet
 -- and fetches whatever of their history it lacks. If one of them holds a
 record the rules refuse for holding both sides of a split, or their latest
 records taken together hold a record and the heartbeat that orphaned it
-(section 10), the server stops: it publishes no heartbeats and syncs with no
-one until an administrator has looked. It keeps answering other servers
-meanwhile. `bundle exec rake status` says why it stopped,
-`bundle exec rake "forget[<url>]"` stops syncing with a server, and
-`bundle exec rake resume` goes on.
+(section 10), the server stops and waits for its administrator to pick a side.
+
+**Not live until then.** Until a server has caught up -- and after a split,
+until a side is picked -- it has published nothing, not even its account's
+declaration, and its API answers every request with 503: it has nothing yet
+it should vouch for, and since no other server has its declaration, none has
+reason to contact it. The check runs on every start, so a server that was
+offline through a split wakes up stopped rather than settling it alone.
+
+**Picking a side.** `bundle exec rake status` lists what split, and for each
+split which side each server is on: *went on* (it holds the heartbeat that
+left a record behind) or *left behind* (it holds that record and not the
+heartbeat). `bundle exec rake "choose[<url>]"` follows the side that server
+is on: servers on the other side are forgotten, the account is declared
+acknowledging the chosen server's latest records, and the server goes live.
+
+A split that happens while a server is running is settled by the rules
+alone: its heartbeats stay on the side its own account is on.
 
 ## Which servers
 

@@ -29,7 +29,7 @@ module Agnostic
     # Each server gets its own subclass carrying its parts, so two servers can
     # run in one process -- as they do in the peer specs.
     class << self
-      attr_accessor :store, :ingest, :host, :genesis, :settings, :clock, :limiter
+      attr_accessor :store, :ingest, :host, :genesis, :settings, :clock, :limiter, :state
     end
 
     error do |e|
@@ -39,6 +39,13 @@ module Agnostic
     end
 
     route do |r|
+      # Not live -- still catching up, or stopped for a chain split -- means
+      # answering no one: this server has nothing it should vouch for yet.
+      case server.state&.call
+      when :catching_up then r.halt(503, { "error" => "this server is catching up with the chain" })
+      when :halted then r.halt(503, { "error" => "this server has stopped for a chain split" })
+      end
+
       r.on "api" do
         r.is { r.get { overview } }
         r.get("genesis") { server.genesis.to_wire }

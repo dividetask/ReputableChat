@@ -25,26 +25,30 @@ task :sweep, [:url] do |_task, args|
   puts "#{server.peers.catch_up(urls)} records new here"
 end
 
-desc "Whether this server has stopped for an administrator, and why"
+desc "Whether this server has stopped for a chain split, and which server is on which side"
 task :status do
   $LOAD_PATH.unshift File.expand_path("lib", __dir__)
   require "agnostic/server"
-  halted = Agnostic::Server.new.halted
-  if halted
-    puts "Stopped at #{Time.at(halted['at']).utc} for a chain split:"
-    halted["problems"].each { |p| puts "  #{p}" }
-    puts "Deal with it -- `rake \"forget[<url>]\"` stops syncing with a server -- then `rake resume`."
-  else
-    puts "Running."
+  server = Agnostic::Server.new
+  halted = server.halted
+  unless halted
+    puts "Not stopped."
+    next
   end
+
+  puts "Stopped at #{Time.at(halted['at']).utc} for a chain split:"
+  halted["problems"].each { |p| puts "  #{p}" }
+  puts "Sides, per split (went on: holds the heartbeat that left the record behind; left behind: holds the record):"
+  server.sides.each { |url, sides| puts "  #{url}: #{sides.map { |s| s ? s.to_s.tr('_', ' ') : 'neither' }.join(', ')}" }
+  puts "Pick the side to follow: rake \"choose[<url>]\""
 end
 
-desc "Go on after a stop for a chain split"
-task :resume do
+desc "After a chain split, follow the side a server is on: rake \"choose[https://chain.example.org]\""
+task :choose, [:url] do |_task, args|
   $LOAD_PATH.unshift File.expand_path("lib", __dir__)
   require "agnostic/server"
-  Agnostic::Server.new.resume
-  puts "Resumed: heartbeats start again at the next one due."
+  Agnostic::Server.new.choose(args[:url].to_s.chomp("/"))
+  puts "Following #{args[:url]}'s side; servers on the other side are forgotten. The server goes live shortly."
 end
 
 desc "Stop syncing with a server: rake \"forget[https://chain.example.org]\""

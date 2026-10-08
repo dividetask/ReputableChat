@@ -47,8 +47,8 @@ bundle exec rake setup      # a fresh server: handle, address, other servers
 bundle exec puma            # http://localhost:9292; PEERS=url,url to sync
 bundle exec rake peers      # servers it syncs with, failing, or forgotten
 bundle exec rake "sweep[<url>,<url>]"   # copy the chain from servers at once
-bundle exec rake status     # stopped for a chain split? and why
-bundle exec rake resume     # go on after one
+bundle exec rake status     # stopped for a chain split? which server is on which side
+bundle exec rake "choose[<url>]"  # follow that server's side and go live
 bundle exec rake "forget[<url>]"  # stop syncing with a server
 bundle exec rake host       # this server's host account (made on first boot)
 bundle exec rake ignored    # peers ignored for a clock over 10 minutes off
@@ -160,8 +160,9 @@ inventing a word for something that already has one.
   development record that acknowledged the old one.
 - **The server's host account phrases** are generated on first boot into
   `server/data/<environment>/`: `host.seed` (working) and `host-master.seed`
-  (master, to be moved off the server; never read again), both 0600, beside
-  the declaration `host.json`. The server refuses to boot without the working
+  (master, to be moved off the server; never read again), both 0600, with the
+  master public key in `host-master.pub`. The declaration `host.json` is
+  written only when the server goes live, after catching up. The server refuses to boot without the working
   phrase or when it does not match the declaration. `server/lib/agnostic/seed.rb`
   derives keys the browser's way, and `server/spec/seed_spec.rb` holds its KDF
   parameters equal to `seed.kdf` in `config/reputation.yml` -- change one

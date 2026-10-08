@@ -88,13 +88,13 @@ class ServerSpec < Minitest::Test
     settings = Agnostic::Settings.new({ "data_dir" => server.settings.dig("data_dir"),
                                         "host" => { "handle" => "Alpha", "bio" => "Ops", "url" => "http://203.0.113.7:9292" } },
                                       env: { "RACK_ENV" => "development" })
-    again = Agnostic::Server.new(settings: settings, http: network)
+    again = Agnostic::Server.new(settings: settings, http: network).tap(&:go_live)
     latest = again.store.by_account(again.host.id, kind: "identity").max_by(&:seq)
 
     assert_equal server.host.id, again.host.id
     assert_equal [server.host.id, "Alpha", "Ops", "http://203.0.113.7:9292"], latest.fields.values_at("id", "title", "body", "url")
 
-    third = Agnostic::Server.new(settings: settings, http: network)
+    third = Agnostic::Server.new(settings: settings, http: network).tap(&:go_live)
     assert_equal 2, third.store.by_account(again.host.id, kind: "identity").size, "an unchanged profile was declared again"
   end
 

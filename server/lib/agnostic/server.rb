@@ -28,7 +28,7 @@ module Agnostic
 
     class BootError < StandardError; end
 
-    attr_reader :settings, :store, :rules, :ingest, :host, :heartbeat, :peers, :genesis, :ratings
+    attr_reader :settings, :store, :rules, :ingest, :host, :heartbeat, :peers, :genesis, :ratings, :state
 
     def initialize(settings: Settings.load, clock: -> { Time.now.to_i }, http: nil)
       @settings = settings
@@ -39,7 +39,8 @@ module Agnostic
       @rules = Rules.new(store: store, genesis: genesis)
       install_genesis
       @ingest = Ingest.new(store: store, rules: rules, settings: settings, clock: clock)
-      @host = declare_host
+      @state = :catching_up
+      @host = load_host
       @heartbeat = Heartbeat.new(store: store, ingest: ingest, host: host, settings: settings, clock: clock)
       @peers = Peers.new(store: store, ingest: ingest, settings: settings, http: http, clock: clock, host: host)
       peers.seed(settings.peers)
@@ -55,6 +56,8 @@ module Agnostic
       klass.genesis = genesis
       klass.settings = settings
       klass.clock = @clock
+      server = self
+      klass.state = -> { server.state }
       trusted = settings.trusted_proxies
       # Rack takes a caller's address from X-Forwarded-For only past proxies
       # this filter trusts. Out of the box it trusts any private address, so
@@ -65,13 +68,18 @@ module Agnostic
       klass.freeze.app
     end
 
-    # Heartbeats at the configured interval, each followed at once by a sync
-    # with every server. The timer thread waits between them and this server
-    # contacts no one meanwhile; the API stays up throughout, for any server
-    # that wants to reach this one.
+    # Catches up, then heartbeats at the configured interval, each followed
+    # at once by a sync with every server. Until it has caught up -- and,
+    # after a split, until an administrator has chosen a side -- the server is
+    # not live: it publishes nothing and answers no one.
     def start
       Thread.new do
-        catch_up
+        begin
+          catch_up
+          wait_for_choice while state == :halted
+        rescue StandardError => e
+          warn "#{e.class}: #{e.message}"
+        end
         loop do
           begin
             beat_and_sync
@@ -85,38 +93,96 @@ module Agnostic
       self
     end
 
-    # Before going live -- before its first heartbeat after a restart, too --
-    # a server sweeps the chain from the servers it was given at setup,
-    # resuming where it stopped.
-    #
-    # Then it looks for a chain split among those servers' latest records. A
-    # split is not something it should settle alone, so it stops: no
-    # heartbeats and no syncs until an administrator has looked
-    # (`rake status`) and said to go on (`rake resume`). It keeps answering
-    # other servers meanwhile.
+    def live? = state == :live
+
+    # Sweeps the chain from the servers given at setup, resuming where it
+    # stopped, then looks for a chain split among their latest records.
+    # Without one it goes live. With one it stops, and an administrator picks
+    # the side to follow (`rake status`, then `rake "choose[<url>]"`). The
+    # same happens on every start, so a server that wakes up after a long
+    # time offline to find a split has its administrator settle it too.
     def catch_up
+      return @state = :halted if halted
+
       urls = store.peers.select { |p| p[:source] == "settings" && !p[:forgotten] }.map { |p| p[:url] }
       peers.catch_up(urls)
-      problems = peers.check_splits(urls)
-      halt(problems) unless problems.empty?
-    rescue StandardError => e
-      warn "catching up failed: #{e.message}"
+      report = peers.check_splits(urls)
+      return halt(report) unless report[:problems].empty?
+
+      go_live(report[:tips].values.flatten)
     end
 
+    # What a stop for a split recorded: the problems, each server's latest
+    # records, and the pairs that split them.
     def halted = (json = store.meta("halted")) && !json.empty? ? JSON.parse(json) : nil
 
-    def halt(problems)
-      store.save_meta("halted", JSON.generate("at" => @clock.call, "problems" => problems))
-      warn "STOPPED: a chain split among the servers given at setup. No heartbeats until an " \
-           "administrator runs `rake status` and then `rake resume`.\n  #{problems.join("\n  ")}"
+    def halt(report)
+      store.save_meta("halted", JSON.generate("at" => @clock.call, "problems" => report[:problems],
+                                              "tips" => report[:tips], "pairs" => report[:pairs]))
+      warn "STOPPED: a chain split among the servers given at setup. Nothing is published or answered until " \
+           "an administrator runs `rake status` and `rake \"choose[<url>]\"`.\n  #{report[:problems].join("\n  ")}"
+      @state = :halted
     end
 
-    def resume = store.save_meta("halted", "")
+    # Which side of each splitting pair every server is on: :went_on when it
+    # holds the heartbeat that orphaned the record, :left_behind when it holds
+    # the record and not that heartbeat.
+    def sides
+      stop = halted or return {}
+      stop["tips"].to_h do |url, tips|
+        held = store.closure(tips)
+        [url, stop["pairs"].map do |orphan, orphaner|
+          if held.include?(orphaner) then :went_on
+          elsif held.include?(orphan) then :left_behind
+          end
+        end]
+      end
+    end
+
+    # The administrator's answer: follow the side the server at url is on.
+    # Servers on the other side of any pair are forgotten.
+    def choose(url)
+      stop = halted or raise ArgumentError, "this server has not stopped for a split"
+      all = sides
+      chosen = all.fetch(url) { raise ArgumentError, "#{url} is not one of the servers that split" }
+      all.each do |other, side|
+        next if other == url
+
+        opposite = side.zip(chosen).any? { |a, b| a && b && a != b }
+        store.update_peer(other, forgotten: true) if opposite
+      end
+      store.save_meta("follow", JSON.generate(stop["tips"].fetch(url)))
+      store.save_meta("halted", "")
+    end
+
+    # While stopped, waits for the administrator's choice, made by
+    # `rake choose` in another process.
+    def wait_for_choice
+      sleep 5 while halted
+      go_live(JSON.parse(store.meta("follow") || "[]"))
+    end
+
+    # Declares the host account, if it never has been, acknowledging where the
+    # chain now is -- the latest records of the side it joins -- and publishes
+    # a new declaration if the handle, bio or url have changed.
+    def go_live(tips = [])
+      submit_declaration(host.declare!(ack: anchor(tips), profile: profile, ts: @clock.call)) unless host.declared?
+      redeclare(host)
+      @state = :live
+    end
+
+    # At most 16 records to acknowledge, heartbeats first, newest first; the
+    # genesis when there is nothing else.
+    def anchor(tips)
+      records = store.fetch_many(tips.uniq).select { |r| r.version == Rules::VERSION }
+      chosen = records.sort_by { |r| [r.heartbeat? ? 0 : 1, -r.seq] }.first(Rules::ACK_RECORDS).map(&:digest)
+      chosen.empty? ? [genesis.digest] : chosen
+    end
 
     # Any change in what this server says of other servers is published just
     # before the heartbeat, so the heartbeat carries it to them.
     def beat_and_sync
-      return if halted || !heartbeat.due?
+      return unless live? && heartbeat.due?
 
       ratings.publish
       result = heartbeat.beat
@@ -167,12 +233,12 @@ module Agnostic
       store.insert(genesis) unless store.known?(genesis.digest)
     end
 
-    def declare_host
+    # The host account's phrases, made on first boot. Its declaration, if it
+    # has one, goes back into the store in case the database is new.
+    def load_host
       check_url
-      host = HostAccount.load_or_create(dir: settings.data_dir, genesis: genesis, profile: profile,
-                                       words: settings.integer("host", "seed_words"), clock: @clock)
-      submit_declaration(host.declaration)
-      redeclare(host)
+      host = HostAccount.load_or_create(dir: settings.data_dir, words: settings.integer("host", "seed_words"))
+      submit_declaration(host.declaration) if host.declared?
       host
     end
 

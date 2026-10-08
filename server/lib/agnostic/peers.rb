@@ -62,7 +62,7 @@ module Agnostic
     # one its latest identity declaration names.
     def learn(record)
       return unless %w[identity heartbeat].include?(record.kind)
-      return if @host && record.account == @host.id
+      return if @host&.id && record.account == @host.id
 
       account = record.account
       return unless record.heartbeat? || @store.by_account(account, kind: "heartbeat").any?
@@ -277,10 +277,13 @@ module Agnostic
     # and looks for a chain split (section 10): a server holding a record the
     # rules refuse for holding both sides of one, or the servers' latest
     # records, taken together, holding a record and the heartbeat that
-    # orphaned it. Returns what it found, one line each; empty when nothing.
+    # orphaned it. Returns what it found (problems, one line each, empty when
+    # nothing), each server's latest records (tips), and the record and
+    # heartbeat of each split found (pairs).
     def check_splits(urls)
       problems = []
       latest = []
+      tips_of = {}
       budget = @settings.integer("peers", "fetch_missing")
       urls.each do |url|
         next unless contact(url)
@@ -299,7 +302,8 @@ module Agnostic
           orphan = Array(result.problems).find { |p| p.include?("orphaned") }
           problems << "#{url} holds #{hash}, which #{orphan.sub(/\Athe history/, 'has a history that')}" if orphan
         end
-        latest.concat(tips.select { |h| @store.known?(h) })
+        tips_of[url] = tips.select { |h| @store.known?(h) }
+        latest.concat(tips_of[url])
       rescue StandardError => e
         failed(url, "split check failed: #{e.message}")
       end
@@ -308,7 +312,9 @@ module Agnostic
                       genesis: @ingest.rules.genesis.digest)
       together = []
       @ingest.rules.split(nil, view, together)
-      problems + together.map { |p| "the servers' latest records together: #{p}" }
+      problems += together.map { |p| "the servers' latest records together: #{p}" }
+      pairs = problems.filter_map { |p| p.match(/holds ([0-9a-f]{64}) and ([0-9a-f]{64}), a heartbeat/)&.captures }.uniq
+      { problems: problems, tips: tips_of, pairs: pairs }
     end
 
     # --- sync ------------------------------------------------------------------
@@ -341,7 +347,7 @@ module Agnostic
       end
 
       @store.save_peer_host(url, host) if Record.hash?(host)
-      return false if @host && host == @host.id
+      return false if @host&.id && host == @host.id
 
       !(host && @store.ignored?(host, at: @clock.call))
     rescue StandardError => e
@@ -349,7 +355,7 @@ module Agnostic
       false
     end
 
-    def own?(peer) = @host && peer[:host] == @host.id
+    def own?(peer) = @host&.id && peer[:host] == @host.id
 
     # Sends whatever the peer says it is still missing that this server holds
     # -- the mirror of fetch_missing, within the same kind of budget.
