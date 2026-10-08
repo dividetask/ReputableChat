@@ -5,7 +5,7 @@
 import { readFileSync } from "node:fs";
 import { createHash, webcrypto as wc } from "node:crypto";
 
-const FILE = process.argv[2] ?? new URL("../docs/project/rules/v0.001-examples.md", import.meta.url);
+const FILE = process.argv[2] ?? new URL("../../docs/project/rules/v0.001-examples.md", import.meta.url);
 const text = readFileSync(FILE, "utf8");
 const problems = [];
 const say = (m) => problems.push(m);

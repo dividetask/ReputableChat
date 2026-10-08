@@ -10,7 +10,7 @@ require "set"
 # text -- a rule with two homes drifts, and the drift decides whether an
 # implementer rejects a record or accepts it.
 class RulesTextSpec < Minitest::Test
-  RULES = File.expand_path("../docs/project/rules/v0.001.md", __dir__)
+  RULES = File.expand_path("../../docs/project/rules/v0.001.md", __dir__)
 
   NORMATIVE = /\b(invalid|refused|must|may only|valid only if|may not|cannot|never|is void)\b/i
 

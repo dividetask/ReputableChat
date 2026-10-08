@@ -16,7 +16,7 @@ require "tmpdir"
 # everything -- asserts that it rejects records written to break a rule.
 class ExamplesSpec < Minitest::Test
   SCRIPT   = File.expand_path("examples.mjs", __dir__)
-  EXAMPLES = File.expand_path("../docs/project/rules/v0.001-examples.md", __dir__)
+  EXAMPLES = File.expand_path("../../docs/project/rules/v0.001-examples.md", __dir__)
   BROKEN   = File.expand_path("fixtures/examples_broken.md", __dir__)
 
   def test_the_example_chain_breaks_no_rule_it_is_an_example_of
