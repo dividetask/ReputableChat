@@ -18,7 +18,8 @@ module ReputableChat
     # that is ~457 years against a memory-hard KDF. Seven words would be ~81
     # days. The KDF is not optional at any length.
     module Seed
-      WORDLIST_PATH = File.expand_path("../../../config/bip39-english.txt", __dir__)
+      # In shared/ at the root, the one copy both apps read.
+      WORDLIST_PATH = File.expand_path("../../../../shared/bip39-english.txt", __dir__)
       BITS_PER_WORD = 11
       CHECKSUM_BITS = 8
       MIN_WORDS     = 8

@@ -91,7 +91,7 @@ declares the address they can reach it at.
 Keys are derived from the phrases exactly as the browser derives them
 (Argon2id under the chat's `seed.kdf` parameters, which a spec holds equal),
 so either phrase can be typed into a client to act as the account.
-`config/bip39-english.txt` is the same wordlist as the chat's, checked by its
+`shared/bip39-english.txt` at the root is the wordlist, the one file both apps read, checked by its
 hash.
 
 ## Heartbeats

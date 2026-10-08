@@ -10,6 +10,7 @@ require_relative "origin"
 require_relative "cryptography/signature"
 require_relative "cryptography/canonical"
 require_relative "cryptography/payload"
+require_relative "cryptography/seed"
 require_relative "chain/mirror"
 require_relative "chain/connection"
 require_relative "chain/service"
@@ -482,7 +483,7 @@ module ReputableChat
     def serve_wordlist
       response["Content-Type"] = "text/plain; charset=utf-8"
       response["Cache-Control"] = "public, max-age=31536000, immutable"
-      File.read(File.join(opts[:root], "config", "bip39-english.txt"))
+      File.read(Cryptography::Seed::WORDLIST_PATH)
     end
 
     def serve_index

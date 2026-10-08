@@ -102,7 +102,7 @@ config/server.yml         optional origin, database and image paths, size limits
 config/reputation.yml     tunable reputation parameters (the defaults layer)
 config/emotes.yml         which reactions count positive, negative, neutral
 config/notices.yml        the notice kinds the chat shows, and takes from its clients
-config/bip39-english.txt  wordlist; one source of truth, served at /wordlist.txt
+../shared/bip39-english.txt  wordlist, at the root for both apps; served at /wordlist.txt
 
 lib/reputable_chat/
   app.rb                  Roda routes, CSP, sessions

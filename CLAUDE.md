@@ -32,6 +32,8 @@ specs; run commands from inside the one you are working on.
 - `chat/` — the chat app, browser client and its server. **Paths in this file
   are inside `chat/`** unless they start with `server/` or `docs/`.
 - `docs/` stays at the root: the rules belong to the chain, not to either app.
+- `shared/` holds files both apps read, such as the BIP39 wordlist. `host/`
+  (gitignored) holds the host account they share.
 
 ## Environment
 
@@ -242,6 +244,6 @@ downloading one. The application itself still ships no JavaScript dependencies.
 - `public/js/vendor-argon2.umd.min.js` — hash-wasm 4.12.0, `dist/argon2.umd.min.js`,
   from the npm registry. sha256
   `dcec617a2e1b700fa132d1583a186cb70611113395e869f2dd6cc82b415d3094`.
-- `config/bip39-english.txt` and `server/config/bip39-english.txt` — canonical
-  BIP39 English wordlist, the same file in both apps, sha256
+- `shared/bip39-english.txt` at the repository root — canonical BIP39 English
+  wordlist, the one copy both apps read, sha256
   `2f5eed53a4727b4bf8880d8f3f199efc90e58503646d9ff8eff3a2ed3b24dbda`.
