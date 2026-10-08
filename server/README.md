@@ -15,8 +15,10 @@ What it does:
   order it accepted them, or filtered by type prefix, account or target.
 - **Has an account of its own, the host account**, generated on first boot,
   and **publishes heartbeats** with it.
-- **Exchanges records with other servers, both ways.** It pulls what its peers
-  accepted since it last asked, and pushes what it accepts.
+- **Syncs with other servers at each heartbeat, both ways.** It pushes what
+  it accepted, offers its heartbeat, sends what the peer is missing, and pulls
+  what the peer accepted. A peer whose heartbeat is more than ten minutes from
+  this server's clock is ignored.
 
 It holds no vault, signs nobody in, stores no images, and computes no
 reputation.
@@ -90,6 +92,35 @@ acknowledge only v0.001 records.
 If acknowledging everything would hold both sides of a split (section 10), it
 leaves out the side its own account is not on.
 
+## Syncing
+
+Right after each heartbeat, the server syncs with every peer in turn:
+
+1. **Push** every record it accepted since the last sync, except to the peer it
+   came from.
+2. **Offer the heartbeat** with `POST /api/sync`.
+3. **Send what is missing**: the peer answers with the hashes it still needs,
+   and the server sends those it holds.
+4. **Pull** what the peer accepted since the last pull, fetching any missing
+   ancestors from it by hash.
+
+So records posted here reach the peers with the next heartbeat, not sooner.
+
+**Clocks.** A heartbeat offered for sync was signed a moment ago, so its `ts`
+is the sending server's clock. When it is more than
+`peers.max_clock_skew_seconds` (600) from the receiving server's clock, either
+way, the receiver refuses it and ignores that server from then on: its syncs
+are refused, and it is no longer pulled from or pushed to. A server is known
+by its host account, not its address. Before ignoring anyone the receiver
+checks that the heartbeat is valid and signed by the account it names, so a
+forged heartbeat cannot get an honest server ignored. Only the offered
+heartbeat is checked this way; older records sent as missing ancestors are
+not, since being old is what they are.
+
+Ignoring lasts until the operator says otherwise: `bundle exec rake ignored`
+lists who and why, and `bundle exec rake "forgive[<host account id>]"` stops
+ignoring one.
+
 ## The API
 
 | | |
@@ -101,6 +132,7 @@ leaves out the side its own account is not on.
 | `GET /api/records/<hash>` | one record, or 404 |
 | `GET /api/frontier` | hashes of the records nothing here acknowledges |
 | `POST /api/records` | `{"records": [...]}`, or one record on its own |
+| `POST /api/sync` | `{"heartbeat": ...}`: a peer's newest heartbeat; 403 when the peer is or becomes ignored |
 
 A record on the wire is `{"payload": "<canonical JSON>", "signature": "<base64url>"}`;
 the server adds `hash` when it serves one. A POST answers one result per
@@ -143,9 +175,13 @@ decision someone may want to make differently.
   v0.001 record and is checked as one. A record of any other version is
   refused, since this server cannot tell whether it is valid. Following a new
   version means implementing it here.
-- **The clock guideline is checked toward the future only** (600 seconds by
-  default). A record signed long ago legitimately arrives late when a server
-  catches up with a peer, and back-dating is what the split rule is for.
+- **The clock guideline** ("servers refuse records whose ts is far from their
+  own clock") is read two ways. Any record more than
+  `records.max_future_seconds` (600) ahead of the clock is refused. And a
+  peer's heartbeat, offered as it syncs, more than ten minutes off either way
+  gets that peer ignored (see **Syncing**). Records are not refused for being
+  old: they legitimately arrive late when a server catches up, and back-dating
+  is what the split rule is for.
 
 ## Known limits
 

@@ -16,6 +16,7 @@ module Agnostic
   #   GET  /api/records/<hash>       one record
   #   GET  /api/frontier             records nothing here acknowledges yet
   #   POST /api/records              {"records": [...]} or one record; each is checked
+  #   POST /api/sync                 {"heartbeat": ...}: a peer's newest heartbeat, its clock checked
   class App < Roda
     plugin :json, classes: [Array, Hash]
     plugin :json_parser, content_type_regexp: %r{\Aapplication/json\b}i,
@@ -27,7 +28,7 @@ module Agnostic
     # Each server gets its own subclass carrying its parts, so two servers can
     # run in one process -- as they do in the peer specs.
     class << self
-      attr_accessor :store, :ingest, :host, :genesis, :settings
+      attr_accessor :store, :ingest, :host, :genesis, :settings, :clock
     end
 
     error do |e|
@@ -42,6 +43,8 @@ module Agnostic
         r.get("genesis") { server.genesis.to_wire }
         r.get("host") { server.host.to_h }
         r.get("frontier") { { "records" => store.frontier.map(&:digest) } }
+
+        r.post("sync") { sync(r) }
 
         r.on "records" do
           r.is do
@@ -82,6 +85,45 @@ module Agnostic
       filters = %w[type account target].to_h { |k| [k.to_sym, r.params[k]] }.reject { |_, v| v.to_s.empty? }
       records = store.since(since, limit: size, **filters)
       { "records" => records.map(&:to_wire), "next" => records.last&.seq || since }
+    end
+
+    # A peer offering the heartbeat it has just published. Its ts says what the
+    # peer's clock read a moment ago, so a ts more than the allowed skew from
+    # this server's clock means the peer's clock is wrong or it is lying about
+    # time, and this server ignores it from then on. Only once the heartbeat
+    # is shown to be signed by the account it names: otherwise anyone could
+    # get an honest server ignored with a forged one.
+    def sync(r)
+      body = r.POST
+      record = Record.from_wire(body.is_a?(Hash) ? body["heartbeat"] : nil)
+      r.halt(400, { "error" => "heartbeat must be a heartbeat record" }) unless heartbeat?(record)
+
+      author = record.account
+      r.halt(403, { "error" => "this server ignores #{author}" }) if store.ignored?(author)
+
+      skew = record.ts - server.clock.call
+      allowed = server.settings.integer("peers", "max_clock_skew_seconds")
+      if skew.abs > allowed
+        verdict = server.ingest.rules.check(record)
+        unless verdict.valid?
+          r.halt(422, { "error" => "the heartbeat's ts is #{skew} seconds from this server's clock, " \
+                                   "and it could not be shown to be #{author}'s" })
+        end
+
+        reason = "its heartbeat #{record.digest} was #{skew} seconds from this server's clock, over the #{allowed} allowed"
+        store.ignore(author, reason: reason, at: server.clock.call)
+        r.halt(403, { "error" => "this server now ignores #{author}: #{reason}" })
+      end
+
+      result = server.ingest.submit(record).to_h
+      response.status = 202 if result["status"] == "pending"
+      { "results" => [result] }
+    rescue ArgumentError, Canonical::NotCanonical
+      r.halt(400, { "error" => "heartbeat must be a heartbeat record" })
+    end
+
+    def heartbeat?(record)
+      record.digest && record.heartbeat? && record.ts.is_a?(Integer) && Record.hash?(record.account)
     end
 
     def post(r)

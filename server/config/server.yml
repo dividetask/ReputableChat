@@ -42,11 +42,13 @@ pending:
   max_age_seconds: "3600"
 
 peers:
-  # Other servers to exchange records with, pulling what they hold and pushing
-  # what arrives here. Base URLs, such as "https://chain.example.org".
+  # Other servers to sync with after each heartbeat: pushing what arrived here,
+  # offering the heartbeat, and pulling what they hold. Base URLs, such as
+  # "https://chain.example.org".
   urls: []
-  pull_interval_seconds: "60"
-  push_interval_seconds: "5"
+  # A peer's heartbeat whose ts is further than this from this server's clock,
+  # either way, gets the peer ignored for good (rake ignored, rake forgive).
+  max_clock_skew_seconds: "600"
   # How many missing ancestors one pull may fetch from a peer by hash.
   fetch_missing: "1000"
   timeout_seconds: "10"

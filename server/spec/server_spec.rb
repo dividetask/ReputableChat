@@ -77,9 +77,9 @@ class ServerSpec < Minitest::Test
   end
 
   def test_settings_fall_back_to_defaults_rather_than_zero
-    settings = Agnostic::Settings.new({ "pending" => { "max_records" => "lots" }, "peers" => { "pull_interval_seconds" => "0" } }, env: {})
+    settings = Agnostic::Settings.new({ "pending" => { "max_records" => "lots" }, "peers" => { "max_clock_skew_seconds" => "0" } }, env: {})
     assert_equal 10_000, settings.integer("pending", "max_records")
-    assert_equal 60, settings.integer("peers", "pull_interval_seconds")
+    assert_equal 600, settings.integer("peers", "max_clock_skew_seconds")
   end
 
   def test_the_environment_wins_over_the_file

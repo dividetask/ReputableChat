@@ -2,7 +2,7 @@
 
 There are two servers in this repository, each in its own directory:
 
-- **`server/`, the agnostic server.** It knows records and the rules and nothing about the apps built on them. It checks every record against the rules before acknowledging it, stores and serves records, publishes heartbeats with its host account, and exchanges records with other servers. See [server/README.md](../../server/README.md).
+- **`server/`, the agnostic server.** It knows records and the rules and nothing about the apps built on them. It checks every record against the rules before acknowledging it, stores and serves records, publishes heartbeats with its host account, and syncs with other servers at each heartbeat, ignoring any whose clock is more than ten minutes off. See [server/README.md](../../server/README.md).
 - **`chat/`, the chat app.** The browser client and the server behind it: login, the vault, images, and the chat UI. It still signs the record shapes that came before the rules.
 
 What follows describes the chat app except where it says otherwise.

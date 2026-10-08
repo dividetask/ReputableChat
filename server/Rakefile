@@ -16,4 +16,23 @@ task :host do
   puts JSON.pretty_generate(server.host.to_h.reject { |k, _| k == "declaration" })
 end
 
+desc "List the servers this one ignores, and why"
+task :ignored do
+  $LOAD_PATH.unshift File.expand_path("lib", __dir__)
+  require "agnostic/settings"
+  require "agnostic/store"
+  Agnostic::Store.new(Agnostic::Settings.load.database_url).ignored.each do |row|
+    puts "#{row[:account]}  #{Time.at(row[:at]).utc}  #{row[:reason]}"
+  end
+end
+
+desc "Stop ignoring a server: rake \"forgive[<host account id>]\""
+task :forgive, [:account] do |_task, args|
+  $LOAD_PATH.unshift File.expand_path("lib", __dir__)
+  require "agnostic/settings"
+  require "agnostic/store"
+  removed = Agnostic::Store.new(Agnostic::Settings.load.database_url).forgive(args[:account].to_s)
+  puts removed.zero? ? "#{args[:account]} was not ignored" : "no longer ignoring #{args[:account]}"
+end
+
 task default: :spec

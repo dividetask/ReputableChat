@@ -173,8 +173,26 @@ module Agnostic
     def peer_cursor(url) = db[:peers].where(url: url).get(:cursor) || 0
 
     def save_peer_cursor(url, cursor)
-      db[:peers].insert_conflict(:replace).insert(url: url, cursor: cursor.to_i)
+      db[:peers].insert_conflict(target: :url, update: { cursor: cursor.to_i }).insert(url: url, cursor: cursor.to_i)
     end
+
+    def peer_host(url) = db[:peers].where(url: url).get(:host)
+
+    def save_peer_host(url, host)
+      db[:peers].insert_conflict(target: :url, update: { host: host }).insert(url: url, cursor: 0, host: host)
+    end
+
+    # --- servers this one ignores -------------------------------------------------
+
+    def ignored?(account) = !db[:ignored].where(account: account).empty?
+
+    def ignore(account, reason:, at:)
+      db[:ignored].insert_conflict(:replace).insert(account: account, reason: reason, at: at)
+    end
+
+    def ignored = db[:ignored].order(:at).all
+
+    def forgive(account) = db[:ignored].where(account: account).delete
 
     def meta(key) = db[:meta].where(key: key).get(:value)
 
@@ -255,6 +273,12 @@ module Agnostic
       db.create_table?(:peers) do
         String :url, primary_key: true
         Integer :cursor, null: false, default: 0
+      end
+      db.alter_table(:peers) { add_column :host, String } unless db[:peers].columns.include?(:host)
+      db.create_table?(:ignored) do
+        String :account, primary_key: true
+        String :reason, text: true, null: false
+        Integer :at, null: false
       end
       db.create_table?(:meta) do
         String :key, primary_key: true

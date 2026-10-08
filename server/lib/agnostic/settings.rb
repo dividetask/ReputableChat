@@ -18,8 +18,7 @@ module Agnostic
       "records" => { "max_future_seconds" => 600 },
       "pending" => { "max_records" => 10_000, "max_age_seconds" => 3_600 },
       "peers" => {
-        "urls" => [], "pull_interval_seconds" => 60, "push_interval_seconds" => 5,
-        "fetch_missing" => 1_000, "timeout_seconds" => 10
+        "urls" => [], "max_clock_skew_seconds" => 600, "fetch_missing" => 1_000, "timeout_seconds" => 10
       },
       "limits" => { "request_bytes" => 8_388_608, "batch_records" => 500, "page_records" => 500 }
     }.freeze

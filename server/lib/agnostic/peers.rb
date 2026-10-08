@@ -6,17 +6,23 @@ require "uri"
 require_relative "record"
 
 module Agnostic
-  # Exchanging records with other servers, both ways.
+  # Exchanging records with other servers, once per heartbeat.
   #
-  # Pull: ask each peer for what it accepted since the last time, in the order
-  # it accepted them, which puts every record after what it acknowledges. A
-  # record that still arrives ahead of an ancestor -- the peer was holding it,
-  # or accepted the ancestor before this server's cursor -- is held, and the
-  # missing ancestors fetched from that peer by hash.
+  # Each time this server publishes a heartbeat it syncs with every peer:
   #
-  # Push: send each record accepted here to every peer but the one it came
-  # from. A peer that already has it answers "known", so pushing and pulling
-  # the same record costs a request and nothing else.
+  # 1. Push: send every record accepted here since the last sync, except to
+  #    the peer it came from. A peer that already has one answers "known".
+  # 2. Offer the new heartbeat (POST /api/sync). The peer checks its ts
+  #    against its own clock and ignores this server for good if the two are
+  #    more than ten minutes apart -- a server whose clock is that far off is
+  #    taken to be lying about time.
+  # 3. Send whatever the peer answers it is still missing.
+  # 4. Pull: ask the peer for what it accepted since the last time, in the
+  #    order it accepted them, which puts every record after what it
+  #    acknowledges. A record that arrives ahead of an ancestor is held, and
+  #    the missing ancestors fetched from that peer by hash.
+  #
+  # A peer whose host account this server ignores is skipped.
   class Peers
     def initialize(store:, ingest:, settings:, http: nil)
       @store = store
@@ -31,7 +37,7 @@ module Agnostic
 
     # --- pull -------------------------------------------------------------------
 
-    def pull_all = urls.each { |url| pull(url) }
+    def pull_all = urls.each { |url| pull(url) unless ignored_peer?(url) }
 
     def pull(url)
       page = @settings.integer("limits", "page_records")
@@ -66,31 +72,51 @@ module Agnostic
       budget
     end
 
-    # --- push -------------------------------------------------------------------
+    # --- sync ------------------------------------------------------------------
 
-    def push_pending
+    # Called with each heartbeat this server publishes.
+    def sync(beat)
       batch = []
-      batch << @outbox.pop until @outbox.empty? || batch.size >= @settings.integer("limits", "batch_records")
-      return if batch.empty?
+      batch << @outbox.pop until @outbox.empty?
+      batch.reject! { |record, _| record.digest == beat.digest }
 
       urls.each do |url|
-        records = batch.reject { |_, source| source == url }.map(&:first)
-        push(url, records) unless records.empty?
+        next if ignored_peer?(url)
+
+        push(url, batch.reject { |_, source| source == url }.map(&:first))
+        body = post(url, "/api/sync", { "heartbeat" => beat.to_wire })
+        push_missing(url, body)
+        pull(url)
       rescue StandardError => e
-        warn "push to #{url} failed: #{e.message}"
+        warn "sync with #{url} failed: #{e.message}"
       end
     end
 
-    # Sends records, then whatever the peer says it is still missing for them
-    # that this server holds -- the mirror of fetch_missing, within the same
-    # kind of budget.
+    # A peer is known by the host account it reports; the account, not the
+    # address, is what gets ignored.
+    def ignored_peer?(url)
+      host = get(url, "/api")["host"]
+      @store.save_peer_host(url, host) if Record.hash?(host)
+      host && @store.ignored?(host)
+    end
+
     def push(url, records)
+      records.each_slice(@settings.integer("limits", "batch_records")) do |slice|
+        push_missing(url, post(url, "/api/records", { "records" => slice.map(&:to_wire) }))
+      end
+    end
+
+    # Sends whatever the peer says it is still missing that this server holds
+    # -- the mirror of fetch_missing, within the same kind of budget.
+    def push_missing(url, body)
       budget = @settings.integer("peers", "fetch_missing")
-      until records.empty?
-        body = post(url, "/api/records", { "records" => records.map(&:to_wire) })
+      loop do
         wanted = Array(body["results"]).flat_map { |r| Array(r["missing"]) }.uniq.first(budget)
-        budget -= wanted.size
         records = @store.fetch_many(wanted.select { |h| Record.hash?(h) })
+        break if records.empty?
+
+        budget -= records.size
+        body = post(url, "/api/records", { "records" => records.map(&:to_wire) })
       end
     end
 

@@ -47,17 +47,21 @@ module Agnostic
       klass.host = host
       klass.genesis = genesis
       klass.settings = settings
+      klass.clock = @clock
       klass.freeze.app
     end
 
-    # Heartbeats, pulling, pushing and expiring held records, each on its own
-    # thread so a slow peer cannot delay a heartbeat.
+    # Each heartbeat is followed by a sync with every peer.
     def start
-      every(30) { heartbeat.beat }
-      every(settings.integer("peers", "pull_interval_seconds")) { peers.pull_all }
-      every(settings.integer("peers", "push_interval_seconds")) { peers.push_pending }
+      every(30) { beat_and_sync }
       every(300) { ingest.expire }
       self
+    end
+
+    def beat_and_sync
+      result = heartbeat.beat
+      peers.sync(heartbeat.previous) if result&.status == :accepted
+      result
     end
 
     private

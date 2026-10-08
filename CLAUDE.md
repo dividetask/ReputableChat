@@ -45,6 +45,8 @@ specs; run commands from inside the one you are working on.
 bundle exec rake spec       # the agnostic server's suite
 bundle exec puma            # http://localhost:9292; PEERS=url,url to sync
 bundle exec rake host       # this server's host account (made on first boot)
+bundle exec rake ignored    # peers ignored for a clock over 10 minutes off
+bundle exec rake "forgive[<host account id>]"   # stop ignoring one
 
 # In chat/
 bundle exec rake spec       # full suite (browser tests skip without `npm install`)
