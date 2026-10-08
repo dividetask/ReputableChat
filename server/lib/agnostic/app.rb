@@ -6,6 +6,7 @@ require_relative "record"
 require_relative "rules"
 require_relative "accounts"
 require_relative "keys"
+require_relative "upload_auth"
 
 module Agnostic
   # The API other servers, and the apps built on the chain, talk to. It knows
@@ -23,9 +24,14 @@ module Agnostic
   #   GET  /api/ratings              this server's ratings of other accounts, by hand or by reachability
   #   POST /api/contacts             an app beside this server reporting whether it reached a server
   #   GET  /api/frontier             records nothing here acknowledges yet
-  #   POST /api/records              {"records": [...]} or one record; each is checked
+  #   POST /api/records              {"records": [...]} or one record; each is checked (signed upload)
+  #   POST /api/introduce            {"declaration": ...}: an account's first declaration, so it can sign uploads
   #   GET  /api/sweep                ?account=&generation=&part=: the chain in parts, for catching up
-  #   POST /api/sync                 {"heartbeat": ...}: a peer's newest heartbeat, its clock checked
+  #   POST /api/sync                 {"heartbeat": ...}: a peer's newest heartbeat, its clock checked (signed upload)
+  #
+  # A signed upload carries the headers UploadAuth names, signed by an account
+  # on this server's chain with its current working or master key. Reading
+  # needs nothing.
   class App < Roda
     plugin :json, classes: [Array, Hash]
     plugin :json_parser, content_type_regexp: %r{\Aapplication/json\b}i,
@@ -60,7 +66,8 @@ module Agnostic
         r.get("host") { server.host.to_h }
         r.get("frontier") { { "records" => store.frontier.map(&:digest) } }
 
-        r.post("sync") { sync(r) }
+        r.post("sync") { sync(r, uploader!(r)) }
+        r.post("introduce") { introduce(r) }
         r.get("sweep") { sweep(r) }
 
         # What an app reads to decide what to show. States change as records
@@ -102,7 +109,10 @@ module Agnostic
         r.on "records" do
           r.is do
             r.get { page(r) }
-            r.post { post(r) }
+            r.post do
+              uploader!(r)
+              post(r)
+            end
           end
           r.get(String) do |hash|
             record = Record.hash?(hash) && store.fetch(hash)
@@ -213,12 +223,50 @@ module Agnostic
     # time, and this server ignores it from then on. Only once the heartbeat
     # is shown to be signed by the account it names: otherwise anyone could
     # get an honest server ignored with a forged one.
-    def sync(r)
+    # The account that signed this upload; halts with 401 when none did, and
+    # 403 when it is one this server ignores.
+    def uploader!(r)
+      now = server.clock.call
+      account = UploadAuth.verify!(r.env, store: store, genesis: server.genesis, now: now,
+                                          skew: server.settings.integer("peers", "max_clock_skew_seconds"))
+      r.halt(403, { "error" => "this server ignores #{account}" }) if store.ignored?(account, at: now)
+      account
+    rescue UploadAuth::Refused => e
+      r.halt(401, { "error" => e.message, "unknown_account" => e.unknown_account })
+    end
+
+    # An account not yet on this server's chain sends its first identity
+    # declaration, and nothing else, so it can then sign uploads. The
+    # declaration is checked like any record: its signature proves the key,
+    # and the rules decide whether it joins.
+    def introduce(r)
+      wait = server.limiter.wait("introduce:#{r.ip}")
+      if wait
+        response["retry-after"] = wait.to_s
+        r.halt(429, { "error" => "too many introductions; ask again in #{wait} seconds" })
+      end
+
+      body = r.POST
+      record = Record.from_wire(body.is_a?(Hash) ? body["declaration"] : nil)
+      unless record.digest && record.first_declaration?
+        r.halt(400, { "error" => "an introduction is an account's first identity declaration" })
+      end
+
+      result = server.ingest.submit(record).to_h
+      response.status = 202 if result["status"] == "pending"
+      { "results" => [result] }
+    rescue ArgumentError, Canonical::NotCanonical
+      r.halt(400, { "error" => "an introduction is an account's first identity declaration" })
+    end
+
+    def sync(r, uploader)
       body = r.POST
       record = Record.from_wire(body.is_a?(Hash) ? body["heartbeat"] : nil)
       r.halt(400, { "error" => "heartbeat must be a heartbeat record" }) unless heartbeat?(record)
 
       author = record.account
+      r.halt(403, { "error" => "a server shares its own heartbeat; #{uploader} signed one of #{author}'s" }) unless
+        author == uploader
       now = server.clock.call
       r.halt(403, { "error" => "this server ignores #{author}" }) if store.ignored?(author, at: now)
 

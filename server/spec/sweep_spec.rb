@@ -105,9 +105,9 @@ class SweepSpec < Minitest::Test
 
     asked = Hash.new(0)
     real = network.method(:call)
-    network.define_singleton_method(:call) do |method, address, body|
+    network.define_singleton_method(:call) do |method, address, body, headers = {}|
       asked[URI(address).host] += 1 if address.include?("/api/sweep")
-      real.call(method, address, body)
+      real.call(method, address, body, headers)
     end
     fresh = boot("fresh", peers: %w[alpha beta], clock: -> { @now })
     fresh.send(:catch_up)
@@ -124,17 +124,17 @@ class SweepSpec < Minitest::Test
 
     calls = 0
     real = network.method(:call)
-    network.define_singleton_method(:call) do |method, address, body|
+    network.define_singleton_method(:call) do |method, address, body, headers = {}|
       raise "connection dropped" if address.include?("/api/sweep") && (calls += 1) == 4
 
-      real.call(method, address, body)
+      real.call(method, address, body, headers)
     end
     fresh.peers.catch_up(["http://alpha"])
     stopped = fresh.store.meta("sweep:#{@alpha.host.id}").to_i
     assert_operator stopped, :>, 1
     refute_empty hashes(@alpha) - hashes(fresh)
 
-    network.define_singleton_method(:call) { |method, address, body| real.call(method, address, body) }
+    network.define_singleton_method(:call) { |method, address, body, headers = {}| real.call(method, address, body, headers) }
     fresh.store.update_peer("http://alpha", next_attempt_at: 0, failures: 0)
     fresh.send(:catch_up)
     assert_empty hashes(@alpha) - hashes(fresh)

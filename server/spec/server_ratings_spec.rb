@@ -208,8 +208,7 @@ class RatedOutSpec < Minitest::Test
 
   def offer
     beat = @beta.host.sign("heartbeat", { "ack" => [@beta.heartbeat.previous.digest], "body" => "", "ts" => @now })
-    Rack::MockRequest.new(@alpha.app).post("/api/sync", input: JSON.generate("heartbeat" => beat.to_wire),
-                                                        "CONTENT_TYPE" => "application/json").status
+    signed_post(@alpha, "/api/sync", { "heartbeat" => beat.to_wire }, signer: @beta.host, ts: @now).status
   end
 
   def test_a_server_rated_minus_one_is_ignored_until_forgiven

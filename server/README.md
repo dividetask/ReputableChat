@@ -279,6 +279,33 @@ bundle exec rake ratings                                     # what it says of w
 The apps beside the server read the current ratings at `GET /api/ratings`:
 the chat uses them to choose which other chat servers to ask for files.
 
+## Who may upload
+
+Reading is open to anyone. Adding records is not: `POST /api/records` and
+`POST /api/sync` must be **signed uploads**, made by an account already on
+this server's chain with its current working or master key. Four headers
+carry it:
+
+| header | |
+|---|---|
+| `X-Reputablechat-Account` | the uploader's account ID |
+| `X-Reputablechat-Key` | the key it signs with: its current working or master key |
+| `X-Reputablechat-Ts` | when it signed, in seconds |
+| `X-Reputablechat-Signature` | Ed25519, base64url, over `reputablechat:upload:v1`, the method, the path, the ts and the SHA-256 (hex) of the body, joined by newlines |
+
+The signature covers the body, so it cannot be moved to other records, and it
+goes stale once its ts is more than `peers.max_clock_skew_seconds` (600) from
+the receiver's clock. Anything else is a 401 saying why. A server shares only
+its own heartbeat: `/api/sync` refuses one of another account's.
+
+An account the receiver has never seen -- a server that has just gone live,
+say -- is told so (`"unknown_account": true`), and may send its first identity
+declaration, and nothing else, to `POST /api/introduce`. The declaration is
+checked like any record, its signature proving the key; once it is on the
+chain the account can sign uploads. This server does all of that by itself
+when it syncs. An app beside the server uploads its users' records the same
+way, signing as the host account the server shares with it.
+
 ## The API
 
 | | |
@@ -294,9 +321,10 @@ the chat uses them to choose which other chat servers to ask for files.
 | `GET /api/keys/<pubkey>` | the account a working key signs for, or null |
 | `GET /api/ratings` | this server's current ratings of other accounts, each by hand or by reachability |
 | `GET /api/frontier` | hashes of the records nothing here acknowledges |
-| `POST /api/records` | `{"records": [...]}`, or one record on its own |
+| `POST /api/records` | `{"records": [...]}`, or one record on its own; a signed upload |
+| `POST /api/introduce` | `{"declaration": ...}`: an account's first identity declaration, so it can sign uploads |
 | `GET /api/sweep?account=&generation=&part=` | one capped part of one generation of an account, and the `next` part to ask for; 429 when asked too often |
-| `POST /api/sync` | `{"heartbeat": ...}`: a peer's newest heartbeat; 403 when the peer is or becomes ignored |
+| `POST /api/sync` | `{"heartbeat": ...}`: the uploader's own newest heartbeat; a signed upload; 403 when the peer is or becomes ignored |
 
 A record on the wire is `{"payload": "<canonical JSON>", "signature": "<base64url>"}`;
 the server adds `hash` when it serves one. A POST answers one result per

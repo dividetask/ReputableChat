@@ -4,6 +4,7 @@ require "json"
 require "net/http"
 require "uri"
 require_relative "record"
+require_relative "upload_auth"
 require_relative "view"
 
 module Agnostic
@@ -184,12 +185,13 @@ module Agnostic
 
     # A request a server answered with an error status.
     class HttpError < StandardError
-      attr_reader :status, :retry_after
+      attr_reader :status, :retry_after, :body
 
-      def initialize(message, status:, retry_after: nil)
+      def initialize(message, status:, retry_after: nil, body: nil)
         super(message)
         @status = status
         @retry_after = retry_after
+        @body = body
       end
     end
 
@@ -373,25 +375,46 @@ module Agnostic
 
     private
 
-    def get(url, path) = @http.call(:get, url + path, nil)
+    def get(url, path) = @http.call(:get, url + path, nil, {})
 
-    def post(url, path, body) = @http.call(:post, url + path, body)
+    # Uploads are signed by this server's host account. A peer that has not
+    # seen the account yet is first sent its declaration, then asked again.
+    def post(url, path, body, introduced: false)
+      json = JSON.generate(body)
+      headers = UploadAuth.headers(@host, :post, URI(url + path).path, json, @clock.call)
+      @http.call(:post, url + path, json, headers)
+    rescue HttpError => e
+      raise unless e.status == 401 && e.body.is_a?(Hash) && e.body["unknown_account"] && !introduced
 
-    def request(method, address, body)
+      introduce(url)
+      post(url, path, body, introduced: true)
+    end
+
+    def introduce(url)
+      @http.call(:post, url + "/api/introduce", JSON.generate("declaration" => @host.declaration.to_wire), {})
+    end
+
+    def request(method, address, body, headers)
       uri = URI(address)
       timeout = @settings.integer("peers", "timeout_seconds")
       Net::HTTP.start(uri.host, uri.port, use_ssl: uri.scheme == "https",
                                           open_timeout: timeout, read_timeout: timeout) do |http|
         request = method == :get ? Net::HTTP::Get.new(uri) : Net::HTTP::Post.new(uri)
         request["Accept"] = "application/json"
+        headers.each { |name, value| request[name] = value }
         if body
           request["Content-Type"] = "application/json"
-          request.body = JSON.generate(body)
+          request.body = body
         end
         response = http.request(request)
         unless response.is_a?(Net::HTTPSuccess)
+          parsed = begin
+            JSON.parse(response.body.to_s)
+          rescue JSON::ParserError
+            nil
+          end
           raise HttpError.new("#{method.upcase} #{address} answered #{response.code}",
-                              status: response.code.to_i, retry_after: response["retry-after"])
+                              status: response.code.to_i, retry_after: response["retry-after"], body: parsed)
         end
 
         JSON.parse(response.body)
