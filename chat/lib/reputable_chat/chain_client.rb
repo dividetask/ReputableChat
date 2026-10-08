@@ -37,6 +37,11 @@ module ReputableChat
     # trust, and whether set by hand or by reachability.
     def ratings = get("/api/ratings")["ratings"]
 
+    # Tells the agnostic server whether this app reached another server's
+    # account, so it counts toward that account's rating. Signed by the host
+    # account the two share; see Host#contact_report.
+    def report_contact(payload, signature) = post("/api/contacts", { "payload" => payload, "signature" => signature })
+
     def submit(payload, signature)
       result = post("/api/records", { "payload" => payload, "signature" => signature })["results"].first
       Result.new(status: result["status"], hash: result["hash"], problems: result["problems"] || [],
@@ -98,7 +103,7 @@ module ReputableChat
       [response.code.to_i, JSON.parse(response.body.to_s.empty? ? "{}" : response.body)]
     rescue Errno::ECONNREFUSED, Errno::EHOSTUNREACH, SocketError, Net::OpenTimeout => e
       raise Unreachable, "the agnostic server at #{url} cannot be reached (#{e.class}). " \
-                         "Start it (cd server && bundle exec puma -p 9393), or set CHAIN_URL."
+                         "Start it (cd server && bundle exec puma), or set CHAIN_URL."
     rescue JSON::ParserError
       raise Unreachable, "the agnostic server at #{url} did not answer #{path} with JSON"
     end

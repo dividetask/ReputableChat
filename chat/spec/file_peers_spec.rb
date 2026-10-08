@@ -26,6 +26,8 @@ class FilePeersSpec < Minitest::Test
     @ratings = {}
     @answers = {}
     @asked = []
+    @connected = []
+    @reports = []
     @now = 1_000
   end
 
@@ -34,7 +36,8 @@ class FilePeersSpec < Minitest::Test
       mirror: Mirror.new(@services), chain: Chain.new(@ratings), images: @images, host: Host.new("me"),
       allow_private: allow_private, require_https: require_https, clock: -> { @now }, random: Random.new(1),
       resolver: resolver,
-      http: ->(url, _max) { @asked << url; @answers[url] }
+      http: ->(url, _max, ip) { @asked << url; @connected << ip; @answers[url] },
+      reporter: ->(account, reached) { @reports << [account, reached] }
     )
   end
 
@@ -106,7 +109,7 @@ class FilePeersSpec < Minitest::Test
       ReputableChat::FilePeers.new(
         mirror: Mirror.new(@services), chain: Chain.new(@ratings), images: @images, host: Host.new("me"),
         allow_private: false, require_https: false, random: Random.new(i), resolver: Resolver.new({}),
-        http: ->(url, _max) { @answers[url] }
+        http: ->(url, _max, _ip) { @answers[url] }
       ).candidates.first.first
     end
 
@@ -146,5 +149,40 @@ class FilePeersSpec < Minitest::Test
 
     assert_nil peers.fetch(NAME)
     assert_empty @asked
+  end
+
+  # RULE (yours): what the chat finds goes to the agnostic server, where it
+  # counts toward the account's rating.
+  def test_each_success_and_failure_is_reported_to_the_agnostic_server
+    server("a", "https://a.example", files: { NAME => PNG })
+    peers.fetch(NAME)
+    assert_equal [["a", true]], @reports
+
+    @reports.clear
+    server("b", "https://b.example")
+    @services.delete("a")
+    peers.fetch("#{'e' * 64}.png")
+    assert_equal [["b", false]], @reports, "a server without the file is a failure"
+  end
+
+  def test_a_server_failing_its_check_is_reported_and_put_off
+    server("b", "https://b.example")
+    @answers.delete("https://b.example/api/host")
+    finder = peers
+    finder.fetch(NAME)
+
+    assert_equal [["b", false]], @reports
+    assert_empty finder.candidates, "put off after failing its check"
+  end
+
+  # RULE: the address checked is the address connected to, and a name with
+  # any private address is refused, so it cannot pass the check with one
+  # address and be reached at another.
+  def test_the_address_checked_is_the_one_connected_to
+    server("a", "https://a.example", files: { NAME => PNG })
+    peers(resolver: Resolver.new({ "a.example" => ["93.184.216.34"] })).fetch(NAME)
+    assert_equal ["93.184.216.34"], @connected.uniq
+
+    refute peers(resolver: Resolver.new({ "a.example" => ["93.184.216.34", "10.0.0.5"] })).allowed?("https://a.example")
   end
 end

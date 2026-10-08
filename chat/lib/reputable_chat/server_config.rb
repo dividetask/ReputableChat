@@ -22,7 +22,7 @@ module ReputableChat
       "chain_url" => "http://localhost:9393",
       # The agnostic server's working seed: the chat and the agnostic server
       # beside it are one account. %{environment} is development or production.
-      "host_seed" => "../server/data/%{environment}/host.seed",
+      "host_seed" => "../host/%{environment}/host.seed",
       # Where other chat servers reach this one for files. Unset, this server
       # does not announce itself and nobody fetches from it.
       "url" => nil,

@@ -44,7 +44,7 @@ specs; run commands from inside the one you are working on.
 # In server/
 bundle exec rake spec       # the agnostic server's suite
 bundle exec rake setup      # a fresh server: handle, address, other servers
-bundle exec puma            # http://localhost:9292; PEERS=url,url to sync
+bundle exec puma            # http://localhost:9393; PEERS=url,url to sync
 bundle exec rake peers      # servers it syncs with, failing, or forgotten
 bundle exec rake "sweep[<url>,<url>]"   # copy the chain from servers at once
 bundle exec rake host       # this server's host account (made on first boot)
@@ -55,7 +55,7 @@ bundle exec rake ignored    # peers ignored for a clock over 10 minutes off
 bundle exec rake "forgive[<host account id>]"   # stop ignoring one
 
 # In chat/, beside an agnostic server at chain_url (http://localhost:9393):
-#   cd server && bundle exec puma -p 9393
+#   cd server && bundle exec puma
 bundle exec rake spec       # full suite; starts its own agnostic server
                             # (browser tests skip without `npm install`)
 npm install                 # once, for the browser tests
@@ -109,7 +109,7 @@ inventing a word for something that already has one.
   committed by omission.
   The host account is a server's own, and **every chat server has one: its
   agnostic server's.** The chat reads that server's working seed (`host_seed`,
-  `HOST_SEED`, by default `../server/data/<env>/host.seed`) and refuses to
+  `HOST_SEED`, by default `../host/<env>/host.seed`) and refuses to
   boot if it is not the account the agnostic server names. One account per
   server, whatever apps it runs. The chat announces itself with it: a notice
   of kind `service` typed `:chat` carrying `url`, on the first boot with an
@@ -173,8 +173,9 @@ inventing a word for something that already has one.
   same spec fails if the two copies differ: two genesis records are two chains. That is deliberate: a published rules file is never edited. Before
   launch, the fix is a new development genesis, which orphans every
   development record that acknowledged the old one.
-- **The server's host account phrases** are generated on first boot into
-  `server/data/<environment>/`: `host.seed` (working) and `host-master.seed`
+- **The host account's phrases** are generated on the agnostic server's first
+  boot into `host/<environment>/` at the repository root, outside both apps,
+  since every app on the server shares the account: `host.seed` (working) and `host-master.seed`
   (master, to be moved off the server; never read again), both 0600, beside
   the declaration `host.json`. The server refuses to boot without the working
   phrase or when it does not match the declaration. `server/lib/agnostic/seed.rb`

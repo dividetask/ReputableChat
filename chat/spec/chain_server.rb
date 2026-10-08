@@ -44,7 +44,7 @@ module ChainServer
     dir = @dir = Dir.mktmpdir("chat-spec-chain")
     port = TCPServer.open("127.0.0.1", 0) { |s| s.addr[1] }
     log = File.join(dir, "server.log")
-    env = { "RACK_ENV" => "development", "BACKGROUND" => "0", "DATA_DIR" => dir,
+    env = { "RACK_ENV" => "development", "BACKGROUND" => "0", "DATA_DIR" => dir, "HOST_DIR" => dir,
             "BUNDLE_GEMFILE" => File.join(SERVER, "Gemfile") }
     pid = clean_env do
       Process.spawn(env, "bundle", "exec", "puma", "-b", "tcp://127.0.0.1:#{port}", "--quiet",

@@ -82,7 +82,7 @@ class ServerConfigSpec < Minitest::Test
     expected = ReputableChat::ServerConfig::DEFAULTS.merge(
       "origin" => [], "limits" => ReputableChat::ServerConfig::LIMITS,
       # Resolved: the agnostic server's seed in this environment, beside the chat.
-      "host_seed" => File.expand_path("../../server/data/development/host.seed", __dir__),
+      "host_seed" => File.expand_path("../../host/development/host.seed", __dir__),
       "allow_private_peers" => true
     )
 

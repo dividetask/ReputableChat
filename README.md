@@ -23,7 +23,7 @@ cd server && bundle install && bundle exec rake spec && bundle exec puma
 cd chat && bundle install && bundle exec rake spec && bundle exec puma
 ```
 
-Both listen on 9292 by default, and the chat looks for its agnostic server at `http://localhost:9393` (`chain_url` in `chat/config/server.yml`, or `CHAIN_URL`), so run that one with `bundle exec puma -p 9393`. The chat's specs start an agnostic server of their own. In `chat/`, `bundle exec rake curve` prints the current curve and ladder.
+The chat listens on 9292 and the agnostic server on 9393, and the chat finds it at `http://localhost:9393` (`chain_url` in `chat/config/server.yml`, or `CHAIN_URL`). On one machine they can share an address on different ports, or share a port behind a reverse proxy under different hostnames: each announces its own address, the agnostic server on its host account's identity declaration and the chat on its `service` notice, so other servers never confuse the two. They share one host account, kept in `host/` at the root, outside both. The chat's specs start an agnostic server of their own. In `chat/`, `bundle exec rake curve` prints the current curve and ladder.
 
 ## Deploying
 

@@ -12,6 +12,10 @@ module Agnostic
 
     DEFAULTS = {
       "data_dir" => "data",
+      # Where the host account lives. Unset, in the data directory; the
+      # committed config/server.yml sets it outside both apps, since the apps
+      # beside this server sign as the same account.
+      "host_dir" => nil,
       "database_url" => nil,
       "genesis" => "config/genesis/%{environment}.json",
       "host" => { "handle" => "Agnostic server", "bio" => "", "url" => nil, "seed_words" => 12 },
@@ -82,6 +86,11 @@ module Agnostic
 
     def data_dir = File.expand_path(File.join(dig("data_dir"), environment), ROOT)
 
+    def host_dir
+      dir = dig("host_dir")
+      present?(dir) ? File.expand_path(File.join(dir, environment), ROOT) : data_dir
+    end
+
     def database_url = dig("database_url") || "sqlite://#{File.join(data_dir, 'server.db')}"
 
     def genesis_path = File.expand_path(format(dig("genesis"), environment: environment), ROOT)
@@ -112,6 +121,7 @@ module Agnostic
     def override
       @values["database_url"] = @env["DATABASE_URL"] if present?(@env["DATABASE_URL"])
       @values["data_dir"] = @env["DATA_DIR"] if present?(@env["DATA_DIR"])
+      @values["host_dir"] = @env["HOST_DIR"] if present?(@env["HOST_DIR"])
       @values["genesis"] = @env["GENESIS"] if present?(@env["GENESIS"])
       @values["host"]["url"] = @env["HOST_URL"] if present?(@env["HOST_URL"])
       @values["peers"]["urls"] = @env["PEERS"].split(",") if present?(@env["PEERS"])

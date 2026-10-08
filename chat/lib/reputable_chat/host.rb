@@ -8,8 +8,9 @@ module ReputableChat
   # The host account: this server's own. Every chat server has one, and it is
   # the same account as the agnostic server's beside it -- one account per
   # server, whatever apps it runs. The agnostic server makes it on first boot
-  # and keeps its working seed; the chat reads that seed (host_seed in
-  # config/server.yml) to sign as it, and refuses to run if the seed's key is
+  # and keeps its working seed outside both apps (host/ at the root of the
+  # repository); the chat reads that seed (host_seed in config/server.yml) to
+  # sign as it, and refuses to run if the seed's key is
   # not the account the agnostic server names.
   #
   # A new account starts with it as a friend, beside the genesis account, and
@@ -56,6 +57,13 @@ module ReputableChat
     # What a client is given: the account and its declaration, enough to show
     # it as a default friend before anything else is fetched.
     def to_h = { "account" => account, "payload" => payload, "signature" => signature, "hash" => hash }
+
+    # A report for the agnostic server that this app did or did not reach
+    # another server's account: [payload, signature]. Not a record; it never
+    # leaves this machine.
+    def contact_report(account, reached:, at: Time.now.to_i)
+      sign({ "purpose" => "reputablechat:contact:v1", "account" => account, "reached" => reached, "ts" => at.to_i })
+    end
 
     # Signs a payload as the host account: [canonical payload, signature].
     def sign(payload)

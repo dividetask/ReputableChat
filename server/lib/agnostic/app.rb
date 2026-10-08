@@ -5,6 +5,7 @@ require "roda"
 require_relative "record"
 require_relative "rules"
 require_relative "accounts"
+require_relative "keys"
 
 module Agnostic
   # The API other servers, and the apps built on the chain, talk to. It knows
@@ -20,6 +21,7 @@ module Agnostic
   #   POST /api/accounts             {"accounts": [...]}: the same for several
   #   GET  /api/keys/<pubkey>        the account a working key signs for
   #   GET  /api/ratings              this server's ratings of other accounts, by hand or by reachability
+  #   POST /api/contacts             an app beside this server reporting whether it reached a server
   #   GET  /api/frontier             records nothing here acknowledges yet
   #   POST /api/records              {"records": [...]} or one record; each is checked
   #   GET  /api/sweep                ?account=&generation=&part=: the chain in parts, for catching up
@@ -83,6 +85,13 @@ module Agnostic
         # carry, such as files.
         r.get("ratings") { { "ratings" => server.ratings ? server.ratings.current : {} } }
 
+        # An app beside this server -- the chat fetching files -- reporting
+        # whether it reached another server's account. Counted with this
+        # server's own contacts, so it moves that account's rating. Signed with
+        # the host account's working key, which only the apps on this machine
+        # hold, so nobody else can move a rating this way.
+        r.post("contacts") { report_contact(r) }
+
         r.on "records" do
           r.is do
             r.get { page(r) }
@@ -103,6 +112,32 @@ module Agnostic
     def store = server.store
 
     def accounts = server.accounts
+
+    CONTACT = "reputablechat:contact:v1"
+
+    def report_contact(r)
+      body = r.POST.is_a?(Hash) ? r.POST : {}
+      payload = body["payload"]
+      fields = begin
+        payload.is_a?(String) ? JSON.parse(payload) : nil
+      rescue JSON::ParserError
+        nil
+      end
+      unless fields.is_a?(Hash) && fields["purpose"] == CONTACT && Keys.verify(server.host.pubkey, body["signature"].to_s, payload)
+        r.halt(403, { "error" => "a contact report is signed by this server's host account" })
+      end
+
+      account = fields["account"]
+      r.halt(400, { "error" => "account is not an account ID" }) unless Record.hash?(account)
+      r.halt(400, { "error" => "reached is true or false" }) unless [true, false].include?(fields["reached"])
+      unless fields["ts"].is_a?(Integer) && (fields["ts"] - server.clock.call).abs <= 600
+        r.halt(400, { "error" => "ts is more than 600 seconds from this server's clock" })
+      end
+      r.halt(400, { "error" => "this server does not rate its own account" }) if account == server.host.id
+
+      store.record_contact(account, success: fields["reached"], at: server.clock.call)
+      { "recorded" => true }
+    end
 
     def bounded!(r, list, name)
       r.halt(400, { "error" => "#{name} must be a list" }) unless list.is_a?(Array)

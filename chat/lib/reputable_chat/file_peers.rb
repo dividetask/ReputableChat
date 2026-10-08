@@ -30,6 +30,15 @@ module ReputableChat
   # - not one that failed lately: each failure puts it off for longer, as the
   #   agnostic server does with servers it cannot reach.
   #
+  # Every success and failure is reported to the agnostic server (reporter),
+  # where it counts toward the account's rating with that server's own
+  # contacts -- so what the chat learns outlasts a restart, and the next
+  # choice takes it into account.
+  #
+  # An address is looked up once, checked, and that address is the one
+  # connected to, so a name cannot answer with a public address for the check
+  # and a private one for the connection.
+  #
   # A request from another chat server (PEER_HEADER) is answered from what is
   # here and never passed on, so two servers cannot ask each other in circles.
   class FilePeers
@@ -41,7 +50,8 @@ module ReputableChat
     BACKOFF_MOST = 86_400
 
     def initialize(mirror:, chain:, images:, host:, allow_private:, require_https:,
-                   http: nil, clock: -> { Time.now.to_i }, random: Random.new, resolver: Resolv)
+                   http: nil, clock: -> { Time.now.to_i }, random: Random.new, resolver: Resolv,
+                   reporter: nil)
       @mirror = mirror
       @chain = chain
       @images = images
@@ -52,6 +62,7 @@ module ReputableChat
       @clock = clock
       @random = random
       @resolver = resolver
+      @reporter = reporter
       @verified = {}
       @failures = Hash.new(0)
       @next_try = Hash.new(0)
@@ -102,16 +113,23 @@ module ReputableChat
 
     # Whether a url may be contacted at all: http(s), https in production, and
     # no private address unless allowed.
-    def allowed?(url)
+    def allowed?(url) = !address(url).nil?
+
+    # The address to connect to for a url, looked up once and checked; nil
+    # when it may not be contacted. Every address a name has must pass, so a
+    # name cannot hide a private one behind a public one.
+    def address(url)
       uri = URI.parse(url)
-      return false unless %w[http https].include?(uri.scheme) && uri.host
-      return false if @require_https && uri.scheme != "https"
-      return true if @allow_private
+      return nil unless %w[http https].include?(uri.scheme) && uri.host
+      return nil if @require_https && uri.scheme != "https"
 
       addresses = @resolver.getaddresses(uri.host)
-      !addresses.empty? && addresses.none? { |a| private?(a) }
+      return nil if addresses.empty?
+      return nil if !@allow_private && addresses.any? { |a| private?(a) }
+
+      addresses.first
     rescue URI::InvalidURIError, IPAddr::InvalidAddressError
-      false
+      nil
     end
 
     private
@@ -140,14 +158,21 @@ module ReputableChat
       ordered
     end
 
+    # Remembered once it passes. One that fails -- not there, or answering
+    # as another account -- is a failure like any other, put off and reported,
+    # and checked again when it comes back round.
     def verified?(account, url)
       key = [account, url]
-      return @verified[key] if @verified.key?(key)
+      return true if @verified[key]
 
       body = get("#{url}/api/host")
-      @verified[key] = body && JSON.parse(body).dig("host", "account") == account
-    rescue JSON::ParserError
-      @verified[key] = false
+      passed = begin
+        body && JSON.parse(body).dig("host", "account") == account
+      rescue JSON::ParserError
+        false
+      end
+      passed ? @verified[key] = true : failed(account)
+      passed
     end
 
     def succeeded(account)
@@ -155,6 +180,7 @@ module ReputableChat
         @failures.delete(account)
         @next_try.delete(account)
       end
+      report(account, true)
     end
 
     def failed(account)
@@ -163,15 +189,31 @@ module ReputableChat
         delay = [BACKOFF_FIRST * (2**(@failures[account] - 1)), BACKOFF_MOST].min
         @next_try[account] = @clock.call + delay
       end
+      report(account, false)
     end
 
-    # The body, or nil for anything but a 200 within the image limit.
-    def get(url) = @http.call(url, @images.max_bytes)
+    # Best effort: a report that does not arrive costs a rating one data point.
+    def report(account, reached)
+      @reporter&.call(account, reached)
+    rescue StandardError
+      nil
+    end
 
-    def over_the_network(url, max_bytes)
+    # The body, or nil for anything but a 200 within the image limit. The
+    # address checked is the one connected to.
+    def get(url)
+      ip = address(url)
+      ip && @http.call(url, @images.max_bytes, ip)
+    end
+
+    def over_the_network(url, max_bytes, ip)
       uri = URI(url)
-      Net::HTTP.start(uri.host, uri.port, use_ssl: uri.scheme == "https", open_timeout: TIMEOUT,
-                                          read_timeout: TIMEOUT) do |http|
+      connection = Net::HTTP.new(uri.host, uri.port)
+      connection.ipaddr = ip
+      connection.use_ssl = uri.scheme == "https"
+      connection.open_timeout = TIMEOUT
+      connection.read_timeout = TIMEOUT
+      connection.start do |http|
         request = Net::HTTP::Get.new(uri)
         request[PEER_HEADER] = "1"
         http.request(request) do |response|

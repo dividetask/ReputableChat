@@ -43,6 +43,15 @@ class HostSpec < Minitest::Test
     assert_match(/agnostic server writes it on its first boot/, error.message)
   end
 
+  # RULE (yours): what the chat learns reaching other servers goes to its
+  # agnostic server, signed by the account they share.
+  def test_a_contact_report_signed_by_the_shared_account_is_taken
+    other = "d" * 64
+    result = chain.report_contact(*ChainServer.host.contact_report(other, reached: false))
+
+    assert_equal true, result["recorded"]
+  end
+
   # RULE: the host account is served beside the genesis, so a new account can
   # start with both as friends before it has fetched anything else.
   def test_the_host_account_is_served

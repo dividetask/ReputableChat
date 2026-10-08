@@ -41,7 +41,11 @@ ReputableChat::Chain::Service.announce!(chain: ReputableChat::App.chain, mirror:
 ReputableChat::App.files = ReputableChat::FilePeers.new(
   mirror: ReputableChat::App.mirror, chain: ReputableChat::App.chain, images: ReputableChat::App.images,
   host: ReputableChat::App.host, allow_private: settings.fetch("allow_private_peers"),
-  require_https: ReputableChat::Environment.production?
+  require_https: ReputableChat::Environment.production?,
+  # What it finds counts toward each account's rating on the agnostic server.
+  reporter: lambda do |account, reached|
+    ReputableChat::App.chain.report_contact(*ReputableChat::App.host.contact_report(account, reached: reached))
+  end
 )
 
 run ReputableChat::App.freeze.app

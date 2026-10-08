@@ -28,13 +28,14 @@
 # The agnostic server this chat runs beside: it holds the chain, judges every
 # record against the rules and syncs with other servers. The chat passes its
 # clients' records to it and keeps a copy of the ones it shows. CHAIN_URL
-# overrides. Start one with `cd server && bundle exec puma -p 9393`.
+# overrides. Start one with `cd server && bundle exec puma` (port 9393).
 chain_url: "http://localhost:9393"
 
-# The agnostic server's working seed. A chat server shares its agnostic
-# server's host account, and refuses to boot if this is not it. HOST_SEED
+# The host account's working seed, which lives outside both apps (host/ at the
+# root of the repository): a chat server shares its agnostic server's host
+# account, and refuses to boot if this is not it. HOST_SEED
 # overrides; %{environment} is development or production.
-host_seed: "../server/data/%{environment}/host.seed"
+host_seed: "../host/%{environment}/host.seed"
 
 # Where other chat servers reach this one to fetch files its people uploaded.
 # Announced on the chain when first set and whenever it changes; unset, this

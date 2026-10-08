@@ -151,7 +151,7 @@ module Agnostic
 
     def declare_host
       check_url
-      host = HostAccount.load_or_create(dir: settings.data_dir, genesis: genesis, profile: profile,
+      host = HostAccount.load_or_create(dir: settings.host_dir, genesis: genesis, profile: profile,
                                        words: settings.integer("host", "seed_words"), clock: @clock)
       submit_declaration(host.declaration)
       redeclare(host)

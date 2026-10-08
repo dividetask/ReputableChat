@@ -31,7 +31,7 @@ cd server
 bundle install
 bundle exec rake spec          # the suite
 bundle exec rake setup         # a fresh server: handle, address, other servers
-bundle exec puma               # http://localhost:9292
+bundle exec puma               # http://localhost:9393 (config/puma.rb), beside the chat's 9292
 bundle exec rake peers         # the servers it syncs with, or has forgotten
 bundle exec rake "sweep[<url>,<url>]"  # copy the chain from servers, generation by generation
 bundle exec rake host          # this server's host account
@@ -65,7 +65,9 @@ signs the rules' record shapes.
 ## The host account
 
 On first boot the server makes two 12-word seed phrases and writes each 0600
-into `data/<environment>/`:
+into `host/<environment>/` at the root of the repository (`host_dir`,
+`HOST_DIR`). That is outside this app on purpose: every app beside this server
+-- the chat -- signs as the same account, one account per server.
 
 - `host.seed`, the working phrase. The server signs with it, and refuses to
   boot without it rather than quietly becoming a new account.

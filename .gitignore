@@ -16,5 +16,9 @@ chat/config/genesis/*.seed
 !chat/config/genesis/development.seed
 !chat/config/genesis/development.master.seed
 
+# The host account a server's agnostic server and apps share: made on the
+# agnostic server's first boot, never committed.
+/host/
+
 # Browser tests only. The application itself ships no JavaScript dependencies.
 node_modules/
