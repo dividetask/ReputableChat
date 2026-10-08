@@ -35,7 +35,7 @@ host:
   # Changing any of these three publishes a new declaration on the next boot.
   # url: "https://chain.example.org"
   # Words in each of the host account's seed phrases, made on first boot.
-  # Never fewer than 8, the chat's minimum.
+  # Never fewer than 8, below which a phrase is guessable.
   seed_words: "12"
 
 heartbeat:

@@ -49,18 +49,15 @@ ancestors, how far ahead of the clock a record may be, request limits.
 
 `config/genesis/development.json` is the developer's first identity
 declaration in the rules' own format, signed with the development genesis key
-(the public one whose seed is committed under `chat/`). Its `rules` field is
+(public on purpose: its seed phrase is `spec/fixtures/development-genesis.seed`). Its `rules` field is
 `docs/project/rules/v0.001.md` exactly, less its trailing newline, and a spec
 fails if the two drift.
 
 Production has no genesis yet, and a production server refuses to boot until
 one is placed at `config/genesis/production.json`. It also refuses one signed
-by the development key. `script/generate_genesis.rb` signs one from a private
-key file and refuses to overwrite an existing genesis.
-
-The chat app's committed genesis and host records predate the rules, so this
-server cannot accept them. The two are on different chains until the chat
-signs the rules' record shapes.
+by the development key. `script/generate_genesis.rb` signs one from the
+genesis account's seed phrase (`--seed-file`, and `--master-seed-file` for its
+master key) and refuses to overwrite an existing genesis.
 
 ## The host account
 
@@ -89,10 +86,10 @@ publishes a new declaration. The `url` is where other servers reach this one -- 
 known by its account, so a server that wants live updates from its peers
 declares the address they can reach it at.
 Keys are derived from the phrases exactly as the browser derives them
-(Argon2id under the chat's `seed.kdf` parameters, which a spec holds equal),
+(Argon2id under the network's derivation parameters, which a spec holds),
 so either phrase can be typed into a client to act as the account.
-`shared/bip39-english.txt` at the root is the wordlist, the one file both apps read, checked by its
-hash.
+`shared/bip39-english.txt` at the root is the wordlist, the one copy every app
+reads, checked by its hash.
 
 ## Heartbeats
 

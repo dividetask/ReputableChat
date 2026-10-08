@@ -1,24 +1,22 @@
-# Runtime state: the database and uploaded images both live here.
+# Runtime state: each server's database lives here.
 data/
 tmp/
 *.db
 *.sqlite3
 .bundle/
 vendor/bundle/
-# Every seed is ignored, and development's are then un-ignored -- the genesis
-# account's. (A server's host account is its agnostic server's, under
-# server/data/, which is ignored whole.) The accident worth guarding against
-# is committing a seed, so the default is to refuse and the exception is
-# explicit. Development's are public on purpose: anyone who clones the
-# repository owns that identity, which is what makes a fresh clone able to
-# run it locally.
-chat/config/genesis/*.seed
-!chat/config/genesis/development.seed
-!chat/config/genesis/development.master.seed
+# Seeds are secrets. The one exception is the development genesis account's
+# phrase, a public test fixture, un-ignored by name.
+*.seed
+!server/spec/fixtures/development-genesis.seed
 
-# The host account a server's agnostic server and apps share: made on the
-# agnostic server's first boot, never committed.
+# The host account a server and its apps share: made on the agnostic server's
+# first boot, never committed.
 /host/
 
-# Browser tests only. The application itself ships no JavaScript dependencies.
+# The chat's (this branch's): the development genesis account's phrases,
+# public on purpose so a fresh clone can sign as it, and the browser tests'
+# node_modules -- the application itself ships no JavaScript dependencies.
+!chat/config/genesis/development.seed
+!chat/config/genesis/development.master.seed
 node_modules/

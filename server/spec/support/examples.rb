@@ -7,7 +7,7 @@ require "agnostic/record"
 module Examples
   ROOT     = File.expand_path("../../..", __dir__)
   EXAMPLES = File.join(ROOT, "docs/project/rules/v0.001-examples.md")
-  BROKEN   = File.join(ROOT, "chat/spec/fixtures/examples_broken.md")
+  BROKEN   = File.expand_path("../fixtures/examples_broken.md", __dir__)
   PATTERN  = /```\npayload:   (.+?)\nsignature: (\S+)\nhash:      (\S+)\n```/
 
   module_function

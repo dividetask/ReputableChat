@@ -6,25 +6,24 @@ require "ed25519"
 require "securerandom"
 
 module Agnostic
-  # Seed phrases, made and read the way the browser does
-  # (chat/public/js/seed.js and identity.js), so a phrase this server writes
-  # signs in the chat client as the same account.
+  # Seed phrases, made and read the way a browser client does, so a phrase
+  # this server writes is the same account typed into any client.
   #
   # A phrase is BIP39 English words: 11 bits each, the last 8 bits a checksum
   # over the entropy and the word count. The key is Argon2id over the
   # normalized phrase, salted with the derivation domain, and its 32 bytes are
   # the Ed25519 private key.
   module Seed
-    # The canonical BIP39 English list, in shared/ at the root: the chat reads
-    # the same file, so a phrase is the same account in either.
+    # The canonical BIP39 English list, in shared/ at the root, where every app
+    # on the server reads it, so a phrase is the same account in any of them.
     WORDLIST = File.expand_path("../../../shared/bip39-english.txt", __dir__)
     BITS_PER_WORD = 11
     CHECKSUM_BITS = 8
     WORDS = 12
 
-    # chat/config/reputation.yml, seed.kdf. Changing any of these derives a
-    # different key from every phrase, which strands every account; a spec
-    # holds them equal to the chat's.
+    # The network's seed derivation. Changing any of these derives a different
+    # key from every phrase, which strands every account; spec/seed_spec.rb
+    # holds them, and the development genesis key they derive.
     KDF = { domain: "reputablechat:seed:v1", iterations: 3, memory_kib: 65_536, parallelism: 1 }.freeze
 
     class InvalidSeed < StandardError; end
