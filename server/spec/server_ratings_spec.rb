@@ -36,12 +36,12 @@ class ServerRatingsSpec < Minitest::Test
     assert_equal "-1", rating
   end
 
-  def test_an_address_that_worked_then_went_offline_is_rated_zero
+  def test_an_address_that_worked_then_went_offline_is_rated_a_little_below_zero
     @alpha.peers.pull_all
     network.apps.delete("http://beta")
     @now += 8 * DAY
     @alpha.peers.pull_all
-    assert_equal "0", rating
+    assert_equal "-0.01", rating
   end
 
   def test_a_reliable_server_is_rated_a_little_after_four_months_and_a_little_more_after_a_year

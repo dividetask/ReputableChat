@@ -57,8 +57,9 @@ module Agnostic
     end
 
     # Heartbeats at the configured interval, each followed at once by a sync
-    # with every server. Between them the server waits rather than checking,
-    # and contacts no one.
+    # with every server. The timer thread waits between them and this server
+    # contacts no one meanwhile; the API stays up throughout, for any server
+    # that wants to reach this one.
     def start
       Thread.new do
         loop do
@@ -70,7 +71,7 @@ module Agnostic
           sleep [heartbeat.seconds_until_due, 1].max
         end
       end
-      every(300) { ingest.expire }
+      every(settings.integer("pending", "sweep_seconds")) { ingest.expire }
       self
     end
 
@@ -120,7 +121,8 @@ module Agnostic
 
     def declare_host
       check_url
-      host = HostAccount.load_or_create(dir: settings.data_dir, genesis: genesis, profile: profile, clock: @clock)
+      host = HostAccount.load_or_create(dir: settings.data_dir, genesis: genesis, profile: profile,
+                                       words: settings.integer("host", "seed_words"), clock: @clock)
       submit_declaration(host.declaration)
       redeclare(host)
       host

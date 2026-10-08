@@ -29,6 +29,9 @@ host:
   # by its account. Without one, peers cannot send this server live updates.
   # Changing any of these three publishes a new declaration on the next boot.
   # url: "https://chain.example.org"
+  # Words in each of the host account's seed phrases, made on first boot.
+  # Never fewer than 8, the chat's minimum.
+  seed_words: "12"
 
 heartbeat:
   # The rules set a floor of 480 seconds between one publisher's heartbeats and
@@ -46,6 +49,8 @@ pending:
   # it does. Bounded, so they cannot fill the disk.
   max_records: "10000"
   max_age_seconds: "3600"
+  # How often held records past their age are cleared out.
+  sweep_seconds: "300"
 
 peers:
   # Servers to sync with after each heartbeat: pushing what arrived here,
@@ -62,6 +67,9 @@ peers:
   # A server not reached for this long is forgotten, at its next failed try: a
   # week. A new identity declaration from it, or a sync from it, brings it back.
   forget_after_seconds: "604800"
+  # At most this many servers learned from records are synced with; past that
+  # a newly learned one is skipped. Those named at setup do not count.
+  max_learned: "100"
   # The wait before the next try after a failed one: first_seconds after the
   # first failure, multiplied by multiplier for each failure after that, and
   # never more than max_seconds. With these: 10 minutes, 20, 40, ... a day.
@@ -83,8 +91,9 @@ ratings:
   trust: "0"
   # A declared address never reached, once the server is forgotten.
   never_reached: "-1"
-  # Reached for a while, then forgotten.
-  went_offline: "0"
+  # Reached for a while, then forgotten. An account nothing is published about
+  # counts as 0, so going offline costs a little.
+  went_offline: "-0.01"
   # Reliably online: reached at least this share of the times it was tried...
   reliable_ratio: "0.9"
   # ...and this long since it was first reached (120 days, about four months)...

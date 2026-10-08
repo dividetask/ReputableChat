@@ -29,15 +29,15 @@ module Agnostic
 
     attr_reader :declaration, :signing_key
 
-    def self.load_or_create(dir:, genesis:, profile:, clock: -> { Time.now.to_i })
+    def self.load_or_create(dir:, genesis:, profile:, words: Seed::WORDS, clock: -> { Time.now.to_i })
       FileUtils.mkdir_p(dir)
       seed = File.join(dir, SEED_FILE)
       path = File.join(dir, DECLARATION_FILE)
       return new(signing_key: Seed.signing_key(read_seed(seed)), declaration: read(path)) if File.exist?(path)
 
-      key = Seed.signing_key(write_seed(seed, Seed.generate))
+      key = Seed.signing_key(write_seed(seed, Seed.generate(words)))
       master = File.join(dir, MASTER_FILE)
-      master_key = Seed.signing_key(write_seed(master, Seed.generate))
+      master_key = Seed.signing_key(write_seed(master, Seed.generate(words)))
       warn "host account master phrase written to #{master}: move it off this server"
       declaration = declare(key, master_key, genesis: genesis, profile: profile, ts: clock.call)
       File.write(path, JSON.pretty_generate(declaration.to_wire))

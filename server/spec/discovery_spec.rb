@@ -100,6 +100,17 @@ class DiscoverySpec < Minitest::Test
     assert_equal 1, alpha.store.peer("http://beta")[:failures]
   end
 
+  def test_learned_servers_are_capped
+    settings = Agnostic::Settings.new({ "peers" => { "max_learned" => "1" } }, env: {})
+    alpha = at("alpha")
+    alpha.peers.instance_variable_set(:@settings, settings)
+    at("beta", peers: ["http://alpha"]).beat_and_sync
+    at("gamma", peers: ["http://alpha"]).beat_and_sync
+
+    assert_includes known(alpha), "http://beta"
+    refute_includes known(alpha), "http://gamma"
+  end
+
   # --- reachability ---------------------------------------------------------------
 
   def test_an_unreachable_server_is_tried_less_and_less_often

@@ -103,6 +103,12 @@ class ServerSpec < Minitest::Test
     assert_match(/host.url/, error.message)
   end
 
+  def test_the_seed_phrase_length_is_configurable_but_never_below_eight
+    server = boot("alpha", host: { "seed_words" => "15" })
+    assert_equal 15, File.read(File.join(server.settings.data_dir, "host.seed")).split.size
+    assert_equal 8, Agnostic::Settings.new({ "host" => { "seed_words" => "6" } }, env: {}).integer("host", "seed_words")
+  end
+
   def test_settings_fall_back_to_defaults_rather_than_zero
     settings = Agnostic::Settings.new({ "pending" => { "max_records" => "lots" }, "peers" => { "max_clock_skew_seconds" => "0" } }, env: {})
     assert_equal 10_000, settings.integer("pending", "max_records")

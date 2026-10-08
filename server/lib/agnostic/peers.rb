@@ -16,11 +16,13 @@ module Agnostic
   #    against its own clock and ignores this server for good if the two are
   #    more than ten minutes apart -- a server whose clock is that far off is
   #    taken to be lying about time.
-  # 3. Send whatever the peer answers it is still missing.
-  # 4. Pull: ask the peer for what it accepted since the last time, in the
-  #    order it accepted them, which puts every record after what it
-  #    acknowledges. A record that arrives ahead of an ancestor is held, and
-  #    the missing ancestors fetched from that peer by hash.
+  # 3. The peer, checking the heartbeat, asks for every record in its
+  #    history it does not hold, and is sent them, until it can check it.
+  #    The ask travels as its answer rather than as a request of its own,
+  #    because this server may have no address the peer can reach.
+  #
+  # Nothing is pulled from the peer: it shares its records the same way, when
+  # it publishes its own heartbeat. pull_all remains, for catching up by hand.
   #
   # A peer whose host account this server ignores is skipped.
   #
@@ -76,7 +78,18 @@ module Agnostic
       # A new declaration brings a forgotten server back; its heartbeats alone
       # do not, or one that is unreachable at its url would be retried at full
       # pace for as long as its heartbeats travel through others.
-      @store.add_peer(url, source: "learned", host: account, at: @clock.call, revive: record.kind == "identity") if url
+      return unless url && room_for?(url)
+
+      @store.add_peer(url, source: "learned", host: account, at: @clock.call, revive: record.kind == "identity")
+    end
+
+    # At most peers.max_learned learned servers are synced with. Past that, a
+    # newly learned one is skipped; one already known stays.
+    def room_for?(url)
+      existing = @store.peer(url)
+      return true if existing && !existing[:forgotten]
+
+      @store.peers.count { |p| p[:source] == "learned" && !p[:forgotten] } < @settings.integer("peers", "max_learned")
     end
 
     def self.url(value)
@@ -184,7 +197,6 @@ module Agnostic
         push(url, batch.reject { |_, source| source == url }.map(&:first))
         body = post(url, "/api/sync", { "heartbeat" => beat.to_wire })
         push_missing(url, body)
-        pull(url, raise_errors: true)
         reached(url)
       rescue StandardError => e
         failed(url, "sync failed: #{e.message}")

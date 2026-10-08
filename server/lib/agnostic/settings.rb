@@ -14,17 +14,17 @@ module Agnostic
       "data_dir" => "data",
       "database_url" => nil,
       "genesis" => "config/genesis/%{environment}.json",
-      "host" => { "handle" => "Agnostic server", "bio" => "", "url" => nil },
+      "host" => { "handle" => "Agnostic server", "bio" => "", "url" => nil, "seed_words" => 12 },
       "heartbeat" => { "interval_seconds" => 600 },
       "records" => { "max_future_seconds" => 600 },
-      "pending" => { "max_records" => 10_000, "max_age_seconds" => 3_600 },
+      "pending" => { "max_records" => 10_000, "max_age_seconds" => 3_600, "sweep_seconds" => 300 },
       "peers" => {
         "urls" => [], "max_clock_skew_seconds" => 600, "ignore_seconds" => 604_800,
-        "forget_after_seconds" => 604_800,
+        "forget_after_seconds" => 604_800, "max_learned" => 100,
         "retry" => { "first_seconds" => 600, "multiplier" => "2", "max_seconds" => 86_400 }, "fetch_missing" => 1_000, "timeout_seconds" => 10
       },
       "ratings" => {
-        "trust" => "0", "never_reached" => "-1", "went_offline" => "0", "reliable_ratio" => "0.9",
+        "trust" => "0", "never_reached" => "-1", "went_offline" => "-0.01", "reliable_ratio" => "0.9",
         "reliable" => { "after_seconds" => 10_368_000, "rating" => "0.01" },
         "established" => { "after_seconds" => 31_536_000, "rating" => "0.02" }
       },
@@ -32,7 +32,9 @@ module Agnostic
     }.freeze
 
     # The least each number may be. The heartbeat floor is the rules' own.
-    MINIMUMS = { %w[heartbeat interval_seconds] => 480 }.freeze
+    # The least each number may be. The heartbeat floor is the rules' own; the
+    # seed floor is the chat's, below which a phrase is guessable.
+    MINIMUMS = { %w[heartbeat interval_seconds] => 480, %w[host seed_words] => 8 }.freeze
 
     attr_reader :environment
 

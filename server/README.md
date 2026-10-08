@@ -100,19 +100,25 @@ leaves out the side its own account is not on.
 
 ## Syncing
 
-The server sleeps until its next heartbeat is due (`heartbeat.interval_seconds`
-after the last), publishes it, and right away syncs with every peer in turn.
-It contacts no one between heartbeats:
+The server stays online throughout, answering any server that connects. Its
+own heartbeat waits on a timer until it is due (`heartbeat.interval_seconds`
+after the last); then it publishes it and right away syncs with every peer in
+turn. It reaches out to no one between its heartbeats:
 
-1. **Push** every record it accepted since the last sync, except to the peer it
-   came from.
-2. **Offer the heartbeat** with `POST /api/sync`.
-3. **Send what is missing**: the peer answers with the hashes it still needs,
-   and the server sends those it holds.
-4. **Pull** what the peer accepted since the last pull, fetching any missing
-   ancestors from it by hash.
+1. **Send ahead** the records it accepted since the last sync, oldest first,
+   except to the peer they came from. They are all in the heartbeat's
+   history; sending them first only saves the peer asking for them one level
+   at a time.
+2. **Share the heartbeat** with `POST /api/sync`.
+3. **The peer asks for what it is missing.** To check the heartbeat it needs
+   every record in its history, so it answers with the hashes it does not
+   hold, and is sent them, and asks again, until it holds them all. The ask
+   travels as its answer, not as a request of its own, because the sharing
+   server may have no address the peer could reach.
 
-So records posted here reach the peers with the next heartbeat, not sooner.
+Nothing is pulled the other way: the peer shares its records the same way,
+when it publishes its own heartbeat. So records posted here reach the peers
+with the next heartbeat, not sooner.
 
 **Which servers.** `rake setup` asks a fresh server for the servers it should
 know, and the list may be empty: the server then runs alone until another
@@ -127,6 +133,10 @@ that does not is still synced with by the servers it reaches itself.
 identity declaration names. A new declaration with no `url` takes it off the
 list and it is no longer contacted; one with a different `url` replaces the
 old address.
+
+**How many.** At most `peers.max_learned` (100) learned servers are synced
+with at once. Past that a newly learned one is skipped until one is
+forgotten; servers named at setup or in the settings do not count.
 
 **Servers that cannot be reached** are tried less and less often: after the
 first failure the next try waits `peers.retry.first_seconds` (10 minutes),
@@ -164,13 +174,13 @@ address its account declared. Every value is in `ratings:` in
 | what happened | rating |
 |---|---|
 | never reached, then forgotten | `never_reached`, -1 |
-| reached for a while, then forgotten | `went_offline`, 0 |
+| reached for a while, then forgotten | `went_offline`, -0.01 |
 | reached at least `reliable_ratio` (90%) of the times tried, 120 days after it was first reached | `reliable.rating`, 0.01 |
 | the same, a year after | `established.rating`, 0.02 |
 | anything else | nothing published |
 
-Each rating carries `trust` (0), so a server's opinion of a server's
-reachability says nothing about whose ratings to believe. An attestation holds
+An account a server has published nothing about counts as 0. Each rating
+carries `trust` (0 for now). An attestation holds
 only the ratings that changed since the last one, so most heartbeats publish
 none. It is signed just before a heartbeat, which then carries it.
 
