@@ -15,7 +15,9 @@ module Agnostic
   # normalized phrase, salted with the derivation domain, and its 32 bytes are
   # the Ed25519 private key.
   module Seed
-    WORDLIST = File.expand_path("../../config/bip39-english.txt", __dir__)
+    # The canonical BIP39 English list, in shared/ at the root: the chat reads
+    # the same file, so a phrase is the same account in either.
+    WORDLIST = File.expand_path("../../../shared/bip39-english.txt", __dir__)
     BITS_PER_WORD = 11
     CHECKSUM_BITS = 8
     WORDS = 12
