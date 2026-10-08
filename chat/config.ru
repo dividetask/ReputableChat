@@ -27,13 +27,14 @@ ReputableChat::App.genesis.install_icon(ReputableChat::App.images)
 # the genesis it has to acknowledge.
 ReputableChat::App.host = ReputableChat::Host.current
 ReputableChat::App.host&.install_icon(ReputableChat::App.images)
-ReputableChat::App.peer_tokens = settings.fetch("peer_tokens")
-# The chain: the genesis at its root, the host account's declaration joined to
-# it, and every stored record read back in the order it was accepted.
-ReputableChat::App.book = ReputableChat::Chain::Book.new(
-  ReputableChat::App.store,
-  genesis: ReputableChat::App.genesis.record,
-  host: ReputableChat::App.host&.record
+# The chain is the agnostic server's. The chat refuses to run against one on
+# another genesis, puts its host account's declaration on the chain, and keeps
+# a copy of the records it shows.
+ReputableChat::App.chain = ReputableChat::ChainClient.new(settings.fetch("chain_url"))
+ReputableChat::Chain::Connection.connect!(ReputableChat::App.chain, genesis: ReputableChat::App.genesis,
+                                                                    host: ReputableChat::App.host)
+ReputableChat::App.mirror = ReputableChat::Chain::Mirror.new(
+  ReputableChat::App.store, ReputableChat::App.chain, chat_notices: ReputableChat::App::NOTICE_KINDS
 )
 
 run ReputableChat::App.freeze.app

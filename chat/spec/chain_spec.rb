@@ -84,7 +84,7 @@ class ChainSpec < Minitest::Test
     genesis = GenesisFixture.build
 
     assert_equal [], JSON.parse(genesis.payload)["ack"]
-    assert genesis.record.genesis?
+    assert genesis.record.first_declaration?
     assert_equal GenesisFixture::RULES, genesis.declaration["rules"]
   end
 
@@ -114,17 +114,22 @@ class ChainSpec < Minitest::Test
       genesis, path = GenesisFixture.write(dir)
       impostor = GenesisFixture.build
 
-      swapped = genesis.to_h.merge("signature" => impostor.signature)
+      # Its hash re-derived, so only the signature is wrong.
+      swapped = genesis.to_h.merge(
+        "signature" => impostor.signature,
+        "hash" => Record.digest(payload: genesis.payload, signature: impostor.signature)
+      )
       File.write(path, JSON.generate(swapped))
 
       error = assert_raises(ReputableChat::Genesis::Corrupt) { ReputableChat::Genesis.load(path: path) }
-      assert_match(/verifies against no key/, error.message)
+      assert_match(/does not verify/, error.message)
     end
   end
 
-  # RULE: a genesis that is not a valid record under the rules is refused, even
-  # though its signature verifies perfectly -- the signature covers the bytes
-  # it was made from. A genesis in an older shape is the realistic case.
+  # RULE: a genesis in an older shape is refused, even though its signature
+  # verifies perfectly -- the signature covers the bytes it was made from.
+  # Whether a genesis is valid under the rules is the agnostic server's to say;
+  # this is the chat noticing it is not one at all.
   def test_a_genesis_written_against_an_older_shape_is_refused
     Dir.mktmpdir do |dir|
       path = File.join(dir, "genesis.json")
@@ -138,7 +143,7 @@ class ChainSpec < Minitest::Test
                                      "hash" => Record.digest(payload: canonical, signature: signature)))
 
       error = assert_raises(ReputableChat::Genesis::Corrupt) { ReputableChat::Genesis.load(path: path) }
-      assert_match(/not a valid record under the rules/, error.message)
+      assert_match(/not a first identity declaration/, error.message)
     end
   end
 

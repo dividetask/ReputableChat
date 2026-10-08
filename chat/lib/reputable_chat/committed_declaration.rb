@@ -2,7 +2,8 @@
 
 require "json"
 require_relative "environment"
-require_relative "chain/record"
+require_relative "chain/envelope"
+require_relative "cryptography/signature"
 
 module ReputableChat
   # An identity declaration committed to the repository as a file, rather than
@@ -116,18 +117,23 @@ module ReputableChat
       end
 
       begin
-        @record = Chain::Record.parse(payload, signature)
-      rescue Chain::Invalid => e
-        raise self.class::Corrupt, "#{path} is not a valid record under the rules: #{e.message}"
+        @record = Chain::Envelope.parse(payload, signature)
+      rescue Chain::Envelope::Unreadable => e
+        raise self.class::Corrupt, "#{path} is not a record: #{e.message}"
       end
 
-      unless record.first_declaration?
+      unless record.first_declaration? && record.kind == "identity"
         raise self.class::Corrupt, "#{path} is not a first identity declaration"
       end
       unless record.record_hash == hash
         raise self.class::Corrupt, "#{path} records hash #{hash} but its contents hash to #{record.record_hash}"
       end
+      unless Cryptography::Signature.verify(pubkey_b64: record["pubkey"], signature_b64: signature, payload: record.fields)
+        raise self.class::Corrupt, "the signature on #{path} does not verify against its working key"
+      end
 
+      # Whether it is valid under the rules is the agnostic server's to say;
+      # the chat checks at boot that it is the genesis that server runs.
       check_ack!(path)
     end
   end

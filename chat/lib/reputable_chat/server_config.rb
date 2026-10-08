@@ -17,21 +17,23 @@ module ReputableChat
     DEFAULTS = {
       "origin" => nil,
       "database_url" => "sqlite://data/reputablechat.db",
-      "image_root" => "data/images"
+      "image_root" => "data/images",
+      "chain_url" => "http://localhost:9393"
     }.freeze
 
     ENV_KEYS = {
       "origin" => "ORIGIN",
       "database_url" => "DATABASE_URL",
-      "image_root" => "IMAGE_ROOT"
+      "image_root" => "IMAGE_ROOT",
+      "chain_url" => "CHAIN_URL"
     }.freeze
 
     # Size limits are an operator's decision rather than a property of the
     # protocol, and they are served to clients so nothing has to discover a
     # ceiling by being refused. Each is overridden by its key in upper case.
     #
-    # They apply to what this server's own clients send. A record another
-    # server passes on is held to the rules alone.
+    # They apply to what this server's own clients send; the rules are the
+    # agnostic server's to hold everyone to.
     LIMITS = {
       "vault_bytes" => 1_048_576,
       "image_bytes" => 262_144,
@@ -58,8 +60,7 @@ module ReputableChat
       end
 
       settings.merge("origin" => Origin.list(settings["origin"]),
-                     "limits" => limits(file["limits"] || {}, env),
-                     "peer_tokens" => peer_tokens(env))
+                     "limits" => limits(file["limits"] || {}, env))
     end
 
     # A limit that is absent, unparseable or not positive falls back to the
@@ -72,13 +73,6 @@ module ReputableChat
 
         [key, parsed&.positive? ? parsed : fallback]
       end
-    end
-
-    # Secrets for the route other servers pass records on through, from
-    # PEER_TOKENS, separated by commas. Never read from the file, which is in
-    # the repository. None means the route is closed.
-    def peer_tokens(env)
-      env["PEER_TOKENS"].to_s.split(",").map(&:strip).reject(&:empty?)
     end
 
     def present(value) = value.is_a?(String) && !value.strip.empty? ? value : nil

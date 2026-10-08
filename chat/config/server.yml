@@ -25,13 +25,14 @@
 #   - "https://chat.example.org"
 #   - "http://203.0.113.7:9292"
 
+# The agnostic server this chat runs beside: it holds the chain, judges every
+# record against the rules and syncs with other servers. The chat passes its
+# clients' records to it and keeps a copy of the ones it shows. CHAIN_URL
+# overrides. Start one with `cd server && bundle exec puma -p 9393`.
+chain_url: "http://localhost:9393"
+
 database_url: "sqlite://data/reputablechat.db"
 image_root: "data/images"
-
-# PEER_TOKENS is absent for the same reason as SESSION_SECRET below. It is a
-# comma-separated list of secrets; another server presenting one of them as a
-# bearer token may pass on records of any type, which this server then holds to
-# the rules alone rather than to the limits below. Unset, the route is closed.
 
 # SESSION_SECRET is deliberately absent: it is a secret and this file is in the
 # repository. Set it in the environment when you deploy. Without it a random

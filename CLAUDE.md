@@ -48,8 +48,10 @@ bundle exec rake host       # this server's host account (made on first boot)
 bundle exec rake ignored    # peers ignored for a clock over 10 minutes off
 bundle exec rake "forgive[<host account id>]"   # stop ignoring one
 
-# In chat/
-bundle exec rake spec       # full suite (browser tests skip without `npm install`)
+# In chat/, beside an agnostic server at chain_url (http://localhost:9393):
+#   cd server && bundle exec puma -p 9393
+bundle exec rake spec       # full suite; starts its own agnostic server
+                            # (browser tests skip without `npm install`)
 npm install                 # once, for the browser tests
 bundle exec rake curve      # print current curve and ladder
 bundle exec rake dump       # readable dump of the database
@@ -139,17 +141,16 @@ inventing a word for something that already has one.
   states, verifies every record, and checks each against the rules it is an
   example of. `spec/fixtures/examples_broken.md` holds three correctly signed
   records that each break a rule, because a checker that has quietly stopped
-  looking passes everything. The same spec runs both files through
-  `Chain::Ledger`, the server's own validator, so the examples and the code
-  that decides what a server accepts cannot drift apart either.
+  looking passes everything. `server/spec/examples_spec.rb` runs both files
+  through the agnostic server, which is what decides what is accepted.
 - **The genesis carries the rules file.** The development genesis's `rules`
   field is `docs/project/rules/v0.001.md`, stripped of surrounding whitespace.
   Edit that file and `spec/chain_spec.rb` fails until the genesis is
   regenerated, which orphans everything that acknowledged it.
 - **The rules and the server's checks.** `server/lib/agnostic/rules.rb` and
-  `server/lib/agnostic/view.rb` enforce `docs/project/rules/v0.001.md`, and so
-  does `lib/reputable_chat/chain/` in the chat -- two implementations of one
-  set of rules, which must change together and with the prose: a rule edited in prose and not in code means the server
+  `server/lib/agnostic/view.rb` enforce `docs/project/rules/v0.001.md` -- the
+  only implementation of the rules; the chat checks none of them and passes
+  records to its agnostic server instead -- and change with the prose: a rule edited in prose and not in code means the server
   accepts records the rules call invalid, or refuses valid ones, and every
   signature still verifies. `server/spec/examples_spec.rb` runs the whole
   example chain and the broken fixture through the server, so changing a rule

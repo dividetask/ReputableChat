@@ -85,7 +85,7 @@ module Agnostic
   class KeyState
     FIELDS = { "key-change" => "pubkey", "master-key-change" => "mpubkey" }.freeze
 
-    attr_reader :confirmed, :tentative, :voided
+    attr_reader :confirmed, :tentative, :voided, :confirmed_records
 
     def initialize(view, account)
       @view = view
@@ -93,6 +93,7 @@ module Agnostic
       @confirmed = { "pubkey" => first&.[]("pubkey"), "mpubkey" => first&.[]("mpubkey") }
       @tentative = { "pubkey" => [], "mpubkey" => [] }
       @voided = Set.new
+      @confirmed_records = Set.new
       replay(account)
     end
 
@@ -115,6 +116,11 @@ module Agnostic
     end
 
     def void?(hash) = voided.include?(hash)
+
+    # The keys of void key changes: whatever they sign is void too (section 8).
+    def void_keys
+      @view.store.fetch_many(voided.to_a).select { |c| FIELDS.key?(c.notice_kind) }.map { |c| c["body"] }.to_set
+    end
 
     private
 
@@ -140,13 +146,16 @@ module Agnostic
 
       kept = ->(c) { c.digest == named.digest || @view.histories.ancestor?(c.digest, named.digest) }
       settled = @view.disputes(named.account).causes.select { |cause| Disputes.settles?(@view, quorum, named, cause) }
-      settled.flat_map(&:records).each { |r| @voided << r.digest unless kept.call(r) }
+      settled.flat_map(&:records).each do |r|
+        kept.call(r) ? @confirmed_records << r.digest : @voided << r.digest
+      end
+      @confirmed_records << named.digest
 
       field = FIELDS[named.notice_kind]
       @confirmed[field] = named["body"] if field
       FIELDS.each_value do |f|
         @tentative[f] = @tentative[f].reject do |c|
-          @voided.include?(c.digest) || (f == field && kept.call(c))
+          (f == field && kept.call(c) && @confirmed_records << c.digest) || @voided.include?(c.digest)
         end
       end
     end

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "spec_helper"
+require_relative "chain_server"
 require "open3"
 require "json"
 require "socket"
@@ -138,7 +139,9 @@ class BrowserSpec < Minitest::Test
         # request, which is how a server with no configuration runs.
         "ORIGIN" => nil,
         "DATABASE_URL" => "sqlite://#{@dir}/browser.db",
-        "IMAGE_ROOT" => "#{@dir}/images" },
+        "IMAGE_ROOT" => "#{@dir}/images",
+        # The agnostic server the specs share, which holds the chain.
+        "CHAIN_URL" => ChainServer.url },
       "bundle", "exec", "puma", "-p", @port.to_s, "-q",
       chdir: ROOT, out: File::NULL, err: File::NULL
     )

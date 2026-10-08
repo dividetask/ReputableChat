@@ -80,7 +80,7 @@ class ServerConfigSpec < Minitest::Test
 
   def test_a_missing_or_empty_file_still_yields_defaults
     expected = ReputableChat::ServerConfig::DEFAULTS
-               .merge("origin" => [], "limits" => ReputableChat::ServerConfig::LIMITS, "peer_tokens" => [])
+               .merge("origin" => [], "limits" => ReputableChat::ServerConfig::LIMITS)
 
     assert_equal expected, Settings.load(path: File.join(@dir, "absent.yml"), env: {})
     assert_equal expected, Settings.load(path: write(""), env: {})

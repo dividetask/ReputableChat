@@ -7,6 +7,7 @@ require "uri"
 require_relative "formats"
 require_relative "host_account"
 require_relative "app"
+require_relative "accounts"
 require_relative "heartbeat"
 require_relative "ingest"
 require_relative "peers"
@@ -54,6 +55,7 @@ module Agnostic
       klass.genesis = genesis
       klass.settings = settings
       klass.clock = @clock
+      klass.accounts = Accounts.new(store: store, genesis: genesis)
       klass.freeze.app
     end
 

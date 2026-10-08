@@ -21,7 +21,8 @@ What it does:
   this server's clock is ignored.
 
 It holds no vault, signs nobody in, stores no images, and computes no
-reputation.
+reputation. Apps run beside it and use it for the chain: the chat passes its
+users' records here and reads back what it shows.
 
 ## Running it
 
@@ -135,7 +136,11 @@ it. `bundle exec rake ignored` lists who is ignored, until when and why, and
 | `GET /api/genesis` | the genesis record |
 | `GET /api/host` | the host account: id, key, and its declaration |
 | `GET /api/records?since=&limit=&type=&account=&target=` | records accepted after the cursor, oldest first; `next` is the cursor for the following page |
-| `GET /api/records/<hash>` | one record, or 404 |
+| `GET /api/records/<hash>` | one record with its `state`, or 404 |
+| `POST /api/states` | `{"hashes": [...]}`: each record's state -- valid, tentative, disputed, confirmed or void -- as seen by everything here; null for one not held |
+| `GET /api/accounts/<id>` | an account's newest identity declaration and attestation, and the record accepted from it last |
+| `POST /api/accounts` | `{"accounts": [...]}`: the same for several |
+| `GET /api/keys/<pubkey>` | the account a working key signs for, or null |
 | `GET /api/frontier` | hashes of the records nothing here acknowledges |
 | `POST /api/records` | `{"records": [...]}`, or one record on its own |
 | `POST /api/sync` | `{"heartbeat": ...}`: a peer's newest heartbeat; 403 when the peer is or becomes ignored |

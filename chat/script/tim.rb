@@ -38,7 +38,6 @@ require "reputable_chat/server_config"
 require "reputable_chat/cryptography/canonical"
 require "reputable_chat/cryptography/payload"
 require "reputable_chat/cryptography/vault"
-require "reputable_chat/chain/record"
 require "reputable_chat/reputation/engine"
 require "reputable_chat/store/memory"
 

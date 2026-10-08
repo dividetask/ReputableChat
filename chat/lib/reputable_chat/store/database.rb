@@ -8,8 +8,8 @@ require "securerandom"
 module ReputableChat
   module Store
     # Persistence. Signed blobs in, signed blobs out, byte-identical. Whether a
-    # record is valid is Chain::Ledger's to say; this only keeps what it
-    # accepted, in the order it accepted it.
+    # record is valid is the agnostic server's to say; this keeps the chat's
+    # copy of what that server accepted, in the order it accepted it.
     class Database
       IN_MEMORY       = ["sqlite:/", "sqlite::memory:"].freeze
       NONCE_TTL       = 300   # seconds a login challenge stays usable
@@ -41,16 +41,17 @@ module ReputableChat
       def migrate!
         refuse_legacy_tables
 
-        # Every record on the chain, whatever its type, by its record hash.
-        # `id` is the order records joined, which is always an order in which
-        # each comes after everything it acknowledges -- the ledger is rebuilt
-        # by reading them back in it. `kind` and `account` are copies of what
-        # the payload says, kept so a dump can be read without parsing; the
-        # payload is stored exactly as it arrived and served back unchanged.
+        # The records the chat keeps of the chain (Chain::Mirror): those about
+        # the chain itself and the chat's own, in the order the agnostic
+        # server accepted them. The server holds the chain; this is a copy of
+        # the part the chat shows. `kind`, `type` and `account` are copies of
+        # what the payload says, kept so they can be queried without parsing;
+        # the payload is stored exactly as it arrived and served back unchanged.
         @db.create_table?(:records) do
           primary_key :id
           String   :hash, null: false, unique: true
-          String   :kind, null: false
+          String   :kind, null: false, index: true
+          String   :type, null: false
           String   :account, null: false, index: true
           String   :payload, text: true, null: false
           String   :signature, null: false
@@ -66,6 +67,12 @@ module ReputableChat
           String   :payload, text: true, null: false
           String   :signature, null: false
           Integer  :updated_at, null: false
+        end
+
+        # Where the mirror has read the agnostic server up to.
+        @db.create_table?(:meta) do
+          String   :key, primary_key: true
+          String   :value
         end
 
         @db.create_table?(:nonces) do
@@ -101,8 +108,8 @@ module ReputableChat
 
       # --- records -------------------------------------------------------------
 
-      def store_record(hash:, kind:, account:, payload:, signature:)
-        @db[:records].insert(hash: hash, kind: kind, account: account, payload: payload,
+      def store_record(hash:, kind:, type:, account:, payload:, signature:)
+        @db[:records].insert(hash: hash, kind: kind, type: type, account: account, payload: payload,
                              signature: signature, received_at: now)
         :ok
       rescue Sequel::UniqueConstraintViolation
@@ -111,10 +118,21 @@ module ReputableChat
 
       def record(hash) = @db[:records].where(hash: hash).first
 
-      # Rows added after `id`, in the order they joined. The ledger reads these
-      # to catch up with records another process stored.
-      def records_after(id, limit: 10_000)
-        @db[:records].where { Sequel[:id] > id }.order(:id).limit(limit).all
+      # The latest of one kind typed for the chat, oldest first.
+      def chat_records(kind, limit)
+        chat = Sequel.like(:type, "reputablechat:#{kind}:%:chat") | Sequel.like(:type, "reputablechat:#{kind}:%:chat:%")
+        @db[:records].where(kind: kind).where(chat).order(Sequel.desc(:id)).limit(limit).all.reverse
+      end
+
+      # Newest first.
+      def records_of(account, kind:, limit:)
+        @db[:records].where(account: account, kind: kind).order(Sequel.desc(:id)).limit(limit).all
+      end
+
+      def chain_cursor = @db[:meta].where(key: "chain_cursor").get(:value).to_i
+
+      def save_chain_cursor(cursor)
+        @db[:meta].insert_conflict(:replace).insert(key: "chain_cursor", value: cursor.to_s)
       end
 
       # --- vaults -------------------------------------------------------------
@@ -147,6 +165,9 @@ module ReputableChat
       # which file to delete and what goes with it.
       def refuse_legacy_tables
         found = LEGACY_TABLES.select { |table| @db.table_exists?(table) }
+        # A records table from when the chat judged records itself, before it
+        # kept a copy of its agnostic server's.
+        found << :records if @db.table_exists?(:records) && !@db[:records].columns.include?(:type)
         return if found.empty?
 
         raise LegacySchema,

@@ -1,33 +1,40 @@
 # frozen_string_literal: true
 
 require_relative "spec_helper"
-require_relative "genesis_fixture"
-require_relative "chain_helper"
+require_relative "chain_server"
 require "rack/test"
 require "tmpdir"
+require "ed25519"
 require "reputable_chat/app"
+require "reputable_chat/cryptography/payload"
+require "reputable_chat/cryptography/canonical"
 
-# The records the chain is made of, over the wire: what the server takes from
-# its own clients, what it takes from other servers, and what it hands back.
+# The records the chain is made of, over the wire: what the chat takes from
+# its own clients and passes to its agnostic server, and what it hands back.
+# The rules themselves are the agnostic server's, and tested there.
 class ChainRecordsSpec < Minitest::Test
   include Rack::Test::Methods
-  include ChainHelper
 
-  Sig = ReputableChat::Cryptography::Signature
-  ORIGIN = "http://example.test"
-  PEER_TOKEN = "a peer's secret"
+  Sig     = ReputableChat::Cryptography::Signature
+  Crypto  = ReputableChat::Cryptography
+  Payload = Crypto::Payload
+  ORIGIN  = "http://example.test"
+
+  # An account under test: its key, and its account ID once declared.
+  Account = Struct.new(:working, :id) do
+    def pubkey = Sig.encode(working.verify_key.to_bytes)
+  end
 
   def setup
-    @genesis, @genesis_key = GenesisFixture.build_with_key
-    ReputableChat::App.store   = ReputableChat::Store::Database.new("sqlite:/")
+    ChainServer.wire
     ReputableChat::App.images  = ReputableChat::Store::Images.new(Dir.mktmpdir)
     ReputableChat::App.origins = [ORIGIN]
-    ReputableChat::App.genesis = @genesis
-    ReputableChat::App.host    = nil
-    ReputableChat::App.peer_tokens = [PEER_TOKEN]
-    ReputableChat::App.book = ReputableChat::Chain::Book.new(ReputableChat::App.store, genesis: @genesis.record)
-    @me = Account.new(master: false)
+    @genesis = ReputableChat::App.genesis
+    @me = Account.new(Ed25519::SigningKey.generate)
   end
+
+  def new_key = Ed25519::SigningKey.generate
+  def key_of(signing) = Sig.encode(signing.verify_key.to_bytes)
 
   def app = ReputableChat::App.app
   def json = JSON.parse(last_response.body)
@@ -112,8 +119,8 @@ class ChainRecordsSpec < Minitest::Test
     say
 
     get "/api/messages"
-    stored = json["messages"].first
-    assert_equal Record.parse(stored["payload"], stored["signature"]).record_hash, stored["hash"]
+    stored = json["messages"].find { |m| m["account"] == @me.id }
+    assert_equal Crypto::Record.digest(payload: stored["payload"], signature: stored["signature"]), stored["hash"]
     assert_equal @me.id, stored["account"]
     assert_equal "valid", stored["state"]
   end
@@ -125,7 +132,17 @@ class ChainRecordsSpec < Minitest::Test
     post_json "/api/record", { "payload" => canonical,
                                "signature" => Sig.encode(@me.working.sign(Crypto::Canonical.dump(payload).b)) }
 
-    assert_refused(/signature verifies against no key/)
+    assert_refused(/signed with the session's key/)
+  end
+
+  # The chat checks its own terms and nothing the rules decide: a record that
+  # meets them is passed on, and the agnostic server's refusal comes back.
+  def test_the_agnostic_servers_refusal_is_passed_back
+    declare_me
+    send_record(Payload.message(id: @me.id, pubkey: @me.pubkey, body: "hi", ack: [@me.id], ts: now,
+                                target: ["b" * 64, "a" * 64]).merge("target" => ["b" * 64, "a" * 64]))
+
+    assert_refused(/sorted/)
   end
 
   def test_an_unknown_ack_is_a_conflict_not_a_verdict
@@ -155,7 +172,7 @@ class ChainRecordsSpec < Minitest::Test
   def test_a_client_signs_with_its_own_session_key
     declare_me
     other = new_key
-    send_record(Payload.message(id: @me.id, pubkey: ChainHelper.key_of(other), body: "x", ack: [@me.id], ts: now),
+    send_record(Payload.message(id: @me.id, pubkey: key_of(other), body: "x", ack: [@me.id], ts: now),
                 key: other)
 
     assert_refused(/session's key/)
@@ -168,17 +185,25 @@ class ChainRecordsSpec < Minitest::Test
     assert_refused(/not this session's account's/)
   end
 
-  # RULE (this server's): only the records the chat makes come from clients.
-  def test_a_client_sends_only_chat_records
+  # RULE (yours): the chat takes records about the chain and its own, and
+  # ignores other apps' -- which still reach it inside other records' histories.
+  def test_a_client_sends_chain_records_and_chat_records_only
     declare_me
     say(app: "forum")
-    assert_refused(/for the chat/)
+    assert_refused(/records about the chain and the chat's own/)
 
-    send_record(Payload.heartbeat(id: @me.id, pubkey: @me.pubkey, ack: [@me.id], ts: now))
-    assert_refused(/not heartbeat/)
+    send_record(Payload.notice(id: @me.id, pubkey: @me.pubkey, kind: "key-change", body: key_of(new_key),
+                               ack: [@me.id], ts: now))
+    assert_equal 200, last_response.status, "a key change is about the chain"
+  end
 
-    say(transfer: { "out" => [{ "to" => @me.id, "value" => "1" }] })
-    assert_refused(/does not take transfer/)
+  # RULE: integers stop where JavaScript stops reading them exactly, as they
+  # do on the agnostic server.
+  def test_a_client_record_holds_no_integer_javascript_cannot_read
+    declare_me
+    send_record(Payload.message(id: @me.id, pubkey: @me.pubkey, body: "x", ack: [@me.id], ts: now)
+                       .merge("count" => 2**53))
+    assert_refused(/integer beyond 9007199254740991/)
   end
 
   def test_a_client_is_held_to_the_server_limits
@@ -197,7 +222,7 @@ class ChainRecordsSpec < Minitest::Test
     assert_equal 200, last_response.status
 
     send_record(Payload.notice(id: @me.id, pubkey: @me.pubkey, kind: "receipt", body: "x", ack: [@me.id], ts: now))
-    assert_refused(/unknown notice kind/)
+    assert_refused(/records about the chain and the chat's own/)
 
     get "/api/notices/#{@me.id}"
     assert_equal ["outage"], json["notices"].map { |n| JSON.parse(n["payload"])["kind"] }
@@ -227,10 +252,10 @@ class ChainRecordsSpec < Minitest::Test
     send_record(Payload.reaction(id: @me.id, pubkey: @me.pubkey, body: "👍", target: [first], ack: [first], ts: now))
 
     get "/api/messages"
-    assert_equal [first], JSON.parse(json["messages"].last["payload"])["target"]
+    assert_equal [first], JSON.parse(json["messages"].reverse.find { |m| m["account"] == @me.id }["payload"])["target"]
 
     get "/api/reactions"
-    reaction = json["reactions"].first
+    reaction = json["reactions"].find { |x| x["account"] == @me.id }
     assert_equal [first], reaction["target"]
     assert_equal "👍", reaction["body"]
   end
@@ -260,50 +285,5 @@ class ChainRecordsSpec < Minitest::Test
 
     get "/api/record/#{hash}"
     assert_equal hash, json["record"]["hash"]
-  end
-
-  # --- other servers -------------------------------------------------------------------
-
-  def peer(records, token: PEER_TOKEN)
-    post_json "/api/peer/records", { "records" => records },
-              token ? { "HTTP_AUTHORIZATION" => "Bearer #{token}" } : {}
-    json
-  end
-
-  def wire(payload, key)
-    canonical = Crypto::Canonical.dump(payload)
-    { "payload" => canonical, "signature" => Sig.encode(key.sign(canonical.b)) }
-  end
-
-  # RULE (yours): another server's records are held to the rules alone, of any
-  # type, and not to the limits this server sets its own clients.
-  def test_a_peer_passes_on_any_valid_record
-    bob = Account.new
-    decl = wire(Payload.identity(pubkey: bob.pubkey, handle: "bob", ack: [@genesis.hash], ts: 1), bob.working)
-    bob_id = Record.parse(decl["payload"], decl["signature"]).record_hash
-    forum = wire(Payload.message(id: bob_id, pubkey: bob.pubkey, body: "x" * 10_000, ack: [bob_id], ts: 2,
-                                 app: "forum"), bob.working)
-    beat = wire(Payload.heartbeat(id: bob_id, pubkey: bob.pubkey, ack: [bob_id], ts: 3), bob.working)
-
-    results = peer([decl, forum, beat])["results"]
-    assert_equal [true, true, true], results.map { |r| r["stored"] }, results.inspect
-  end
-
-  def test_a_peer_record_is_still_held_to_the_rules
-    bob = Account.new
-    decl = wire(Payload.identity(pubkey: bob.pubkey, handle: " bob", ack: [@genesis.hash], ts: 1), bob.working)
-
-    result = peer([decl])["results"].first
-    refute result["stored"]
-    assert_match(/surrounding whitespace/, result["error"])
-  end
-
-  def test_only_a_peer_may_pass_records_on
-    peer([], token: "wrong")
-    assert_equal 401, last_response.status
-
-    ReputableChat::App.peer_tokens = []
-    peer([])
-    assert_equal 404, last_response.status, "with no tokens configured the route is closed"
   end
 end

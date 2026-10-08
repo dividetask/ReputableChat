@@ -4,6 +4,7 @@ require "json"
 require "roda"
 require_relative "record"
 require_relative "rules"
+require_relative "accounts"
 
 module Agnostic
   # The API other servers, and the apps built on the chain, talk to. It knows
@@ -13,7 +14,11 @@ module Agnostic
   #   GET  /api/genesis              the genesis record
   #   GET  /api/host                 this server's host account and its declaration
   #   GET  /api/records              records accepted after ?since=<cursor>, oldest first
-  #   GET  /api/records/<hash>       one record
+  #   GET  /api/records/<hash>       one record, with its state
+  #   POST /api/states               {"hashes": [...]}: each record's state as this server sees it
+  #   GET  /api/accounts/<id>        an account's newest declaration and attestation, and latest record
+  #   POST /api/accounts             {"accounts": [...]}: the same for several
+  #   GET  /api/keys/<pubkey>        the account a working key signs for
   #   GET  /api/frontier             records nothing here acknowledges yet
   #   POST /api/records              {"records": [...]} or one record; each is checked
   #   POST /api/sync                 {"heartbeat": ...}: a peer's newest heartbeat, its clock checked
@@ -28,7 +33,7 @@ module Agnostic
     # Each server gets its own subclass carrying its parts, so two servers can
     # run in one process -- as they do in the peer specs.
     class << self
-      attr_accessor :store, :ingest, :host, :genesis, :settings, :clock
+      attr_accessor :store, :ingest, :host, :genesis, :settings, :clock, :accounts
     end
 
     error do |e|
@@ -46,6 +51,29 @@ module Agnostic
 
         r.post("sync") { sync(r) }
 
+        # What an app reads to decide what to show. States change as records
+        # arrive, so these are asked, not kept.
+        r.post("states") do
+          hashes = r.POST.is_a?(Hash) ? r.POST["hashes"] : nil
+          bounded!(r, hashes, "hashes")
+          { "states" => accounts.states(hashes.select { |h| Record.hash?(h) }) }
+        end
+
+        r.on "accounts" do
+          r.is do
+            r.post do
+              ids = r.POST.is_a?(Hash) ? r.POST["accounts"] : nil
+              bounded!(r, ids, "accounts")
+              { "accounts" => ids.select { |a| Record.hash?(a) }.filter_map { |a| accounts.summary(a) } }
+            end
+          end
+          r.get(String) do |id|
+            (Record.hash?(id) && accounts.summary(id)) || r.halt(404, { "error" => "no account #{id[0, 64]} here" })
+          end
+        end
+
+        r.get("keys", String) { |pubkey| { "account" => accounts.account_for(pubkey) } }
+
         r.on "records" do
           r.is do
             r.get { page(r) }
@@ -53,7 +81,7 @@ module Agnostic
           end
           r.get(String) do |hash|
             record = Record.hash?(hash) && store.fetch(hash)
-            record ? record.to_wire : r.halt(404, { "error" => "no record #{hash[0, 64]} here" })
+            record ? record.to_wire.merge("state" => accounts.state(hash)) : r.halt(404, { "error" => "no record #{hash[0, 64]} here" })
           end
         end
       end
@@ -64,6 +92,13 @@ module Agnostic
     def server = self.class
 
     def store = server.store
+
+    def accounts = server.accounts
+
+    def bounded!(r, list, name)
+      r.halt(400, { "error" => "#{name} must be a list" }) unless list.is_a?(Array)
+      r.halt(413, { "error" => "over #{limit('batch_records')} #{name} in one request" }) if list.size > limit("batch_records")
+    end
 
     def limit(name) = server.settings.integer("limits", name)
 

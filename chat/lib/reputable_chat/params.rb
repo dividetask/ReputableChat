@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
 require "bigdecimal"
-require_relative "chain/record"
 
 module ReputableChat
   # Input validation. Everything from a client is checked for type, length and
@@ -81,11 +80,13 @@ module ReputableChat
     # counter construction is safe at.
     def iv(value) = base64url(value, bytes: 12)
 
-    # A decimal string in its one spelling, as the rules define it (section 1),
-    # within a range. The pattern is Chain::Record's, so there is one home for
-    # what a decimal looks like.
+    # A decimal string in its one spelling, as the rules define it (section 1):
+    # a whole part of at least one digit with no leading zeros, and a fraction
+    # of one to eighteen digits whose last is not zero; never "-0".
+    DECIMAL = /\A-?(0|[1-9][0-9]*)(\.[0-9]{0,17}[1-9])?\z/
+
     def decimal(value, min: -1, max: 1)
-      return nil unless value.is_a?(String) && value.match?(Chain::Record::DECIMAL) && value != "-0"
+      return nil unless value.is_a?(String) && value.match?(DECIMAL) && value != "-0"
 
       number = BigDecimal(value)
       number.between?(BigDecimal(min.to_s), BigDecimal(max.to_s)) ? value : nil

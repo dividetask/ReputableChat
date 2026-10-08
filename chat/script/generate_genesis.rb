@@ -50,7 +50,7 @@ require "reputable_chat/cryptography/seed"
 require "reputable_chat/cryptography/canonical"
 require "reputable_chat/cryptography/payload"
 require "reputable_chat/cryptography/signature"
-require "reputable_chat/chain/record"
+require "reputable_chat/chain/envelope"
 require "reputable_chat/environment"
 require "reputable_chat/genesis"
 require "reputable_chat/host"
@@ -152,9 +152,13 @@ module GenerateGenesis
   end
 
   def check!(canonical, signature)
-    ReputableChat::Chain::Record.parse(canonical, signature)
-  rescue ReputableChat::Chain::Invalid => e
-    abort "the record would be refused (#{e.message}) -- refusing to write it"
+    record = ReputableChat::Chain::Envelope.parse(canonical, signature)
+    unless Crypto::Signature.verify(pubkey_b64: record["pubkey"], signature_b64: signature, payload: record.fields)
+      abort "the signature did not verify against the Ruby verifier -- refusing to write a record nobody can check"
+    end
+    record
+  rescue ReputableChat::Chain::Envelope::Unreadable => e
+    abort "the record is unreadable (#{e.message}) -- refusing to write it"
   end
 
   def write(path, record)
@@ -268,16 +272,20 @@ module GenerateGenesis
   # The handle and bio are Text (rules, section 1): no surrounding whitespace
   # and no control characters. The whole record is judged again before it is
   # written; this catches the common mistakes before a seed is spent.
+  # The rules' handle limit and Text's forbidden characters (sections 1 and 3).
+  HANDLE_BYTES = 64
+  CONTROL = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/
+
   def validate_options!(options)
     minimum = ReputableChat::Config.load.integer("seed.min_words")
     abort "a seed needs at least #{minimum} words" if options[:words] < minimum
 
     options[:handle] = options[:handle].strip
     options[:bio] = options[:bio].strip
-    limit = ReputableChat::Chain::Record::HANDLE_BYTES
+    limit = HANDLE_BYTES
     abort "a handle is 1 to #{limit} bytes" unless options[:handle].bytesize.between?(1, limit)
-    abort "a handle has no control characters" if options[:handle].match?(ReputableChat::Chain::Record::CONTROL)
-    abort "a bio has no control characters" if options[:bio].match?(ReputableChat::Chain::Record::CONTROL)
+    abort "a handle has no control characters" if options[:handle].match?(CONTROL)
+    abort "a bio has no control characters" if options[:bio].match?(CONTROL)
   end
 
   # Overwriting would orphan every record that acknowledges the old genesis,

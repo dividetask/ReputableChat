@@ -3,7 +3,9 @@
 There are two servers in this repository, each in its own directory:
 
 - **`server/`, the agnostic server.** It knows records and the rules and nothing about the apps built on them. It checks every record against the rules before acknowledging it, stores and serves records, publishes heartbeats with its host account, and syncs with other servers at each heartbeat, ignoring any whose clock is more than ten minutes off. See [server/README.md](../../server/README.md).
-- **`chat/`, the chat app.** The browser client and the server behind it: login, the vault, images, and the chat UI. It still signs the record shapes that came before the rules.
+- **`chat/`, the chat app.** The browser client and the server behind it: login, the vault, images, and the chat UI. It runs beside an agnostic server and leaves the chain to it.
+
+Each server runs one agnostic server, and one instance of each app it supports beside it. An app is a client of its agnostic server: it never judges a record against the rules, and holds its own users to its own terms before passing their records on.
 
 What follows describes the chat app except where it says otherwise.
 
@@ -12,9 +14,10 @@ What follows describes the chat app except where it says otherwise.
 It never sees a seed, never holds a private key, and never computes a reputation. The one exception is a server's host account: the agnostic server generates one on first boot and keeps its working seed phrase on the machine, 0600, because a heartbeat has to be signed by somebody and nobody sits at a browser for it. Its master phrase is written beside it once, for the operator to move off the machine. The working key signs heartbeats and nothing else, and it is the server's own account, never anybody else's. What the chat server does:
 
 - hands out single-use login challenges
-- **judges every record against the rules before storing it**, signature included, and refuses the invalid ones (`chain/record.rb` for what a record alone decides, `chain/ledger.rb` for what needs its history)
-- stores signed blobs and serves them back byte-identical
-- holds its own clients to stricter terms than the rules: only the records the chat makes, signed by the session's own key, within the limits in `config/server.yml`. Another server passing records on, through a route closed unless `PEER_TOKENS` is set, is held to the rules alone.
+- holds its own clients to its own terms -- signed by the session's own key for the session's own account, a record the chat keeps, timestamped within an hour of its clock, no integer JavaScript cannot read exactly, within the limits in `config/server.yml` -- and passes what meets them to its agnostic server (`chain_url`), which judges it against the rules. The agnostic server's verdict is the answer the client gets.
+- keeps a copy of the records it shows (`chain/mirror.rb`), pulled from the agnostic server in the order that server accepted them: records about the chain itself (identity declarations, attestations, heartbeats, releases, and the notices the rules define) and the chat's own (messages and reactions typed `:chat`, and the notice kinds in `config/notices.yml`). Another app's records are not its business, though they reach it anyway inside other records' histories.
+- asks the agnostic server for what needs the chain: each record's state, the account a key signs for, an account's newest declaration and attestation.
+- serves signed blobs back byte-identical
 
 Signed blobs go out exactly as they came in. Re-serializing them server-side would only create a way to break signatures.
 
@@ -130,8 +133,8 @@ public/js/
 
 - Loading the client from a release. See the end of [chain.md](chain.md).
 - Client-side verification of *other people's* attestations (`session.verify_signatures`). Your own vault is already verified, since detecting tampering is why it is signed.
-- Key changes from the browser. The chat server judges key changes, compromised notices and quorums, and the genesis and host accounts declare master keys, but the browser declares a working key only and has no way to change one.
-- Heartbeats and releases from the chat server. It judges them but publishes neither; the agnostic server publishes heartbeats.
+- Key changes from the browser. The chat passes them on and the genesis and host accounts declare master keys, but the browser declares a working key only and has no way to change one.
+- Files on the chain. Records name files by hash, but each chat server stores and serves only its own uploads, so an avatar uploaded to one server is not on another.
 - WebSocket delivery — messages currently poll every 4s
 - Chunking an attestation, which currently grows an entry per person ever rated
-- Moving the chat onto the agnostic server. The agnostic server exchanges records between servers; the chat takes records another server passes on (`POST /api/peer/records`, with a token from `PEER_TOKENS`) but does not sync. The principle it has to keep: a person sees messages whatever server they came from, and is largely unaware which server anyone else uses. What they see is decided by their friend list, never by where somebody's account lives.
+- Federation's principle, which the agnostic servers' syncing has to keep: a person sees messages whatever server they came from, and is largely unaware which server anyone else uses. What they see is decided by their friend list, never by where somebody's account lives.

@@ -2,6 +2,7 @@
 
 require_relative "spec_helper"
 require_relative "genesis_fixture"
+require_relative "chain_server"
 require "rack/test"
 require "ed25519"
 require "reputable_chat/app"
@@ -20,13 +21,9 @@ class AppSpec < Minitest::Test
   ORIGIN = "http://example.test"
 
   def setup
-    ReputableChat::App.store  = ReputableChat::Store::Database.new("sqlite:/")
+    ChainServer.wire
     ReputableChat::App.images = ReputableChat::Store::Images.new(Dir.mktmpdir)
     ReputableChat::App.origins = [ORIGIN]
-    ReputableChat::App.genesis = GenesisFixture.build
-    ReputableChat::App.host = nil
-    ReputableChat::App.book = ReputableChat::Chain::Book.new(ReputableChat::App.store,
-                                                             genesis: ReputableChat::App.genesis.record)
     @signing = Ed25519::SigningKey.generate
     @pubkey  = Sig.encode(@signing.verify_key.to_bytes)
   end

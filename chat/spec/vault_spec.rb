@@ -2,6 +2,7 @@
 
 require_relative "spec_helper"
 require_relative "genesis_fixture"
+require_relative "chain_server"
 require "rack/test"
 require "ed25519"
 require "base64"
@@ -20,12 +21,9 @@ class VaultSpec < Minitest::Test
   ORIGIN = "http://example.test"
 
   def setup
-    ReputableChat::App.store   = ReputableChat::Store::Database.new("sqlite:/")
+    ChainServer.wire
     ReputableChat::App.images  = ReputableChat::Store::Images.new(Dir.mktmpdir)
     ReputableChat::App.origins  = [ORIGIN]
-    ReputableChat::App.genesis = GenesisFixture.build
-    ReputableChat::App.book = ReputableChat::Chain::Book.new(ReputableChat::App.store,
-                                                             genesis: ReputableChat::App.genesis.record)
     @signing, @pubkey = new_user
     log_in_as(@signing, @pubkey)
   end
