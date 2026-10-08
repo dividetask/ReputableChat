@@ -17,7 +17,10 @@ module Servers
         env["CONTENT_TYPE"] = "application/json"
       end
       response = Rack::MockRequest.new(app).request(method.to_s.upcase, uri.request_uri, env)
-      raise "#{address} answered #{response.status}" unless response.status.between?(200, 299)
+      unless response.status.between?(200, 299)
+        raise Agnostic::Peers::HttpError.new("#{address} answered #{response.status}", status: response.status,
+                                                                                         retry_after: response.headers["retry-after"])
+      end
 
       JSON.parse(response.body)
     end

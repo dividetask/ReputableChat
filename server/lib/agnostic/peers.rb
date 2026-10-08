@@ -31,7 +31,9 @@ module Agnostic
   # and forgotten once it has gone peers.forget_after_seconds without being
   # reached; hearing from it again brings it back.
   class Peers
-    def initialize(store:, ingest:, settings:, http: nil, clock: -> { Time.now.to_i }, host: nil)
+    def initialize(store:, ingest:, settings:, http: nil, clock: -> { Time.now.to_i }, host: nil,
+                   sleeper: ->(seconds) { sleep seconds })
+      @sleeper = sleeper
       @clock = clock
       @store = store
       @ingest = ingest
@@ -177,43 +179,93 @@ module Agnostic
       budget
     end
 
-    # --- sweep -----------------------------------------------------------------
+    # --- catching up -----------------------------------------------------------
 
-    # Copies the chain from a server, generation by generation, part by part,
-    # resuming where the last sweep of it stopped. Returns how many records
-    # were new here.
-    def sweep(url)
-      peer = @store.peer(url)
-      generation = peer ? peer[:sweep_generation] : 1
-      part = peer ? peer[:sweep_part] : 0
-      added = 0
-      loop do
-        body = get(url, "/api/sweep?generation=#{generation}&part=#{part}")
-        Array(body["records"]).each do |wire|
-          added += 1 if @ingest.submit(Record.from_wire(wire), source: url).status == :accepted
-        end
-        following = body["next"]
-        unless following.is_a?(Hash)
-          @store.update_peer(url, swept: true) if peer
-          return added
-        end
+    # A request a server answered with an error status.
+    class HttpError < StandardError
+      attr_reader :status, :retry_after
 
-        generation = Integer(following["generation"])
-        part = Integer(following["part"])
-        @store.update_peer(url, sweep_generation: generation, sweep_part: part) if peer
+      def initialize(message, status:, retry_after: nil)
+        super(message)
+        @status = status
+        @retry_after = retry_after
       end
     end
 
-    # The servers given at setup or in the settings, each swept once.
-    def sweep_settings_peers
-      @store.peers.select { |p| p[:source] == "settings" && !p[:swept] && !p[:forgotten] }.each do |peer|
-        next unless contact(peer[:url])
+    # Sweeps the chain before going live, from several servers at once.
+    #
+    # Generations are counted by one account that publishes heartbeats -- the
+    # first server's own -- so they mean the same on every server holding its
+    # heartbeats, and each server can be asked for different ones. Up to one
+    # generation per server is fetched in parallel; they are checked in order,
+    # each record after everything it acknowledges. Progress is kept per
+    # account, so a sweep resumes where it stopped. Returns how many records
+    # were new here.
+    def catch_up(urls)
+      sources = urls.select { |url| contact(url) }
+      return 0 if sources.empty?
 
-        count = sweep(peer[:url])
-        reached(peer[:url])
-        warn "caught up from #{peer[:url]}: #{count} records"
+      account = get(sources.first, "/api")["host"]
+      reach = sources.to_h { |url| [url, latest_generation(url, account)] }.select { |_, latest| latest }
+      top = reach.values.max.to_i
+      generation = (@store.meta("sweep:#{account}") || "1").to_i
+      added = 0
+      while generation <= top
+        batch = (generation..[generation + reach.size - 1, top].min).to_a
+        threads = batch.each_with_index.map do |g, i|
+          holders = reach.keys.rotate(i).select { |url| reach[url] >= g }
+          Thread.new { fetch_generation(account, g, holders) }
+        end
+        batch.zip(threads.map(&:value)).each do |g, records|
+          return added unless records
+
+          added += records.count { |wire| @ingest.submit(Record.from_wire(wire), source: :sweep).status == :accepted }
+          @store.save_meta("sweep:#{account}", g + 1)
+        end
+        generation = batch.last + 1
+      end
+      reach.each_key { |url| reached(url) }
+      added
+    end
+
+    def latest_generation(url, account)
+      Integer(sweep_request(url, account, 1, 0)["latest"])
+    rescue StandardError => e
+      failed(url, "sweep failed: #{e.message}")
+      nil
+    end
+
+    # Every part of one generation, from the first of these servers that
+    # gives all of it; nil when none does.
+    def fetch_generation(account, generation, holders)
+      holders.each do |url|
+        records = []
+        part = 0
+        loop do
+          body = sweep_request(url, account, generation, part)
+          records.concat(Array(body["records"]))
+          following = body["next"]
+          break unless following.is_a?(Hash) && following["generation"] == generation
+
+          part = Integer(following["part"])
+        end
+        return records
       rescue StandardError => e
-        failed(peer[:url], "sweep failed: #{e.message}")
+        warn "#{url}: generation #{generation} of #{account} failed: #{e.message}"
+      end
+      nil
+    end
+
+    # Waits as long as a server asks, a few times, when it is asked too often.
+    def sweep_request(url, account, generation, part)
+      attempts = 0
+      begin
+        get(url, "/api/sweep?account=#{account}&generation=#{generation}&part=#{part}")
+      rescue HttpError => e
+        raise unless e.status == 429 && (attempts += 1) <= 3
+
+        @sleeper.call([e.retry_after.to_i, 1].max)
+        retry
       end
     end
 
@@ -289,7 +341,10 @@ module Agnostic
           request.body = JSON.generate(body)
         end
         response = http.request(request)
-        raise "#{method.upcase} #{address} answered #{response.code}" unless response.is_a?(Net::HTTPSuccess)
+        unless response.is_a?(Net::HTTPSuccess)
+          raise HttpError.new("#{method.upcase} #{address} answered #{response.code}",
+                              status: response.code.to_i, retry_after: response["retry-after"])
+        end
 
         JSON.parse(response.body)
       end

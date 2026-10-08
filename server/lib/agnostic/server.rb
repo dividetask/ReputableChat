@@ -11,6 +11,7 @@ require_relative "heartbeat"
 require_relative "ingest"
 require_relative "peers"
 require_relative "record"
+require_relative "rate_limit"
 require_relative "rules"
 require_relative "server_ratings"
 require_relative "settings"
@@ -54,6 +55,7 @@ module Agnostic
       klass.genesis = genesis
       klass.settings = settings
       klass.clock = @clock
+      klass.limiter = RateLimit.new(per_minute: settings.integer("limits", "sweep_requests_per_minute"), clock: @clock)
       klass.freeze.app
     end
 
@@ -78,10 +80,10 @@ module Agnostic
     end
 
     # Before going live -- before its first heartbeat after a restart, too --
-    # a server sweeps the chain from the servers it was given at setup, each
-    # once to the end, resuming where it stopped.
+    # a server sweeps the chain from the servers it was given at setup,
+    # resuming where it stopped.
     def catch_up
-      peers.sweep_settings_peers
+      peers.catch_up(store.peers.select { |p| p[:source] == "settings" && !p[:forgotten] }.map { |p| p[:url] })
     rescue StandardError => e
       warn "catching up failed: #{e.message}"
     end
@@ -95,7 +97,6 @@ module Agnostic
       result = heartbeat.beat
       return result unless result&.status == :accepted
 
-      store.assign_generation(heartbeat.previous)
       peers.sync(heartbeat.previous)
       result
     end
@@ -126,10 +127,11 @@ module Agnostic
       record
     end
 
-    # Heartbeats published before generations were kept.
+    # Heartbeats stored before generations were kept, oldest first.
     def assign_missed_generations
-      store.by_account(host.id, kind: "heartbeat").sort_by(&:beat_index).each do |beat|
-        store.assign_generation(beat)
+      store.db[:records].where(kind: "heartbeat").order(:seq).all.each do |row|
+        beat = store.fetch(row[:hash])
+        store.assign_generations(beat) unless store.generations_assigned?(beat)
       end
     end
 

@@ -28,7 +28,8 @@ module Agnostic
         "reliable" => { "after_seconds" => 10_368_000, "rating" => "0.01" },
         "established" => { "after_seconds" => 31_536_000, "rating" => "0.02" }
       },
-      "limits" => { "request_bytes" => 8_388_608, "batch_records" => 500, "page_records" => 500, "sweep_records" => 500 }
+      "limits" => { "request_bytes" => 8_388_608, "batch_records" => 500, "page_records" => 500, "sweep_records" => 500,
+                     "sweep_requests_per_minute" => 60 }
     }.freeze
 
     # The least each number may be. The heartbeat floor is the rules' own.

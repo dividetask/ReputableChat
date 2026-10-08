@@ -114,3 +114,6 @@ limits:
   # Records in one part of a sweep (GET /api/sweep): the most this server
   # shares with a server catching up in one request.
   sweep_records: "500"
+  # How many sweep requests one caller may make in any minute; past that it
+  # is told how long to wait.
+  sweep_requests_per_minute: "60"

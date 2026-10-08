@@ -32,7 +32,7 @@ bundle exec rake spec          # the suite
 bundle exec rake setup         # a fresh server: handle, address, other servers
 bundle exec puma               # http://localhost:9292
 bundle exec rake peers         # the servers it syncs with, or has forgotten
-bundle exec rake "sweep[<url>]"  # copy the chain from a server, generation by generation
+bundle exec rake "sweep[<url>,<url>]"  # copy the chain from servers, generation by generation
 bundle exec rake host          # this server's host account
 BACKGROUND=0 bundle exec puma  # the API alone: no heartbeats, no syncing
 PEERS=https://a.example,https://b.example HOST_URL=https://me.example bundle exec puma
@@ -122,21 +122,39 @@ with the next heartbeat, not sooner.
 ## Catching up
 
 A new server spends some time catching up before it goes live: before its
-first heartbeat it sweeps the chain from each server it was given at setup,
-and only then starts publishing. `bundle exec rake "sweep[<url>]"` sweeps from
-any server by hand.
+first heartbeat it sweeps the chain from the servers it was given at setup,
+several at once, and only then starts publishing. It does the same after a
+restart, picking up where it stopped. `bundle exec rake "sweep[<url>,<url>]"`
+sweeps by hand.
 
-A sweep asks for the chain in parts (`GET /api/sweep?generation=&part=`).
-Records are grouped into **generations** by the sharing server's own
-heartbeats: generation *g* is every record its heartbeat *g* brought into its
-history that no earlier heartbeat of its own held, so generation 1 is
-everything up to its first. Each part holds at most `limits.sweep_records`
-(500) of one generation, every record after everything it acknowledges, so
-the server catching up can check each one as it arrives. Each answer names
-the next part to ask for, and nothing once the latest generation is done.
-Progress is kept per server, so an interrupted sweep resumes where it
-stopped. Records the sharing server has not yet put in a heartbeat are in no
-generation; they come with that server's next heartbeat instead.
+**Generations.** The chain is swept a generation at a time, and generations
+belong to an account that publishes heartbeats: generation *g* of an account
+is every record its heartbeat *g* brought into its history that none of its
+earlier heartbeats held, so generation 1 is everything up to its first. A
+record's history never changes, so every server holding those heartbeats
+reaches the same generations. Within one, records are ordered by depth (one
+past the deepest of their parents in the same generation), then by hash:
+each comes after everything it acknowledges, and the order is the same on
+every server.
+
+**The request.** `GET /api/sweep?account=&generation=&part=` names the
+account whose generations are wanted (the answering server's own if left
+out), the generation, and the part. A part holds at most
+`limits.sweep_records` (500). The answer says how many parts the generation
+has, the latest generation of that account the server holds, and the `next`
+part to ask for, or nothing after the last. Each caller may make
+`limits.sweep_requests_per_minute` (60) sweep requests in any minute; past
+that it gets a 429 saying how many seconds to wait, and a server catching up
+waits that long and asks again.
+
+**From several servers at once.** A server catching up counts generations by
+the first of its servers' own account, asks each server how far it holds
+them, and fetches up to one generation from each server in parallel, then
+checks them in order. A server that fails on a generation is replaced by the
+next that holds it. Progress is kept per account.
+
+Records no heartbeat of that account holds yet are in no generation; they
+arrive with heartbeats once the server is live.
 
 ## Which servers
 
@@ -217,7 +235,7 @@ none. It is signed just before a heartbeat, which then carries it.
 | `GET /api/records/<hash>` | one record, or 404 |
 | `GET /api/frontier` | hashes of the records nothing here acknowledges |
 | `POST /api/records` | `{"records": [...]}`, or one record on its own |
-| `GET /api/sweep?generation=&part=` | one capped part of one generation, and the `next` part to ask for |
+| `GET /api/sweep?account=&generation=&part=` | one capped part of one generation of an account, and the `next` part to ask for; 429 when asked too often |
 | `POST /api/sync` | `{"heartbeat": ...}`: a peer's newest heartbeat; 403 when the peer is or becomes ignored |
 
 A record on the wire is `{"payload": "<canonical JSON>", "signature": "<base64url>"}`;

@@ -16,7 +16,7 @@ module Agnostic
   #   GET  /api/records/<hash>       one record
   #   GET  /api/frontier             records nothing here acknowledges yet
   #   POST /api/records              {"records": [...]} or one record; each is checked
-  #   GET  /api/sweep                ?generation=&part=: the chain in parts, for a server catching up
+  #   GET  /api/sweep                ?account=&generation=&part=: the chain in parts, for catching up
   #   POST /api/sync                 {"heartbeat": ...}: a peer's newest heartbeat, its clock checked
   class App < Roda
     plugin :json, classes: [Array, Hash]
@@ -29,7 +29,7 @@ module Agnostic
     # Each server gets its own subclass carrying its parts, so two servers can
     # run in one process -- as they do in the peer specs.
     class << self
-      attr_accessor :store, :ingest, :host, :genesis, :settings, :clock
+      attr_accessor :store, :ingest, :host, :genesis, :settings, :clock, :limiter
     end
 
     error do |e|
@@ -90,24 +90,35 @@ module Agnostic
       { "records" => records.map(&:to_wire), "next" => records.last&.seq || since }
     end
 
-    # A full sweep, for a server catching up. Records are grouped into
-    # generations by this server's own heartbeats, and a generation is served
-    # in parts of at most limits.sweep_records, each record after everything
-    # it acknowledges. "next" names the part to ask for after this one, and is
-    # null once the latest generation has been served. Records no heartbeat
-    # of this server holds yet are not in any generation; they arrive with
-    # its next heartbeat instead.
+    # A full sweep, for a server catching up: one part of one generation of
+    # an account that publishes heartbeats (store.rb says what a generation
+    # is), this server's own unless ?account= names another. A part holds at
+    # most limits.sweep_records, each record after everything it acknowledges
+    # and in the same order on every server. "next" names the part after this
+    # one, or the next generation's first, and is null once this server has
+    # no later generation of that account. Each caller may ask
+    # limits.sweep_requests_per_minute times a minute.
     def sweep(r)
+      wait = server.limiter.wait(r.ip)
+      if wait
+        response["retry-after"] = wait.to_s
+        r.halt(429, { "error" => "too many sweep requests; ask again in #{wait} seconds" })
+      end
+
+      account = r.params["account"].to_s.empty? ? server.host.id : r.params["account"].to_s
+      r.halt(400, { "error" => "account must be an account ID" }) unless Record.hash?(account)
       generation = [Integer(r.params["generation"].to_s, exception: false) || 1, 1].max
       part = [Integer(r.params["part"].to_s, exception: false) || 0, 0].max
       size = limit("sweep_records")
-      latest = store.latest_generation
-      records = generation <= latest ? store.generation_part(generation, part, size) : []
-      following = if records.size == size then { "generation" => generation, "part" => part + 1 }
+      latest = store.latest_generation(account)
+      count = generation <= latest ? store.generation_size(account, generation) : 0
+      parts = (count + size - 1) / size
+      records = part < parts ? store.generation_part(account, generation, part, size) : []
+      following = if part + 1 < parts then { "generation" => generation, "part" => part + 1 }
                   elsif generation < latest then { "generation" => generation + 1, "part" => 0 }
                   end
-      { "generation" => generation, "part" => part, "latest" => latest, "records" => records.map(&:to_wire),
-        "next" => following }
+      { "account" => account, "generation" => generation, "part" => part, "parts" => parts, "latest" => latest,
+        "records" => records.map(&:to_wire), "next" => following }
     end
 
     # A peer offering the heartbeat it has just published. Its ts says what the

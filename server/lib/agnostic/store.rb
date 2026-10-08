@@ -42,6 +42,7 @@ module Agnostic
         rows(:endorsements, record, record.endorse) { |h| { record: record.digest, endorsed: h } }
         spent = Array(record.transfer&.fetch("in", nil))
         rows(:spends, record, spent) { |h| { record: record.digest, output: h, account: record.account } }
+        assign_generations(record) if record.heartbeat?
       end
       record
     end
@@ -142,32 +143,59 @@ module Agnostic
 
     # --- generations ------------------------------------------------------------------
 
-    # Generation g is what this server's own heartbeat g brought into its
-    # history: every record that heartbeat holds that no earlier one of its
-    # own did. A record with a generation has ancestors with one too, so the
-    # walk stops at the first it meets.
-    def assign_generation(beat)
+    # Generations belong to an account that publishes heartbeats: its
+    # generation g is every record its heartbeat g brought into its history
+    # that none of its earlier heartbeats held. A record's history never
+    # changes, so every server holding those heartbeats reaches the same
+    # generations, and a server catching up can take them from any of them.
+    #
+    # Within a generation records are ordered by depth -- one past the
+    # deepest of their parents in the same generation -- then by hash. That
+    # puts each after everything it acknowledges, and puts them in the same
+    # order on every server, so part 3 of a generation is the same records
+    # wherever it is asked for.
+    def assign_generations(beat)
+      account = beat.account
       sql = <<~SQL
         WITH RECURSIVE h(hash) AS (
           VALUES ('#{beat.digest}')
           UNION
           SELECT acks.parent FROM acks
             JOIN h ON acks.child = h.hash
-            JOIN records r ON r.hash = acks.parent
-          WHERE r.generation IS NULL
+          WHERE NOT EXISTS (
+            SELECT 1 FROM generations g WHERE g.account = #{db.literal(account)} AND g.record = acks.parent
+          )
         )
-        UPDATE records SET generation = #{Integer(beat.beat_index)}
-        WHERE generation IS NULL AND hash IN (SELECT hash FROM h)
+        SELECT hash FROM h
       SQL
-      db.run(sql)
+      fresh = db.fetch(sql).map { |row| row[:hash] }.to_set
+      depth = {}
+      parents = fresh.each_slice(500).flat_map { |slice| db[:acks].where(child: slice).select_map(%i[child parent]) }
+                     .group_by(&:first).transform_values { |pairs| pairs.map(&:last).select { |h| fresh.include?(h) } }
+      order = db[:records].where(hash: fresh.to_a).order(:seq).select_map(:hash)
+      order.each { |h| depth[h] = (parents.fetch(h, []).map { |p| depth.fetch(p) }.max || -1) + 1 }
+      rows = order.sort_by { |h| [depth[h], h] }.each_with_index.map do |h, i|
+        { account: account, record: h, generation: beat.beat_index, position: i }
+      end
+      db[:generations].insert_ignore.multi_insert(rows)
     end
 
-    def latest_generation = db[:records].max(:generation) || 0
+    def generations_assigned?(beat) = !db[:generations].where(account: beat.account, record: beat.digest).empty?
 
-    # One part of a generation, in the order this server accepted the records,
-    # which puts each after everything it acknowledges.
-    def generation_part(generation, part, size)
-      db[:records].where(generation: generation).order(:seq).limit(size, part * size).all.map { |row| hydrate(row) }
+    def latest_generation(account) = db[:generations].where(account: account).max(:generation) || 0
+
+    def generation_size(account, generation) = db[:generations].where(account: account, generation: generation).count
+
+    def generation_part(account, generation, part, size)
+      hashes = db[:generations].where(account: account, generation: generation).order(:position)
+                               .limit(size, part * size).select_map(:record)
+      rows = db[:records].where(hash: hashes).all.to_h { |row| [row[:hash], row] }
+      hashes.map { |h| hydrate(rows.fetch(h)) }
+    end
+
+    # Accounts whose generations this server can serve, and how far.
+    def generation_accounts
+      db[:generations].group_and_count(:account).select_append(Sequel.function(:max, :generation).as(:latest)).all
     end
 
     # Records nothing on this server acknowledges yet.
@@ -363,11 +391,15 @@ module Agnostic
         String :url, primary_key: true
         Integer :cursor, null: false, default: 0
       end
-      db.alter_table(:records) { add_column :generation, Integer; add_index :generation } unless
-        db[:records].columns.include?(:generation)
+      db.create_table?(:generations) do
+        String :account, null: false
+        String :record, null: false
+        Integer :generation, null: false
+        Integer :position, null: false
+        primary_key %i[account record]
+        index %i[account generation position]
+      end
       {
-        sweep_generation: [Integer, { null: false, default: 1 }], sweep_part: [Integer, { null: false, default: 0 }],
-        swept: [TrueClass, { null: false, default: false }],
         host: [String], source: [String, { null: false, default: "settings" }],
         added_at: [Integer, { null: false, default: 0 }], last_success_at: [Integer],
         failures: [Integer, { null: false, default: 0 }], next_attempt_at: [Integer, { null: false, default: 0 }],
