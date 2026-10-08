@@ -58,9 +58,4 @@ task :genesis do
   ruby "-Ilib", "script/generate_genesis.rb"
 end
 
-desc "Generate this server's host account, which acknowledges the genesis"
-task :host do
-  ruby "-Ilib", "script/generate_genesis.rb", "--host"
-end
-
 task default: :spec

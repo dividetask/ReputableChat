@@ -59,11 +59,11 @@ class BrowserSpec < Minitest::Test
 
   # RULE: the default friends are on the list before the account exists, named
   # and, where they have one, with their faces, from the declarations the client
-  # already holds. Development runs a host account, so there are two: the
-  # genesis account and this server's host account.
+  # already holds. Every chat server has a host account -- its agnostic
+  # server's -- so there are two: the genesis account and that one.
   def test_the_default_friends_are_listed_with_their_names_and_faces
     assert_equal 2, seen.fetch("friend_rows_before_creating")
-    assert_equal "Host", seen.fetch("host_named")
+    assert_equal ChainServer.host.handle, seen.fetch("host_named")
     assert_equal "Tim", seen.fetch("genesis_named")
     assert seen.fetch("genesis_has_an_image"), "the genesis avatar must be its image, not a placeholder"
     assert_equal 64, seen.fetch("whole_key_shown").length, "the whole account ID must be shown"
@@ -141,7 +141,8 @@ class BrowserSpec < Minitest::Test
         "DATABASE_URL" => "sqlite://#{@dir}/browser.db",
         "IMAGE_ROOT" => "#{@dir}/images",
         # The agnostic server the specs share, which holds the chain.
-        "CHAIN_URL" => ChainServer.url },
+        "CHAIN_URL" => ChainServer.url,
+        "HOST_SEED" => ChainServer.host_seed },
       "bundle", "exec", "puma", "-p", @port.to_s, "-q",
       chdir: ROOT, out: File::NULL, err: File::NULL
     )

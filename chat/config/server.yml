@@ -31,6 +31,21 @@
 # overrides. Start one with `cd server && bundle exec puma -p 9393`.
 chain_url: "http://localhost:9393"
 
+# The agnostic server's working seed. A chat server shares its agnostic
+# server's host account, and refuses to boot if this is not it. HOST_SEED
+# overrides; %{environment} is development or production.
+host_seed: "../server/data/%{environment}/host.seed"
+
+# Where other chat servers reach this one to fetch files its people uploaded.
+# Announced on the chain when first set and whenever it changes; unset, this
+# server does not announce itself. PUBLIC_URL overrides.
+# url: "https://chat.example.org"
+
+# Whether other chat servers at private, loopback or link-local addresses may
+# be fetched from. Unset: yes in development, no in production, where they
+# must also be https. ALLOW_PRIVATE_PEERS overrides.
+# allow_private_peers: false
+
 database_url: "sqlite://data/reputablechat.db"
 image_root: "data/images"
 

@@ -5,7 +5,6 @@ require_relative "genesis_fixture"
 require "reputable_chat/cryptography/record"
 require "reputable_chat/cryptography/payload"
 require "reputable_chat/genesis"
-require "reputable_chat/host"
 require "reputable_chat/cryptography/canonical"
 require "json"
 require "ed25519"
@@ -158,16 +157,13 @@ class ChainSpec < Minitest::Test
                  "docs/project/rules/v0.001.md has changed since the genesis was made"
   end
 
-  # RULE: an account made for the developer or a server declares a master key
-  # as well as a working key.
-  def test_the_committed_accounts_declare_a_master_key
+  # RULE: the developer's account declares a master key as well as a working
+  # key. (A server's host account is its agnostic server's, which does the same.)
+  def test_the_committed_genesis_declares_a_master_key
     genesis = ReputableChat::Genesis.load(path: ReputableChat::Genesis.path("development"))
-    host = ReputableChat::Host.load(path: ReputableChat::Host.path("development"), genesis: genesis)
 
-    [genesis, host].each do |committed|
-      assert committed.mpubkey, "#{committed.handle} declares no master key"
-      refute_equal committed.pubkey, committed.mpubkey
-    end
+    assert genesis.mpubkey, "the genesis declares no master key"
+    refute_equal genesis.pubkey, genesis.mpubkey
   end
 
   # --- the genesis avatar -------------------------------------------------

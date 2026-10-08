@@ -19,6 +19,7 @@ module Agnostic
   #   GET  /api/accounts/<id>        an account's newest declaration and attestation, and latest record
   #   POST /api/accounts             {"accounts": [...]}: the same for several
   #   GET  /api/keys/<pubkey>        the account a working key signs for
+  #   GET  /api/ratings              this server's ratings of other accounts, by hand or by reachability
   #   GET  /api/frontier             records nothing here acknowledges yet
   #   POST /api/records              {"records": [...]} or one record; each is checked
   #   GET  /api/sweep                ?account=&generation=&part=: the chain in parts, for catching up
@@ -34,7 +35,7 @@ module Agnostic
     # Each server gets its own subclass carrying its parts, so two servers can
     # run in one process -- as they do in the peer specs.
     class << self
-      attr_accessor :store, :ingest, :host, :genesis, :settings, :clock, :accounts, :limiter
+      attr_accessor :store, :ingest, :host, :genesis, :settings, :clock, :accounts, :limiter, :ratings
     end
 
     error do |e|
@@ -75,6 +76,12 @@ module Agnostic
         end
 
         r.get("keys", String) { |pubkey| { "account" => accounts.account_for(pubkey) } }
+
+        # What this server rates each account it has an opinion of, and
+        # whether by hand or by reachability. The apps beside it read this to
+        # choose which of their peers to ask for things the chain does not
+        # carry, such as files.
+        r.get("ratings") { { "ratings" => server.ratings ? server.ratings.current : {} } }
 
         r.on "records" do
           r.is do

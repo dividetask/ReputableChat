@@ -2,6 +2,7 @@
 
 require "yaml"
 require_relative "origin"
+require_relative "environment"
 
 module ReputableChat
   # Server settings from config/server.yml, with environment variables winning
@@ -18,14 +19,26 @@ module ReputableChat
       "origin" => nil,
       "database_url" => "sqlite://data/reputablechat.db",
       "image_root" => "data/images",
-      "chain_url" => "http://localhost:9393"
+      "chain_url" => "http://localhost:9393",
+      # The agnostic server's working seed: the chat and the agnostic server
+      # beside it are one account. %{environment} is development or production.
+      "host_seed" => "../server/data/%{environment}/host.seed",
+      # Where other chat servers reach this one for files. Unset, this server
+      # does not announce itself and nobody fetches from it.
+      "url" => nil,
+      # Whether other chat servers at private, loopback or link-local
+      # addresses may be fetched from. Unset: yes in development, no otherwise.
+      "allow_private_peers" => nil
     }.freeze
 
     ENV_KEYS = {
       "origin" => "ORIGIN",
       "database_url" => "DATABASE_URL",
       "image_root" => "IMAGE_ROOT",
-      "chain_url" => "CHAIN_URL"
+      "chain_url" => "CHAIN_URL",
+      "host_seed" => "HOST_SEED",
+      "url" => "PUBLIC_URL",
+      "allow_private_peers" => "ALLOW_PRIVATE_PEERS"
     }.freeze
 
     # Size limits are an operator's decision rather than a property of the
@@ -59,7 +72,12 @@ module ReputableChat
         [key, value]
       end
 
+      root = File.expand_path("../..", __dir__)
+      environment = Environment.name
       settings.merge("origin" => Origin.list(settings["origin"]),
+                     "host_seed" => File.expand_path(format(settings["host_seed"], environment: environment), root),
+                     "url" => present(settings["url"]&.to_s)&.chomp("/"),
+                     "allow_private_peers" => flag(settings["allow_private_peers"], environment != Environment::PRODUCTION),
                      "limits" => limits(file["limits"] || {}, env))
     end
 
@@ -73,6 +91,12 @@ module ReputableChat
 
         [key, parsed&.positive? ? parsed : fallback]
       end
+    end
+
+    def flag(value, fallback)
+      return fallback if value.nil? || value.to_s.strip.empty?
+
+      %w[1 true yes].include?(value.to_s.strip.downcase)
     end
 
     def present(value) = value.is_a?(String) && !value.strip.empty? ? value : nil

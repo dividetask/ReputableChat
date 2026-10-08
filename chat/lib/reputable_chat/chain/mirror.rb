@@ -43,6 +43,18 @@ module ReputableChat
 
       def notices(account, limit: 100) = sync.then { @store.records_of(account, kind: "notice", limit: limit) }
 
+      # The chat servers that have announced themselves: account => the url
+      # of its latest service notice, or nil where that notice withdrew it.
+      def services
+        sync
+        @store.chat_records("notice", 100_000).each_with_object({}) do |row, out|
+          envelope = Envelope.parse(row[:payload], row[:signature])
+          next unless envelope.service?
+
+          out[envelope.account] = envelope["url"].is_a?(String) ? envelope["url"].chomp("/") : nil
+        end
+      end
+
       private
 
       def keep(wire)

@@ -18,6 +18,9 @@ module ReputableChat
       # they came from.
       CHAIN_KINDS = %w[identity attestation heartbeat release].freeze
       CHAT = "chat"
+      # A chat server announcing itself: a notice of this kind typed for the
+      # chat, carrying the address it is reached at (Chain::Service).
+      SERVICE = "service"
 
       attr_reader :payload, :signature, :fields, :record_hash
 
@@ -49,6 +52,8 @@ module ReputableChat
       def app?(name) = apps.first == name
       def notice_kind = kind == "notice" ? fields["kind"] : nil
 
+      def service? = notice_kind == SERVICE && app?(CHAT)
+
       def first_declaration? = kind == "identity" && !fields.key?("id")
       def account = fields["id"] || record_hash
       def targets = fields["target"].is_a?(Array) ? fields["target"] : []
@@ -57,7 +62,7 @@ module ReputableChat
       # and the chat's own records. Another app's records are not the chat's
       # business, though they reach it anyway inside other records' histories.
       def relevant?(chat_notices)
-        return true if CHAIN_KINDS.include?(kind)
+        return true if CHAIN_KINDS.include?(kind) || service?
         return true if kind == "notice" && (CHAIN_NOTICES.include?(notice_kind) || chat_notices.include?(notice_kind))
 
         %w[message reaction].include?(kind) && app?(CHAT)

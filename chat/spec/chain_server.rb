@@ -7,6 +7,7 @@ require "tmpdir"
 require "reputable_chat/app"
 require "reputable_chat/chain_client"
 require "reputable_chat/genesis"
+require "reputable_chat/host"
 
 # A real agnostic server for the specs that need the chain: started once per
 # run from ../server, on a free port with its own data directory, running the
@@ -20,19 +21,27 @@ module ChainServer
 
   def url = @url ||= start
 
+  # Where the server wrote its host account's working seed on first boot.
+  def host_seed = File.join(@dir || (url && @dir), "development", "host.seed")
+
+  # The chat's host account: the agnostic server's, derived once per run since
+  # Argon2id is slow on purpose.
+  def host = @host ||= ReputableChat::Host.join(ReputableChat::ChainClient.new(url), seed_path: host_seed)
+
   # The chat wired to it: the development genesis, which both commit, and a
   # fresh local database and mirror.
   def wire(app = ReputableChat::App, store: ReputableChat::Store::Database.new("sqlite:/"))
     app.store = store
     app.genesis = ReputableChat::Genesis.load(path: ReputableChat::Genesis.path("development"))
-    app.host = nil
     app.chain = ReputableChat::ChainClient.new(url)
+    app.host = host
+    app.files = nil
     app.mirror = ReputableChat::Chain::Mirror.new(store, app.chain, chat_notices: ReputableChat::App::NOTICE_KINDS)
     app
   end
 
   def start
-    dir = Dir.mktmpdir("chat-spec-chain")
+    dir = @dir = Dir.mktmpdir("chat-spec-chain")
     port = TCPServer.open("127.0.0.1", 0) { |s| s.addr[1] }
     log = File.join(dir, "server.log")
     env = { "RACK_ENV" => "development", "BACKGROUND" => "0", "DATA_DIR" => dir,

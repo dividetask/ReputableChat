@@ -12,6 +12,8 @@ require_relative "cryptography/canonical"
 require_relative "cryptography/payload"
 require_relative "chain/mirror"
 require_relative "chain/connection"
+require_relative "chain/service"
+require_relative "file_peers"
 require_relative "chain_client"
 require_relative "genesis"
 require_relative "host"
@@ -87,7 +89,7 @@ module ReputableChat
       # `host` is nil when this server runs without a host account. `chain`
       # is the agnostic server (a ChainClient), and `mirror` the chat's copy
       # of the records it shows.
-      attr_accessor :store, :images, :genesis, :host, :chain, :mirror
+      attr_accessor :store, :images, :genesis, :host, :chain, :mirror, :files
       attr_writer :limits, :origins
 
       # Defaulted rather than required, so a test or a script can build the app
@@ -106,6 +108,7 @@ module ReputableChat
     def host = self.class.host
     def chain = self.class.chain
     def mirror = self.class.mirror
+    def files = self.class.files
     def limits = self.class.limits
     def limit(name) = limits.fetch(name.to_s)
 
@@ -120,7 +123,7 @@ module ReputableChat
       # Served from config/ rather than copied into public/ so the wordlist has
       # exactly one source of truth shared with the Ruby reference.
       r.get("wordlist.txt") { serve_wordlist }
-      r.get("images", String) { |name| serve_image(name) }
+      r.get("images", String) { |name| serve_image(r, name) }
 
       r.on "api" do
         r.post("challenge") { { "nonce" => store.issue_nonce } }
@@ -324,6 +327,7 @@ module ReputableChat
         refuse.call("attestation is larger than #{limit(:attestation_bytes)} bytes") if
           record.payload.bytesize > limit(:attestation_bytes)
       when "notice"
+        refuse.call("a chat server announces itself; its clients do not") if record.service?
         refuse.call("notice body is over #{limit(:notice_bytes)} bytes") if body.bytesize > limit(:notice_bytes)
       end
     end
@@ -459,8 +463,15 @@ module ReputableChat
     end
 
     # Content-addressed, so the bytes can never change under a given name.
-    def serve_image(name)
-      bytes = images.read(name) or response.status = 404
+    # One this server lacks is asked of the other chat servers (FilePeers) --
+    # unless another chat server is the one asking, which is answered from
+    # what is here so that two servers cannot ask each other in circles.
+    def serve_image(r, name)
+      bytes = images.read(name)
+      if bytes.nil? && files && Store::Images::NAME.match?(name) && !r.get_header("HTTP_X_REPUTABLECHAT_PEER")
+        bytes = files.fetch(name) && images.read(name)
+      end
+      response.status = 404 unless bytes
       return "" unless bytes
 
       response["Content-Type"] = images.content_type(name)

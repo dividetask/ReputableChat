@@ -17,6 +17,10 @@ module Agnostic
   #   year) have.
   # - Anything else: no opinion, and nothing is published.
   #
+  # The operator can set any account's rating by hand, trust included (rake
+  # rate); that stands in for the rating above until it is removed (rake
+  # unrate), and is published the same way.
+  #
   # It is published as an attestation of the host account, holding only the
   # ratings that changed since the last one -- a later attestation amends the
   # earlier ones rather than replacing them -- so one is rare: a server's
@@ -30,19 +34,41 @@ module Agnostic
       @clock = clock
     end
 
-    # What this server should say of each server account it has tried.
-    def due
-      @store.contacts.each_with_object({}) do |contact, out|
-        next if contact[:account] == @host.id
+    # What this server says of each account it has an opinion of: an
+    # operator's rating where there is one, else what reachability says.
+    def current
+      contacts = @store.contacts.to_h { |c| [c[:account], c] }
+      overrides = @store.rating_overrides.to_h { |o| [o[:account], o] }
+      (contacts.keys | overrides.keys).each_with_object({}) do |account, out|
+        next if account == @host.id
 
-        rating = rating_for(contact)
-        next unless rating
-
-        published = @store.published_rating(contact[:account])
-        next if published && published[:reputation] == rating && published[:trust] == trust
-
-        out[contact[:account]] = { "reputation" => rating, "trust" => trust }
+        if (o = overrides[account])
+          out[account] = { "reputation" => o[:reputation], "trust" => o[:trust], "source" => "operator" }
+        elsif (rating = contacts[account] && rating_for(contacts[account]))
+          out[account] = { "reputation" => rating, "trust" => trust, "source" => "reachability" }
+        end
       end
+    end
+
+    # What has changed since the last attestation. An account whose rating
+    # was published and which this server no longer has an opinion of -- an
+    # operator's rating removed with nothing to fall back on -- is published
+    # as 0 with trust 0, since an attestation can amend an entry but not
+    # delete one.
+    def due
+      now = current
+      changed = now.each_with_object({}) do |(account, score), out|
+        published = @store.published_rating(account)
+        next if published && published[:reputation] == score["reputation"] && published[:trust] == score["trust"]
+
+        out[account] = score.slice("reputation", "trust")
+      end
+      @store.published_ratings.each do |row|
+        next if now.key?(row[:account]) || (row[:reputation] == "0" && row[:trust] == "0")
+
+        changed[row[:account]] = { "reputation" => "0", "trust" => "0" }
+      end
+      changed
     end
 
     # Publishes an attestation when any rating changed. Returns the Ingest

@@ -1,144 +1,70 @@
 # frozen_string_literal: true
 
 require_relative "spec_helper"
-require_relative "genesis_fixture"
+require_relative "chain_server"
 require "rack/test"
+require "tmpdir"
 require "reputable_chat/app"
 require "reputable_chat/environment"
 require "reputable_chat/host"
 require "reputable_chat/operator"
-require "json"
-require "tmpdir"
 
-# The host account: this server's own, optional, hanging off the one chain.
+# The host account: every chat server has one, and it is the agnostic
+# server's beside it -- one account per server, whatever it runs.
 class HostSpec < Minitest::Test
   include Rack::Test::Methods
 
-  Environment = ReputableChat::Environment
-  Host        = ReputableChat::Host
-  Genesis     = ReputableChat::Genesis
-  Operator    = ReputableChat::Operator
-
-  def setup
-    @rack_env = ENV.fetch("RACK_ENV", nil)
-    @genesis = GenesisFixture.build
-    Host.reset!
-  end
-
-  def teardown
-    ENV["RACK_ENV"] = @rack_env
-    ReputableChat::App.host = nil
-    Host.reset!
-    Genesis.reset!
-  end
+  Host     = ReputableChat::Host
+  Operator = ReputableChat::Operator
 
   def app = ReputableChat::App.app
 
-  # RULE: a host account acknowledges the genesis. Its declaration is the link
-  # that keeps a server's own account on the network's one chain rather than
-  # the bottom of a second.
-  def test_a_host_account_acknowledges_the_genesis
-    host = GenesisFixture.build_host(genesis: @genesis)
+  def chain = ReputableChat::ChainClient.new(ChainServer.url)
 
-    assert_equal [@genesis.hash], host.declaration["ack"]
+  # RULE (yours): the chat and its agnostic server share an account.
+  def test_the_chat_signs_as_its_agnostic_servers_host_account
+    host = ChainServer.host
+
+    assert_equal chain.host["id"], host.account
+    assert_equal chain.host["pubkey"], host.pubkey
   end
 
-  def test_a_host_account_acknowledging_anything_else_is_refused
-    other = GenesisFixture.build
-    record = GenesisFixture.host_record(genesis: @genesis, ack: [other.hash])
+  # RULE: a seed that is not the agnostic server's is refused at boot, and the
+  # refusal says what to point where.
+  def test_a_seed_that_is_not_the_agnostic_servers_is_refused
+    error = assert_raises(Host::Mismatch) { Host.join(chain, seed_path: Operator.path_for("development")) }
 
-    error = assert_raises(Host::Corrupt) { Host.new(record, genesis: @genesis) }
-    assert_match(/not the genesis/, error.message)
+    assert_match(/point host_seed at that server's host.seed/, error.message)
   end
 
-  def test_a_host_account_acknowledging_nothing_is_refused
-    record = GenesisFixture.host_record(genesis: @genesis, ack: [])
+  def test_a_missing_seed_says_where_it_comes_from
+    error = assert_raises(Host::Missing) { Host.join(chain, seed_path: File.join(Dir.tmpdir, "nothing.seed")) }
 
-    assert_raises(Host::Corrupt) { Host.new(record, genesis: @genesis) }
+    assert_match(/agnostic server writes it on its first boot/, error.message)
   end
 
-  # RULE: a host account is checked like the genesis: a record edited after
-  # signing is refused rather than served.
-  def test_an_edited_host_account_is_refused
-    record = GenesisFixture.host_record(genesis: @genesis)
-    record["payload"] = record["payload"].sub("\"Host\"", "\"Hosts\"")
-
-    assert_raises(Host::Corrupt) { Host.new(record, genesis: @genesis) }
-  end
-
-  # RULE: the genesis is the only record that acknowledges nothing.
-  def test_a_genesis_that_acknowledges_something_is_refused
-    record = GenesisFixture.host_record(genesis: @genesis)
-
-    assert_raises(Genesis::Corrupt) { Genesis.new(record) }
-  end
-
-  # RULE: having a host account is a choice. A server without one runs, and
-  # says so rather than failing.
-  def test_a_server_without_a_host_account_serves_null
-    ReputableChat::App.genesis = @genesis
-    ReputableChat::App.host = nil
+  # RULE: the host account is served beside the genesis, so a new account can
+  # start with both as friends before it has fetched anything else.
+  def test_the_host_account_is_served
+    ChainServer.wire
     get "/api/host"
+    served = JSON.parse(last_response.body).fetch("host")
 
-    assert_equal 200, last_response.status
-    assert_nil JSON.parse(last_response.body).fetch("host")
+    assert_equal ChainServer.host.account, served["account"]
+    assert_equal ChainServer.host.payload, served["payload"]
   end
 
-  def test_a_server_with_a_host_account_serves_it
-    host = GenesisFixture.build_host(genesis: @genesis)
-    ReputableChat::App.genesis = @genesis
-    ReputableChat::App.host = host
-    get "/api/host"
-
-    assert_equal host.hash, JSON.parse(last_response.body).fetch("host").fetch("hash")
-  end
-
-  # RULE: production refuses the development host account, compared by key,
-  # for the same reason it refuses the development genesis: its seed is
-  # committed, so everyone who has cloned the repository could sign as it.
-  def test_production_refuses_the_development_host_account
-    development = JSON.parse(File.read(Host.path(Environment::DEVELOPMENT)))
-    genesis = Genesis.load(path: Genesis.path(Environment::DEVELOPMENT))
-    ENV["RACK_ENV"] = Environment::PRODUCTION
-
-    error = assert_raises(Host::WrongEnvironment) do
-      Host.refuse_development_in_production(Host.new(development, genesis: genesis))
-    end
-    assert_match(/public/, error.message)
-  end
-
-  def test_production_accepts_a_host_account_that_is_not_developments
-    ENV["RACK_ENV"] = Environment::PRODUCTION
-    own = GenesisFixture.build_host(genesis: @genesis)
-
-    assert_equal own, Host.refuse_development_in_production(own)
-  end
-
-  # RULE: the committed development host account hangs off the committed
-  # development genesis. If either is regenerated without the other, the
-  # server refuses to boot, and this says why first.
-  def test_the_committed_development_host_account_acknowledges_the_development_genesis
-    genesis = Genesis.load(path: Genesis.path(Environment::DEVELOPMENT))
-    host = Host.load(path: Host.path(Environment::DEVELOPMENT), genesis: genesis)
-
-    assert_equal [genesis.hash], host.declaration["ack"]
-    refute_equal genesis.pubkey, host.pubkey
-  end
-
-  # RULE: every seed but development's is kept out of git, the host account's
-  # as well as the genesis account's, master keys' as well as working keys'.
-  # Development's are public on purpose.
+  # RULE: every seed but development's is kept out of git, master keys'
+  # as well as working keys'. Development's are public on purpose.
   def test_only_development_seeds_are_committed
-    %i[genesis host].each do |account|
-      production = Operator.path_for(Environment::PRODUCTION, account: account)
-      development = Operator.path_for(Environment::DEVELOPMENT, account: account)
+    production = Operator.path_for(ReputableChat::Environment::PRODUCTION)
+    development = Operator.path_for(ReputableChat::Environment::DEVELOPMENT)
 
-      [production, production.sub(/\.seed\z/, ".master.seed")].each do |path|
-        assert ignored?(path), "#{path} must be gitignored"
-      end
-      [development, development.sub(/\.seed\z/, ".master.seed")].each do |path|
-        refute ignored?(path), "#{path} is committed on purpose"
-      end
+    [production, production.sub(/\.seed\z/, ".master.seed")].each do |path|
+      assert ignored?(path), "#{path} must be gitignored"
+    end
+    [development, development.sub(/\.seed\z/, ".master.seed")].each do |path|
+      refute ignored?(path), "#{path} is committed on purpose"
     end
   end
 

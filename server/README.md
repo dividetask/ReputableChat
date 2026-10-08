@@ -225,6 +225,23 @@ other trust would suggest it does. An attestation holds
 only the ratings that changed since the last one, so most heartbeats publish
 none. It is signed just before a heartbeat, which then carries it.
 
+### By hand
+
+The operator can set any account's rating, trust included, from the machine
+the server runs on. It stands in for what reachability says until removed,
+and goes out in the attestation published with the next heartbeat; an
+account nobody has an opinion of any more is published as 0 with trust 0,
+since an attestation can amend an entry but not delete one.
+
+```bash
+bundle exec rake "rate[<account id>,<reputation>,<trust>]"   # decimals from -1 to 1
+bundle exec rake "unrate[<account id>]"                      # back to reachability
+bundle exec rake ratings                                     # what it says of whom, and why
+```
+
+The apps beside the server read the current ratings at `GET /api/ratings`:
+the chat uses them to choose which other chat servers to ask for files.
+
 ## The API
 
 | | |
@@ -238,6 +255,7 @@ none. It is signed just before a heartbeat, which then carries it.
 | `GET /api/accounts/<id>` | an account's newest identity declaration and attestation, and the record accepted from it last |
 | `POST /api/accounts` | `{"accounts": [...]}`: the same for several |
 | `GET /api/keys/<pubkey>` | the account a working key signs for, or null |
+| `GET /api/ratings` | this server's current ratings of other accounts, each by hand or by reachability |
 | `GET /api/frontier` | hashes of the records nothing here acknowledges |
 | `POST /api/records` | `{"records": [...]}`, or one record on its own |
 | `GET /api/sweep?account=&generation=&part=` | one capped part of one generation of an account, and the `next` part to ask for; 429 when asked too often |

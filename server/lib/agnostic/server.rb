@@ -61,6 +61,7 @@ module Agnostic
       klass.settings = settings
       klass.clock = @clock
       klass.accounts = Accounts.new(store: store, genesis: genesis)
+      klass.ratings = ratings
       klass.limiter = RateLimit.new(per_minute: settings.integer("limits", "sweep_requests_per_minute"), clock: @clock)
       klass.freeze.app
     end

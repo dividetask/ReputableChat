@@ -53,7 +53,6 @@ require "reputable_chat/cryptography/signature"
 require "reputable_chat/chain/envelope"
 require "reputable_chat/environment"
 require "reputable_chat/genesis"
-require "reputable_chat/host"
 require "reputable_chat/store/images"
 require "reputable_chat/operator"
 
@@ -235,7 +234,9 @@ module GenerateGenesis
       when "--path"   then options[:path]   = File.expand_path(argv.shift.to_s)
       when "--seed"   then options[:seed_path] = File.expand_path(argv.shift.to_s)
       when "--master-seed" then options[:master_seed_path] = File.expand_path(argv.shift.to_s)
-      when "--host"   then options[:account] = :host
+      when "--host"
+        abort "a chat server's host account is its agnostic server's, which makes one on first boot " \
+              "(cd server && bundle exec rake host)"
       when "--production"  then environment = ReputableChat::Environment::PRODUCTION
       when "--development" then environment = ReputableChat::Environment::DEVELOPMENT
       when "--help", "-h" then usage
@@ -247,7 +248,7 @@ module GenerateGenesis
     # from a development shell without exporting anything.
     options[:environment] = environment || ReputableChat::Environment.name
     host = options[:account] == :host
-    record_class = host ? ReputableChat::Host : ReputableChat::Genesis
+    record_class = ReputableChat::Genesis
 
     options[:handle] ||= host ? DEFAULT_HOST_HANDLE : "Tim"
     options[:bio]    ||= host ? DEFAULT_HOST_BIO : DEFAULT_BIO

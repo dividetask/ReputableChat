@@ -2,6 +2,7 @@
 
 require_relative "spec_helper"
 require "servers"
+require "agnostic/manual_ratings"
 
 # What a server says of other servers, from whether it could reach them at the
 # addresses their accounts declared.
@@ -107,5 +108,59 @@ class ServerRatingsSpec < Minitest::Test
     assert_nil @beta.beat_and_sync
     @now += 1
     assert_equal :accepted, @beta.beat_and_sync.status
+  end
+
+  # --- ratings by hand ------------------------------------------------------------
+
+  def by_hand = Agnostic::ManualRatings.new(@alpha.store, clock: -> { @now })
+
+  def published(account = beta) = @alpha.store.published_rating(account)&.values_at(:reputation, :trust)
+
+  # The operator decides, trust included, and the server publishes it as it
+  # would its own rating.
+  def test_a_rating_by_hand_stands_in_for_reachability_trust_included
+    contact(attempts: 100, successes: 95, first_success_at: @now - (400 * DAY))
+    by_hand.set(beta, "-0.5", "1")
+
+    assert_equal({ "reputation" => "-0.5", "trust" => "1", "source" => "operator" }, @alpha.ratings.current[beta])
+    @alpha.ratings.publish
+    assert_equal %w[-0.5 1], published
+  end
+
+  def test_removing_a_rating_by_hand_hands_it_back_to_reachability
+    contact(attempts: 100, successes: 95, first_success_at: @now - (400 * DAY))
+    by_hand.set(beta, "-0.5", "1")
+    @alpha.ratings.publish
+    by_hand.clear(beta)
+
+    assert_equal "reachability", @alpha.ratings.current[beta]["source"]
+    @alpha.ratings.publish
+    assert_equal %w[0.02 0], published
+  end
+
+  # An attestation amends an entry but cannot delete one, so an account
+  # nobody has an opinion of any more is published as 0 with trust 0.
+  def test_removing_the_only_opinion_publishes_zero
+    stranger = "c" * 64
+    by_hand.set(stranger, "0.3", "0.5")
+    @alpha.ratings.publish
+    by_hand.clear(stranger)
+    @alpha.ratings.publish
+
+    assert_equal %w[0 0], published(stranger)
+  end
+
+  def test_a_rating_by_hand_is_a_decimal_from_minus_one_to_one_for_an_account
+    assert_raises(ArgumentError) { by_hand.set("not an account", "0.5", "1") }
+    %w[.5 1.5 0.50].each { |bad| assert_raises(ArgumentError) { by_hand.set(beta, bad, "1") } }
+    assert_raises(ArgumentError) { by_hand.set(beta, "0.5", "2") }
+  end
+
+  # The apps beside the server read its ratings to choose their own peers.
+  def test_the_ratings_are_served_to_the_apps_beside_the_server
+    by_hand.set(beta, "0.4", "0")
+    response = Rack::MockRequest.new(@alpha.app).get("/api/ratings")
+
+    assert_equal "0.4", JSON.parse(response.body).dig("ratings", beta, "reputation")
   end
 end

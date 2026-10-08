@@ -30,6 +30,13 @@ module ReputableChat
 
     def genesis = get("/api/genesis")
 
+    # The agnostic server's host account, which the chat shares.
+    def host = get("/api/host")
+
+    # The agnostic server's ratings of other accounts: account => reputation,
+    # trust, and whether set by hand or by reachability.
+    def ratings = get("/api/ratings")["ratings"]
+
     def submit(payload, signature)
       result = post("/api/records", { "payload" => payload, "signature" => signature })["results"].first
       Result.new(status: result["status"], hash: result["hash"], problems: result["problems"] || [],

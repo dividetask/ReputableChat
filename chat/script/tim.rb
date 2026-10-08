@@ -32,7 +32,6 @@ require "net/http"
 require "uri"
 require "reputable_chat/config"
 require "reputable_chat/genesis"
-require "reputable_chat/host"
 require "reputable_chat/operator"
 require "reputable_chat/server_config"
 require "reputable_chat/cryptography/canonical"
@@ -146,7 +145,7 @@ module Tim
     else usage
     end
   rescue Failed, ReputableChat::Operator::MissingSeed, ReputableChat::Genesis::Missing,
-         ReputableChat::Host::Missing, Crypto::Seed::InvalidSeed => e
+         Crypto::Seed::InvalidSeed => e
     abort "  #{e.message}"
   end
 
@@ -162,7 +161,7 @@ module Tim
     puts "  Account ID   #{client.account}"
     puts "  Working key  #{client.pubkey}"
     puts "  Genesis      #{ReputableChat::Genesis.current.hash}"
-    puts "  Host         #{ReputableChat::Host.current&.hash || 'none on this server'}"
+    puts "  Host         #{host_account(options)['account']}"
     puts "  Attestation  #{attestation(client) ? 'published' : 'none yet'}, " \
          "#{ratings.size} #{ratings.size == 1 ? 'rating' : 'ratings'}"
     puts "  Vault        revision #{vault['revision']} (private: the server cannot read it)"
@@ -277,7 +276,8 @@ module Tim
   # the network sees rather than a placeholder that has to be corrected later.
   def own_identity(client, options)
     blob = client.get_json("/api/identity/#{client.account}")["identity"]
-    return committed(options).declaration if blob.nil?
+    return committed(options).declaration if blob.nil? && options[:account] != :host
+    return JSON.parse(host_account(options)["payload"]) if blob.nil?
 
     JSON.parse(blob["payload"])
   end
@@ -404,9 +404,9 @@ module Tim
       ReputableChat::Operator.seed_readable_by_others?(path: options[:seed_path])
 
     keys = ReputableChat::Operator.derive(phrase)
-    expected = committed(options).pubkey
+    expected = options[:account] == :host ? JSON.parse(host_account(options)["payload"])["pubkey"] : committed(options).pubkey
     unless keys["pubkey"] == expected
-      abort "  the seed derives #{keys['pubkey']} but the committed #{options[:account]} account is " \
+      abort "  the seed derives #{keys['pubkey']} but the #{options[:account]} account signs with " \
             "#{expected}. Wrong seed file, or a changed seed.kdf.domain."
     end
 
@@ -422,12 +422,17 @@ module Tim
                pubkey: keys["pubkey"], vault_key: vault_key).log_in
   end
 
-  # The committed record of whichever account this run signs as.
-  def committed(options)
-    return ReputableChat::Genesis.current unless options[:account] == :host
+  # The genesis account's committed record. The host account has none here:
+  # it is the agnostic server's, and the chat server says which it is.
+  def committed(_options) = ReputableChat::Genesis.current
 
-    ReputableChat::Host.current or
-      raise ReputableChat::Host::Missing, ReputableChat::Host.missing_message(ReputableChat::Host.path)
+  def host_account(options)
+    @host_account ||= begin
+      uri = URI("#{options[:url]}/api/host")
+      JSON.parse(Net::HTTP.get(uri)).fetch("host")
+    rescue Errno::ECONNREFUSED
+      raise Failed, "nothing is listening on #{options[:url]}. Start the server, or pass --url."
+    end
   end
 
   def parse(argv)
@@ -476,7 +481,7 @@ module Tim
                             first origin in config/server.yml, else #{DEFAULT_URL})
         --origin ORIGIN     the origin inside the signature (default: the URL)
         --seed FILE         seed file (default: config/genesis/<env>.seed,
-                            or config/host/<env>.seed with --host)
+                            or the agnostic server's host.seed with --host)
 
     TEXT
     exit 0

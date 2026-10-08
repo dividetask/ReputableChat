@@ -48,6 +48,9 @@ bundle exec puma            # http://localhost:9292; PEERS=url,url to sync
 bundle exec rake peers      # servers it syncs with, failing, or forgotten
 bundle exec rake "sweep[<url>,<url>]"   # copy the chain from servers at once
 bundle exec rake host       # this server's host account (made on first boot)
+bundle exec rake "rate[<account>,<reputation>,<trust>]"   # a rating by hand
+bundle exec rake "unrate[<account>]"                      # back to reachability
+bundle exec rake ratings                                  # what it rates whom
 bundle exec rake ignored    # peers ignored for a clock over 10 minutes off
 bundle exec rake "forgive[<host account id>]"   # stop ignoring one
 
@@ -61,8 +64,6 @@ bundle exec rake dump       # readable dump of the database
 bundle exec rake "dump[messages,reactions]"   # just those sections
 bundle exec rake genesis    # development genesis (already committed)
 RACK_ENV=production bundle exec rake genesis   # production genesis (once, ever)
-bundle exec rake host       # development host account (already committed)
-RACK_ENV=production bundle exec rake host      # a server's production host account
 # Handle, bio and icon: run the script directly with --handle, --bio, --icon.
 bundle exec ruby script/generate_genesis.rb --host --production --handle Ops --icon ops.png
 
@@ -98,18 +99,23 @@ inventing a word for something that already has one.
   the chain. Regenerating one orphans every record that acknowledged the old
   one, which is the whole chain. `script/generate_genesis.rb` refuses to
   overwrite either it or the seed beside it.
-- **Two accounts, two environments each, and only development's are public.**
-  The genesis account is the developer's; the host account
-  (`config/host/`) is a server's own, optional, and must acknowledge the
-  genesis. `config/genesis/development.seed` and `config/host/development.seed`,
-  and the `.master.seed` beside each, are **committed on purpose** — those
-  identities are public, so a fresh clone can sign as either without being
-  handed a secret. Each account has a working key and a master key, from two
-  separate seed phrases. Every other seed is
-  gitignored, 0600, and never printed. `.gitignore` ignores every `*.seed` in
-  both folders and then un-ignores development's, so a new environment's seed
-  is refused by default rather than committed by omission.
-  A production deployment **refuses to boot on either development account**,
+- **Two accounts.** The genesis account is the developer's.
+  `config/genesis/development.seed` and the `.master.seed` beside it are
+  **committed on purpose** — that identity is public, so a fresh clone can
+  sign as it without being handed a secret. It has a working key and a master
+  key, from two separate seed phrases. Every other seed is gitignored, 0600,
+  and never printed. `.gitignore` ignores every `*.seed` and then un-ignores
+  development's, so a new environment's seed is refused by default rather than
+  committed by omission.
+  The host account is a server's own, and **every chat server has one: its
+  agnostic server's.** The chat reads that server's working seed (`host_seed`,
+  `HOST_SEED`, by default `../server/data/<env>/host.seed`) and refuses to
+  boot if it is not the account the agnostic server names. One account per
+  server, whatever apps it runs. The chat announces itself with it: a notice
+  of kind `service` typed `:chat` carrying `url`, on the first boot with an
+  address and whenever the address changes (`chain/service.rb`); other chat
+  servers fetch files from it (`file_peers.rb`).
+  A production deployment **refuses to boot on the development genesis**,
   compared by key rather than by filename, because the realistic mistake is
   copying the record into place rather than misnaming it. The production
   genesis seed belongs with the developer, never on a server.

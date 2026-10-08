@@ -17,6 +17,8 @@ It never sees a seed, never holds a private key, and never computes a reputation
 - holds its own clients to its own terms -- signed by the session's own key for the session's own account, a record the chat keeps, timestamped within an hour of its clock, no integer JavaScript cannot read exactly, within the limits in `config/server.yml` -- and passes what meets them to its agnostic server (`chain_url`), which judges it against the rules. The agnostic server's verdict is the answer the client gets.
 - keeps a copy of the records it shows (`chain/mirror.rb`), pulled from the agnostic server in the order that server accepted them: records about the chain itself (identity declarations, attestations, heartbeats, releases, and the notices the rules define) and the chat's own (messages and reactions typed `:chat`, and the notice kinds in `config/notices.yml`). Another app's records are not its business, though they reach it anyway inside other records' histories.
 - asks the agnostic server for what needs the chain: each record's state, the account a key signs for, an account's newest declaration and attestation.
+- signs as its agnostic server's host account -- one account per server -- and announces itself to other chat servers with it: a `service` notice typed `:chat` carrying the address it is reached at, published on the first boot with an address and whenever that changes. The chat client never signs one and the server refuses one from a client.
+- fetches a file it lacks from the chat servers that announced themselves (`file_peers.rb`). The chain names files by hash but does not carry them; each app shares its own. A server is asked only once it answers at its address as the announcing account, never at a private, loopback or link-local address unless allowed, and only over https in production. Which is chosen at random, weighted by the agnostic server's ratings of its account and skipping any rated below zero or that failed lately. The bytes are kept only if they hash to the name. A request from another chat server is never passed on.
 - serves signed blobs back byte-identical
 
 Signed blobs go out exactly as they came in. Re-serializing them server-side would only create a way to break signatures.
@@ -134,7 +136,7 @@ public/js/
 - Loading the client from a release. See the end of [chain.md](chain.md).
 - Client-side verification of *other people's* attestations (`session.verify_signatures`). Your own vault is already verified, since detecting tampering is why it is signed.
 - Key changes from the browser. The chat passes them on and the genesis and host accounts declare master keys, but the browser declares a working key only and has no way to change one.
-- Files on the chain. Records name files by hash, but each chat server stores and serves only its own uploads, so an avatar uploaded to one server is not on another.
+- Fetching files from another chat server end to end between two real servers; it is tested against a faked network.
 - WebSocket delivery — messages currently poll every 4s
 - Chunking an attestation, which currently grows an entry per person ever rated
 - Federation's principle, which the agnostic servers' syncing has to keep: a person sees messages whatever server they came from, and is largely unaware which server anyone else uses. What they see is decided by their friend list, never by where somebody's account lives.

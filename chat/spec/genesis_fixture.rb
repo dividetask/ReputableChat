@@ -4,7 +4,6 @@ require "ed25519"
 require "json"
 require "tmpdir"
 require "reputable_chat/genesis"
-require "reputable_chat/host"
 require "reputable_chat/cryptography/canonical"
 require "reputable_chat/cryptography/payload"
 require "reputable_chat/cryptography/signature"
@@ -34,19 +33,6 @@ module GenesisFixture
   end
 
   def build(**kwargs) = build_with_key(**kwargs).first
-
-  # A host account acknowledging `genesis`, or whatever `ack` says instead,
-  # as the committed file holds it. Raw, for the paths that must see a check
-  # refuse it.
-  def host_record(genesis:, ack: [genesis.hash], handle: "Host", signing: Ed25519::SigningKey.generate)
-    pubkey = Crypto::Signature.encode(signing.verify_key.to_bytes)
-    payload = Crypto::Payload.identity(pubkey: pubkey, handle: handle, ack: ack, ts: Time.now.to_i)
-    signed(signing, payload)
-  end
-
-  def build_host(genesis:, **kwargs)
-    ReputableChat::Host.new(host_record(genesis: genesis, **kwargs), genesis: genesis)
-  end
 
   def signed(signing, payload)
     canonical = Crypto::Canonical.dump(payload)
