@@ -13,7 +13,7 @@ The server is deliberately close to useless. It verifies signatures and the rule
 ## Layout
 
 - **[`server/`](server/README.md), the agnostic server.** It knows the chain and its rules and nothing about any app: it checks every record against [the rules](docs/project/rules/v0.001.md) before acknowledging it, stores and serves records, publishes heartbeats with its own host account, and exchanges records with other servers.
-- **`chat/`, the chat app**: the browser client and the server behind it.
+- **`chat/`, the chat app**: the browser client and the server behind it. It runs beside an agnostic server, which holds the chain; the chat passes its users' records there and keeps a copy of the ones it shows.
 - **`docs/`**: the rules and the design, shared by both.
 
 ## Running it
@@ -23,7 +23,7 @@ cd server && bundle install && bundle exec rake spec && bundle exec puma
 cd chat && bundle install && bundle exec rake spec && bundle exec puma
 ```
 
-Both listen on 9292 by default; give one `-p` to run them side by side. In `chat/`, `bundle exec rake curve` prints the current curve and ladder.
+The chat listens on 9292 and the agnostic server on 9393, and the chat finds it at `http://localhost:9393` (`chain_url` in `chat/config/server.yml`, or `CHAIN_URL`). On one machine they can share an address on different ports, or share a port behind a reverse proxy under different hostnames: each announces its own address, the agnostic server on its host account's identity declaration and the chat on its `service` notice, so other servers never confuse the two. They share one host account, kept in `host/` at the root, outside both. The chat's specs start an agnostic server of their own. In `chat/`, `bundle exec rake curve` prints the current curve and ladder.
 
 ## Deploying
 

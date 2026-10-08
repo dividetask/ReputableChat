@@ -1,79 +1,76 @@
 # frozen_string_literal: true
 
-require_relative "committed_declaration"
-require_relative "genesis"
+require "json"
+require_relative "operator"
+require_relative "cryptography/canonical"
 
 module ReputableChat
-  # The host account: this server's own account, and optional.
+  # The host account: this server's own. Every chat server has one, and it is
+  # the same account as the agnostic server's beside it -- one account per
+  # server, whatever apps it runs. The agnostic server makes it on first boot
+  # and keeps its working seed outside both apps (host/ at the root of the
+  # repository); the chat reads that seed (host_seed in config/server.yml) to
+  # sign as it, and refuses to run if the seed's key is
+  # not the account the agnostic server names.
   #
-  # The genesis account is the developer's and the same everywhere. A server
-  # that wants a voice of its own -- to announce an outage, to vouch for the
-  # people who join through it -- generates a host account. Its first identity
-  # declaration acknowledges the genesis record, so the server's account hangs
-  # off the one chain rather than starting a second.
-  #
-  # A new account starts with both as friends, or with the genesis account
-  # alone where the server has no host account. Either is an ordinary friend
-  # the person can remove.
-  #
-  # Committed as a file for the same reason the genesis is: a client needs it
-  # before it has fetched anything. Development's seed is committed and public,
-  # like the development genesis; every other environment's is gitignored.
+  # A new account starts with it as a friend, beside the genesis account, and
+  # it is what the chat announces itself with (Chain::Service).
   class Host
-    include CommittedDeclaration
-
-    DIRECTORY = File.expand_path("../../config/host", __dir__)
-
     class Missing < StandardError; end
-    class Corrupt < StandardError; end
-    class WrongEnvironment < StandardError; end
+    class Mismatch < StandardError; end
 
-    def self.label = "host account"
+    attr_reader :account, :pubkey, :payload, :signature, :hash, :declaration
 
-    def self.load(path: self.path, genesis: Genesis.current)
-      new(read_record(path), path: path, genesis: genesis)
+    def self.join(chain, seed_path:)
+      unless File.exist?(seed_path)
+        raise Missing, "no host seed at #{seed_path}. The agnostic server writes it on its first boot; " \
+                       "start that first, or point host_seed (HOST_SEED) at its data directory."
+      end
+
+      keys = Operator.derive(Operator.seed_phrase(path: seed_path))
+      theirs = chain.host
+      unless keys["pubkey"] == theirs["pubkey"]
+        raise Mismatch, "the seed at #{seed_path} derives #{keys['pubkey']}, but the agnostic server at " \
+                        "#{chain.url} signs as #{theirs['pubkey']}. A chat server shares its agnostic " \
+                        "server's account: point host_seed at that server's host.seed."
+      end
+
+      new(theirs, private_key: keys["private_key"])
     end
 
-    # nil when this server has none -- having one is a choice, not a
-    # requirement. Memoized, since it never changes while a process is running.
-    def self.current
-      return @current if defined?(@current)
-
-      @current = File.exist?(path) ? refuse_development_in_production(load) : nil
+    # `wire` is the agnostic server's GET /api/host: its id, its working key,
+    # and its current identity declaration.
+    def initialize(wire, private_key: nil)
+      @account = wire.fetch("id")
+      @pubkey = wire.fetch("pubkey")
+      record = wire.fetch("declaration")
+      @payload = record.fetch("payload")
+      @signature = record.fetch("signature")
+      @hash = record.fetch("hash")
+      @declaration = JSON.parse(@payload)
+      @private_key = private_key
     end
 
-    def self.reset!
-      remove_instance_variable(:@current) if defined?(@current)
+    def handle = declaration["title"]
+    def icon = declaration["file"]&.first
+
+    # What a client is given: the account and its declaration, enough to show
+    # it as a default friend before anything else is fetched.
+    def to_h = { "account" => account, "payload" => payload, "signature" => signature, "hash" => hash }
+
+    # A report for the agnostic server that this app did or did not reach
+    # another server's account: [payload, signature]. Not a record; it never
+    # leaves this machine.
+    def contact_report(account, reached:, at: Time.now.to_i)
+      sign({ "purpose" => "reputablechat:contact:v1", "account" => account, "reached" => reached, "ts" => at.to_i })
     end
 
-    def self.development_message
-      "this is the development host account, whose seed is committed to the repository and " \
-        "therefore public. Generate a production one with " \
-        "`RACK_ENV=production bundle exec rake host`, or delete config/host/production.json " \
-        "to run without one."
-    end
+    # Signs a payload as the host account: [canonical payload, signature].
+    def sign(payload)
+      raise Missing, "this host account was loaded without its seed and cannot sign" unless @private_key
 
-    def self.missing_message(path)
-      "no host account at #{path}. Generate one with " \
-        "`#{Environment.production? ? 'RACK_ENV=production ' : ''}bundle exec rake host`."
-    end
-
-    def initialize(record, genesis:, path: Host.path)
-      @genesis = genesis
-      adopt(record, path)
-    end
-
-    private
-
-    # A host account that does not acknowledge the genesis is on another chain,
-    # and every record its server's people make would hang off it rather than
-    # off the network's.
-    def check_ack!(path)
-      return if declaration["ack"] == @genesis.hash
-
-      raise Corrupt, "#{path} acknowledges #{declaration['ack'].inspect}, not the genesis " \
-                     "#{@genesis.hash}. A host account is generated against the genesis " \
-                     "it will serve."
+      canonical = Cryptography::Canonical.dump(payload)
+      [canonical, Operator.sign(@private_key, canonical)]
     end
   end
 end

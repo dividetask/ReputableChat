@@ -99,7 +99,7 @@ class DefaultsSpec < Minitest::Test
   def test_the_seeded_profile_is_set_before_the_walk_fetches_declarations
     app = File.read(File.expand_path("../public/js/app.js", __dir__), encoding: "UTF-8")
     seeded = app.index("declarationProfile(record)")
-    fetched = app.index("state.profiles.set(blob.pubkey")
+    fetched = app.index("state.profiles.set(blob.account")
 
     refute_nil seeded, "the default friends' profiles are never seeded"
     refute_nil fetched, "fetched declarations never populate profiles"
@@ -141,16 +141,16 @@ class DefaultsSpec < Minitest::Test
                  "rendering the route must not re-seed the list")
   end
 
-  # RULE: a key pasted on the new account screen must look like a key. The
-  # field takes raw base64url, so it is the only thing standing between a
-  # typo and a friendship with nobody.
+  # RULE: an account ID pasted on the new account screen must look like one.
+  # The field takes raw hex, so it is the only thing standing between a typo
+  # and a friendship with nobody.
   def test_a_pasted_friend_key_is_validated
     add = app_js[/function addNewFriend\(\)[\s\S]{0,900}?\n\}/]
     refute_nil add, "addNewFriend not found"
 
-    assert_includes add, "PUBKEY.test(pubkey)", "a pasted key must be checked"
-    assert_includes add, "state.me?.pubkey", "their own key must be refused"
-    assert_includes add, "state.newFriends[pubkey]", "duplicates must be refused"
+    assert_includes add, "ACCOUNT.test(account)", "a pasted account ID must be checked"
+    assert_includes add, "state.me?.account", "their own account must be refused"
+    assert_includes add, "state.newFriends[account]", "duplicates must be refused"
   end
 
   # app.js carries emoji, and the default external encoding here is not always

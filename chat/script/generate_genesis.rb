@@ -10,9 +10,17 @@
 #   bundle exec ruby script/generate_genesis.rb --host --production \
 #     --handle Ops --bio "Announcements for this server" --icon ops.png
 #
-# Writes two files, the record and the seed beside it, plus the icon when one
-# is given. The genesis goes under config/genesis/, the host account under
+# Writes three files, the record and two seeds beside it, plus the icon when
+# one is given. The genesis goes under config/genesis/, the host account under
 # config/host/.
+#
+# Two seeds because the account has two keys (rules, section 2): the working
+# key, which signs day to day, and the master key, which alone can change
+# itself and which a quorum cannot pass over. They come from two separate seed
+# phrases rather than one, so that the working seed living on a machine that
+# signs things does not also hand over the master key. <env>.seed is the
+# working key's phrase and <env>.master.seed the master key's; the master one
+# belongs offline, away from the server, once it is backed up.
 #
 # Which pair depends on the environment. The DEVELOPMENT seed is committed and
 # therefore public -- anyone who has cloned the repository owns that identity,
@@ -38,15 +46,13 @@ require "fileutils"
 require "tmpdir"
 require "digest"
 require "reputable_chat/config"
-require "reputable_chat/params"
 require "reputable_chat/cryptography/seed"
 require "reputable_chat/cryptography/canonical"
 require "reputable_chat/cryptography/payload"
-require "reputable_chat/cryptography/record"
 require "reputable_chat/cryptography/signature"
+require "reputable_chat/chain/envelope"
 require "reputable_chat/environment"
 require "reputable_chat/genesis"
-require "reputable_chat/host"
 require "reputable_chat/store/images"
 require "reputable_chat/operator"
 
@@ -60,6 +66,7 @@ module GenerateGenesis
     options = parse(argv)
     refuse_to_overwrite!(options[:path], options[:account] == :host ? "host account" : "genesis record")
     refuse_to_overwrite!(options[:seed_path], "seed")
+    refuse_to_overwrite!(options[:master_seed_path], "master seed")
 
     if options[:icon_source]
       options[:icon] = install_icon(options[:icon_source], options[:path].sub(/\.json\z/, ""))
@@ -67,22 +74,23 @@ module GenerateGenesis
 
     kdf    = kdf_parameters
     phrase = new_phrase(options[:words])
+    master_phrase = new_phrase(options[:words])
     keys   = node("derive", phrase: phrase, kdf: kdf)
+    master = node("derive", phrase: master_phrase, kdf: kdf)
 
-    payload   = record_for(keys["pubkey"], options)
+    payload   = record_for(keys["pubkey"], master["pubkey"], options)
     canonical = Crypto::Canonical.dump(payload)
     signature = node("sign", private_key: keys["private_key"], message: canonical)["signature"]
 
-    # Verified with the Ruby verifier the server actually uses, so a mismatch
-    # between the two halves of the crypto shows up here rather than as every
-    # login failing later for no visible reason.
-    verify!(keys["pubkey"], signature, payload)
+    # Judged by the same code the server judges records with, signature
+    # included, so a record the server would refuse is never written.
+    record = check!(canonical, signature)
 
-    hash = Crypto::Record.digest(payload: canonical, signature: signature)
-    write(options[:path], pubkey: keys["pubkey"], payload: canonical, signature: signature, hash: hash)
+    write(options[:path], payload: canonical, signature: signature, hash: record.record_hash)
     ReputableChat::Operator.write_seed(phrase, path: options[:seed_path])
+    ReputableChat::Operator.write_seed(master_phrase, path: options[:master_seed_path])
 
-    report(options, keys["pubkey"], hash)
+    report(options, keys["pubkey"], master["pubkey"], record.record_hash)
   end
 
   # --- steps ------------------------------------------------------------
@@ -110,13 +118,22 @@ module GenerateGenesis
   end
 
   # The genesis acknowledges nothing, because there was nothing to
-  # acknowledge. A host account acknowledges the genesis it serves.
-  def record_for(pubkey, options)
+  # acknowledge, and carries the rules. A host account acknowledges the
+  # genesis it serves.
+  def record_for(pubkey, mpubkey, options)
     Crypto::Payload.identity(
-      pubkey: pubkey, revision: 1, handle: options[:handle], bio: options[:bio],
-      icon: options[:icon], ack: options[:ack], issued_at: Time.now.to_i
+      pubkey: pubkey, mpubkey: mpubkey, handle: options[:handle], bio: options[:bio],
+      avatar: options[:icon], ack: options[:ack] ? [options[:ack]] : [], ts: Time.now.to_i,
+      rules: options[:account] == :host ? nil : rules_text
     )
   end
+
+  # The founding rules, read straight from their file so the file and the chain
+  # cannot disagree (docs/project/chain.md). Text has no surrounding whitespace,
+  # so the file's trailing newline is not part of it.
+  RULES = File.expand_path("../../docs/project/rules/#{Crypto::Payload::RULES_VERSION}.md", __dir__)
+
+  def rules_text = File.read(RULES, encoding: "UTF-8").strip
 
   # Copies the image in beside the record and returns the content-addressed
   # name to sign. The name is the hash of the bytes, so committing them is what
@@ -133,10 +150,14 @@ module GenerateGenesis
     "#{Digest::SHA256.hexdigest(raw)}.#{extension}"
   end
 
-  def verify!(pubkey, signature, payload)
-    return if Crypto::Signature.verify(pubkey_b64: pubkey, signature_b64: signature, payload: payload)
-
-    abort "the signature did not verify against the Ruby verifier -- refusing to write a genesis nobody can check"
+  def check!(canonical, signature)
+    record = ReputableChat::Chain::Envelope.parse(canonical, signature)
+    unless Crypto::Signature.verify(pubkey_b64: record["pubkey"], signature_b64: signature, payload: record.fields)
+      abort "the signature did not verify against the Ruby verifier -- refusing to write a record nobody can check"
+    end
+    record
+  rescue ReputableChat::Chain::Envelope::Unreadable => e
+    abort "the record is unreadable (#{e.message}) -- refusing to write it"
   end
 
   def write(path, record)
@@ -156,7 +177,7 @@ module GenerateGenesis
   # Public key and record hash only. Both are public by definition -- the
   # record hash is what every other record will acknowledge, and the public key
   # is the identity itself. The seed is never printed.
-  def report(options, pubkey, hash)
+  def report(options, pubkey, mpubkey, hash)
     production = options[:environment] == ReputableChat::Environment::PRODUCTION
     what = options[:account] == :host ? "Host account" : "Genesis"
 
@@ -165,17 +186,21 @@ module GenerateGenesis
     puts
     puts "  Record       #{relative(options[:path])}"
     puts "  Seed         #{relative(options[:seed_path])}#{production ? '  (0600, gitignored, never printed)' : '  (0600, committed on purpose -- this identity is public)'}"
-    puts "  Public key   #{pubkey}"
-    puts "  Record hash  #{hash}"
+    puts "  Master seed  #{relative(options[:master_seed_path])}#{production ? '  (0600, gitignored, never printed)' : '  (0600, committed on purpose)'}"
+    puts "  Working key  #{pubkey}"
+    puts "  Master key   #{mpubkey}"
+    puts "  Account ID   #{hash}"
     puts "  Acknowledges #{options[:ack]} (the genesis)" if options[:ack]
     puts
 
     if production
-      puts "  Commit the record, never the seed. Back the seed up somewhere"
-      puts "  outside this checkout: it is the whole identity and there is no"
-      puts "  recovery."
+      puts "  Commit the record, never the seeds. Back both seeds up somewhere"
+      puts "  outside this checkout: there is no recovery without them. Then"
+      puts "  take the master seed off this machine. It is needed only to move"
+      puts "  a stolen working key, and a master seed beside the working one"
+      puts "  is stolen with it."
     else
-      puts "  Commit both. The development identity is meant to be shared, so"
+      puts "  Commit all three. The development identity is meant to be shared, so"
       puts "  that a fresh clone can sign as this account without being"
       puts "  handed a secret. Never point a production deployment at it --"
       puts "  the server refuses to boot if you do."
@@ -192,7 +217,7 @@ module GenerateGenesis
   DEFAULT_HOST_BIO    = "This server's own account"
 
   DEFAULTS = { account: :genesis, handle: nil, bio: nil, words: 12,
-               environment: nil, path: nil, seed_path: nil,
+               environment: nil, path: nil, seed_path: nil, master_seed_path: nil,
                icon_source: nil, icon: nil, ack: nil }.freeze
 
   def parse(argv)
@@ -208,7 +233,10 @@ module GenerateGenesis
       when "--words"  then options[:words]  = Integer(argv.shift)
       when "--path"   then options[:path]   = File.expand_path(argv.shift.to_s)
       when "--seed"   then options[:seed_path] = File.expand_path(argv.shift.to_s)
-      when "--host"   then options[:account] = :host
+      when "--master-seed" then options[:master_seed_path] = File.expand_path(argv.shift.to_s)
+      when "--host"
+        abort "a chat server's host account is its agnostic server's, which makes one on first boot " \
+              "(cd server && bundle exec rake host)"
       when "--production"  then environment = ReputableChat::Environment::PRODUCTION
       when "--development" then environment = ReputableChat::Environment::DEVELOPMENT
       when "--help", "-h" then usage
@@ -220,12 +248,13 @@ module GenerateGenesis
     # from a development shell without exporting anything.
     options[:environment] = environment || ReputableChat::Environment.name
     host = options[:account] == :host
-    record_class = host ? ReputableChat::Host : ReputableChat::Genesis
+    record_class = ReputableChat::Genesis
 
     options[:handle] ||= host ? DEFAULT_HOST_HANDLE : "Tim"
     options[:bio]    ||= host ? DEFAULT_HOST_BIO : DEFAULT_BIO
     options[:path] ||= record_class.path(options[:environment])
     options[:seed_path] ||= ReputableChat::Operator.path_for(options[:environment], account: options[:account])
+    options[:master_seed_path] ||= options[:seed_path].sub(/\.seed\z/, ".master.seed")
     options[:ack] = genesis_hash(options[:environment]) if host
 
     validate_options!(options)
@@ -241,21 +270,23 @@ module GenerateGenesis
     abort "  a host account acknowledges the genesis, and there is no usable one: #{e.message}"
   end
 
-  # Checked through the same helpers every other profile goes through. The
-  # genesis is written once and can never be reissued without orphaning the
-  # chain, so a handle or bio the rest of the system would reject has to be
-  # caught here rather than discovered later.
+  # The handle and bio are Text (rules, section 1): no surrounding whitespace
+  # and no control characters. The whole record is judged again before it is
+  # written; this catches the common mistakes before a seed is spent.
+  # The rules' handle limit and Text's forbidden characters (sections 1 and 3).
+  HANDLE_BYTES = 64
+  CONTROL = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/
+
   def validate_options!(options)
     minimum = ReputableChat::Config.load.integer("seed.min_words")
     abort "a seed needs at least #{minimum} words" if options[:words] < minimum
 
-    unless ReputableChat::Params.handle(options[:handle])
-      abort "a handle is required, at most #{ReputableChat::Params::MAX_HANDLE} bytes and no control characters"
-    end
-
-    return if ReputableChat::Params.bio(options[:bio])
-
-    abort "a bio is at most #{ReputableChat::Params::MAX_BIO} bytes and has no control characters"
+    options[:handle] = options[:handle].strip
+    options[:bio] = options[:bio].strip
+    limit = HANDLE_BYTES
+    abort "a handle is 1 to #{limit} bytes" unless options[:handle].bytesize.between?(1, limit)
+    abort "a handle has no control characters" if options[:handle].match?(CONTROL)
+    abort "a bio has no control characters" if options[:bio].match?(CONTROL)
   end
 
   # Overwriting would orphan every record that acknowledges the old genesis,
@@ -293,7 +324,10 @@ module GenerateGenesis
         --development   cut the development account (the default); its seed
                         is committed on purpose so a clone can use it
         --path FILE     where to write the record
-        --seed FILE     where to write the seed
+        --seed FILE     where to write the working key's seed
+        --master-seed FILE
+                        where to write the master key's seed (default: the
+                        seed's path with .master.seed)
     TEXT
   end
 end

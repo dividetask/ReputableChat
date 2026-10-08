@@ -6,7 +6,7 @@ import * as seed from "./seed.js";
 import * as identity from "./identity.js";
 import { Reputation, Graph, toNumber, toFixed, toDecimal } from "./reputation.js";
 import { Session } from "./session.js";
-import { initialRatings, declarationProfile } from "./defaults.js";
+import { initialRatings, declarationProfile, profileOf } from "./defaults.js";
 import * as vault from "./vault.js";
 import * as names from "./names.js";
 
@@ -15,13 +15,17 @@ const NEW_ACCOUNT_PATH = "/new-account";
 // A quick picker, not the whole set: sixteen emotes make a toolbar wider than
 // the message it floats over. The rest stay configured and unused for now.
 const QUICK_EMOTES = 8;
-const PUBKEY = /^[A-Za-z0-9_-]{42,44}$/;
+// An account ID: the record hash of the account's first identity declaration.
+const ACCOUNT = /^[0-9a-f]{64}$/;
 const $ = (id) => document.getElementById(id);
 
+// `me` is the derived key (privateKey, pubkey, vaultKey) plus `account`, the
+// account ID that key signs for, once there is one. `latest` is the hash of
+// this account's newest record, which the next one acknowledges.
 const state = {
-  config: null, emotes: null, me: null, profile: null, revision: 0,
+  config: null, emotes: null, me: null, profile: null, latest: null,
   ratings: {}, graph: new Graph(), reputation: null, session: null,
-  identityRevision: 0, attestationRevision: 0, attestationPending: 0, attestationAt: 0,
+  attestationPending: 0, attestationAt: 0,
   voted: new Set(), viewing: null, settings: {}, vaultRevision: 0,
   vaultDirty: false,
   reactions: new Map(), recentlyBlocked: new Map(), replyingTo: null,
@@ -35,19 +39,31 @@ const state = {
 // alone must not rebuild the DOM, so local changes announce themselves here.
 const touch = () => { state.renderEpoch += 1; };
 
-// The record this client will name as the last thing it saw. `tip` is the most
-// recent record whose author cleared the bar; with nothing yet seen it is the
-// genesis, which is why Tim exists.
+// The records this client will name as the last things it saw: the most recent
+// message whose author cleared the bar, and this account's own newest record,
+// so its records form one line rather than branches. With nothing yet seen it
+// is the host account's declaration where there is one, else the genesis --
+// which is why Tim exists. identity.js sorts them, as the rules require.
 function currentAck() {
-  return state.tip || state.genesis.hash;
+  const ack = [...new Set([state.tip, state.latest].filter(Boolean))];
+  if (ack.length) return ack;
+
+  return [(state.host || state.genesis).hash];
+}
+
+// Signs a record, sends it, and remembers it as this account's newest.
+async function publishRecord(payload) {
+  const result = await post("/api/record", await identity.signRecord(state.me, payload));
+  state.latest = result.hash;
+  return result;
 }
 
 // The genesis account's committed declaration or this server's host
-// account's, whichever `pubkey` belongs to. Both are in hand before anything
+// account's, whichever `account` belongs to. Both are in hand before anything
 // has been fetched, which is what lets the default friends have a name and a
 // face on the account creation screen.
-function committedFor(pubkey) {
-  return [state.genesis, state.host].find((record) => record && record.pubkey === pubkey) || null;
+function committedFor(account) {
+  return [state.genesis, state.host].find((record) => record && record.account === account) || null;
 }
 
 // The bar is the viewer's own, read through the viewer's own config, so two
@@ -60,9 +76,10 @@ function chooseTip(messages) {
   const bar = toFixed(state.config.chain.min_reputation_to_acknowledge);
 
   for (let i = messages.length - 1; i >= 0; i--) {
-    const { pubkey: author, hash } = messages[i];
+    const { account: author, hash } = messages[i];
     if (!hash) continue;
-    if (author === state.me.pubkey) return hash;
+    if (messages[i].state === "void") continue;
+    if (author === state.me.account) return hash;
     if (state.session.scoreOf(author) > bar) return hash;
   }
   return null;
@@ -85,9 +102,10 @@ function status(el, message, kind = "") {
   el.className = `status ${kind}`;
 }
 
-// People are identified by key, never by name — names are not unique, so the
-// fingerprint is all that stands between a user and a convincing impersonator.
-const fingerprint = (pubkey) => pubkey.slice(0, 8);
+// People are identified by account ID, never by name — names are not unique, so
+// the fingerprint is all that stands between a user and a convincing
+// impersonator.
+const fingerprint = (account) => account.slice(0, 8);
 
 // --- the vault ----------------------------------------------------------
 //
@@ -128,7 +146,7 @@ function vaultContents() {
     voted: [...state.voted],
     seen: state.seen,
     // Canonical serialization sorts keys, so the ratings object comes back from
-    // the server in public-key order and cannot carry "who I added first".
+    // the server in account-ID order and cannot carry "who I added first".
     // Each entry also records the handle that friend is using and when they
     // took it, because a name claim is only as old as the name.
     friends: state.friendList,
@@ -136,7 +154,6 @@ function vaultContents() {
     // is the score they come to, published in an attestation.
     ratings: state.ratings,
     attestation: {
-      revision: state.attestationRevision,
       pending: state.attestationPending,
       at: state.attestationAt,
     },
@@ -149,7 +166,6 @@ function applyVault(contents) {
   state.seen = contents.seen || [];
   state.friendList = names.normalizeFriends(contents.friends || contents.friend_order || []);
   state.ratings = contents.ratings || {};
-  state.attestationRevision = contents.attestation?.revision || state.attestationRevision;
   state.attestationPending = contents.attestation?.pending || 0;
   state.attestationAt = contents.attestation?.at || 0;
 }
@@ -253,9 +269,9 @@ function rebuildSession() {
   // That one happens to keep working because it stored the live state.ratings
   // object and mutations show through, which is true today and is not a thing
   // to depend on.
-  state.graph.add(state.me.pubkey, state.ratings);
+  state.graph.add(state.me.account, state.ratings);
   state.session = new Session(
-    state.reputation, state.me.pubkey, state.graph, state.config.session.report_blocks,
+    state.reputation, state.me.account, state.graph, state.config.session.report_blocks,
   );
 
   for (const [subject, reporters] of previous) {
@@ -341,7 +357,8 @@ async function signIn(derived, { restoring = false } = {}) {
     pubkey: derived.pubkey, nonce, ts, signature: await identity.sign(derived, payload),
   });
 
-  state.me = derived;
+  state.me = { ...derived, account: session.account };
+  state.latest = session.latest;
 
   if (session.registered) return enterChat();
 
@@ -372,15 +389,15 @@ async function signIn(derived, { restoring = false } = {}) {
 
 // --- choosing friends before the account exists -------------------------
 //
-// A friend list is a list of public keys and nothing else, so none of this
-// needs the server: a key that belongs to nobody yet, or to nobody ever, is
+// A friend list is a list of account IDs and nothing else, so none of this
+// needs the server: an ID that belongs to nobody yet, or to nobody ever, is
 // still a perfectly good thing to write down. That is what makes it possible
 // to choose here, before the account being created has said anything.
 
 // Before login there are no fetched profiles, so the only names available are
 // the default friends', out of the declarations already in hand.
-function newAccountName(pubkey) {
-  const record = committedFor(pubkey);
+function newAccountName(account) {
+  const record = committedFor(account);
   if (!record) return "unknown";
 
   const fallback = record === state.genesis ? "the genesis account" : "this server's account";
@@ -389,9 +406,9 @@ function newAccountName(pubkey) {
 
 function resetNewFriends() {
   state.newFriends = initialRatings({
-    genesisPubkey: state.genesis?.pubkey,
-    hostPubkey: state.host?.pubkey,
-    ownPubkey: state.me?.pubkey,
+    genesisAccount: state.genesis?.account,
+    hostAccount: state.host?.account,
+    ownAccount: state.me?.account,
   });
   renderNewFriends();
 }
@@ -408,36 +425,36 @@ function renderNewFriends() {
     return box.append(empty);
   }
 
-  for (const pubkey of keys) {
+  for (const account of keys) {
     const row = document.createElement("div");
     row.className = "row";
 
     const name = document.createElement("span");
     name.className = "name";
-    name.textContent = newAccountName(pubkey); // textContent, never innerHTML
+    name.textContent = newAccountName(account); // textContent, never innerHTML
 
     const key = document.createElement("span");
-    key.className = "pubkey";
-    key.textContent = pubkey;
+    key.className = "account-id";
+    key.textContent = account;
 
     const remove = document.createElement("button");
     remove.type = "button";
     remove.className = "secondary";
     remove.textContent = "remove";
-    remove.addEventListener("click", () => removeNewFriend(pubkey));
+    remove.addEventListener("click", () => removeNewFriend(account));
 
-    row.append(avatarFor(pubkey), name, key, remove);
+    row.append(avatarFor(account), name, key, remove);
     box.append(row);
   }
 }
 
 // Removing a default friend here is the one choice on this screen with a
 // consequence somebody might not have in mind, so it is the one that asks.
-// Removing a key pasted in ten seconds ago is not worth a dialog.
-async function removeNewFriend(pubkey) {
-  if (committedFor(pubkey)) {
+// Removing an ID pasted in ten seconds ago is not worth a dialog.
+async function removeNewFriend(account) {
+  if (committedFor(account)) {
     const sure = await confirmAction(
-      `Start without ${newAccountName(pubkey)}? Nothing it vouches for will reach ` +
+      `Start without ${newAccountName(account)}? Nothing it vouches for will reach ` +
       "you, and accounts nobody else has vouched for will be invisible. You can " +
       "add it back later.",
       "Yes, remove",
@@ -445,22 +462,22 @@ async function removeNewFriend(pubkey) {
     if (!sure) return;
   }
 
-  delete state.newFriends[pubkey];
+  delete state.newFriends[account];
   renderNewFriends();
 }
 
 function addNewFriend() {
   const field = $("new-friend-key");
-  const pubkey = field.value.trim();
+  const account = field.value.trim();
   const say = (message, kind) => status($("new-friend-status"), message, kind);
 
-  if (!PUBKEY.test(pubkey)) return say("That is not a public key.", "error");
-  if (pubkey === state.me?.pubkey) return say("That is your own key.", "error");
-  if (state.newFriends[pubkey]) return say("Already on the list.", "error");
+  if (!ACCOUNT.test(account)) return say("That is not an account ID.", "error");
+  if (account === state.me?.account) return say("That is your own account.", "error");
+  if (state.newFriends[account]) return say("Already on the list.", "error");
 
   // The same shape the seeded friendship uses, so nothing downstream can tell
   // which entries were chosen here and which were the default.
-  state.newFriends[pubkey] = { friend: true, reported: false, net_votes: 0, cleared: false };
+  state.newFriends[account] = { friend: true, reported: false, net_votes: 0, cleared: false };
   field.value = "";
   say("Added.", "ok");
   renderNewFriends();
@@ -480,25 +497,24 @@ async function startNewAccount() {
   $("new-name").focus();
 }
 
+// The account comes into being with its first identity declaration, whose
+// record hash becomes its account ID. Nothing else registers it.
 async function registerWith(username) {
-  await post("/api/register", {});
-  state.profile = { username, message: "", icon: null };
+  state.profile = { handle: username, bio: "", icon: null };
+  await publishIdentity();
 
   // Whatever was on the new account screen, which started from the seeded
-  // default and is theirs to have edited. Their own key can only have got in
-  // here by being pasted before they had one, so it goes now.
+  // default and is theirs to have edited.
   state.ratings = { ...state.newFriends };
-  delete state.ratings[state.me.pubkey];
+  delete state.ratings[state.me.account];
   // Captured before anything round-trips through the server, which is the only
   // moment this order exists: canonical serialization sorts keys, so it cannot
   // be recovered from the ratings afterwards.
-  state.friendList = Object.keys(state.ratings).map((pubkey) => ({
-    pubkey, handle: newAccountName(pubkey), at: now(),
+  state.friendList = Object.keys(state.ratings).map((account) => ({
+    account, handle: newAccountName(account), at: now(),
   }));
   vaultChanged();
 
-  state.profile = { handle: username, bio: "", icon: null };
-  await publishIdentity();
   // Published straight away rather than waiting on the cadence: an account
   // with no attestation contributes nothing to anybody, and the friendships
   // just chosen are the whole reason this screen exists.
@@ -538,20 +554,21 @@ function parseRecord(blob) {
   }
 }
 
+// The first declaration carries no id; the server answers with its record
+// hash, which is the account ID from then on.
 async function publishIdentity() {
-  state.identityRevision += 1;
-  const ts = now();
-  const body = {
-    revision: state.identityRevision,
+  const payload = identity.identityPayload({
+    id: state.me.account,
+    pubkey: state.me.pubkey,
     handle: state.profile.handle,
     bio: state.profile.bio || "",
-    icon: state.profile.icon || null,
+    avatar: state.profile.icon || null,
     ack: currentAck(),
-    ts,
-  };
-  const payload = identity.identityPayload({ pubkey: state.me.pubkey, ...body });
+    ts: now(),
+  });
 
-  await send("PUT", "/api/identity", { ...body, signature: await identity.sign(state.me, payload) });
+  const result = await publishRecord(payload);
+  if (!state.me.account) state.me.account = result.account;
 }
 
 // What the vault's private actions come to, as a number. The curve runs here,
@@ -560,11 +577,11 @@ async function publishIdentity() {
 function myScores() {
   const scores = {};
 
-  for (const [pubkey, rating] of Object.entries(state.ratings)) {
+  for (const [account, rating] of Object.entries(state.ratings)) {
     const value = state.reputation.ratingValue(rating);
     if (value === null) continue;
 
-    scores[pubkey] = {
+    scores[account] = {
       reputation: toDecimal(value),
       trust: toDecimal(state.reputation.multiplierOf(rating)),
     };
@@ -577,35 +594,36 @@ const configValue = (path) => path.split(".").reduce(
   deepMerge(state.config, state.settings),
 );
 
-// The cache other people use as the fourth term of their own score. Carries the
-// fingerprint of the parameters it was computed under, because reputation is
-// subjective and configuration is per-user: without it a reader cannot tell
-// whether these numbers mean anything to them.
+// What this viewer calculated for accounts further away, for readers whose own
+// walk does not reach them. The same shape as scores (rules, section 4); trust
+// follows the guideline and is 0 or 1. Nothing says what parameters it was
+// computed under -- see docs/project/reputation.md.
 function derivedScores() {
   const hops = Number(state.config.attestation?.published_hops ?? 3);
   const scores = {};
   if (!state.session) return scores;
 
-  for (const [pubkey, depth] of state.session.depths || []) {
-    if (depth > hops || pubkey === state.me.pubkey) continue;
-    scores[pubkey] = toDecimal(state.session.scoreOf(pubkey));
+  for (const [account, depth] of state.session.depths || []) {
+    if (depth > hops || account === state.me.account || state.ratings[account]) continue;
+    const reputation = state.session.scoreOf(account);
+    scores[account] = { reputation: toDecimal(reputation), trust: reputation > 0n ? "1" : "0" };
   }
   return scores;
 }
 
 async function publishAttestation() {
-  state.attestationRevision += 1;
   const ts = now();
-  const body = {
-    revision: state.attestationRevision,
+  const derived = derivedScores();
+  const payload = identity.attestationPayload({
+    id: state.me.account,
+    pubkey: state.me.pubkey,
     scores: myScores(),
-    derived: { scores: derivedScores() },
+    derived: Object.keys(derived).length ? derived : null,
     ack: currentAck(),
     ts,
-  };
-  const payload = identity.attestationPayload({ pubkey: state.me.pubkey, ...body });
+  });
 
-  await send("PUT", "/api/attestation", { ...body, signature: await identity.sign(state.me, payload) });
+  await publishRecord(payload);
   state.attestationPending = 0;
   state.attestationAt = ts;
   vaultChanged();
@@ -630,7 +648,7 @@ function attestationIsDue() {
 
   return state.attestationPending >= changes
     || (state.attestationAt > 0 && now() - state.attestationAt >= seconds)
-    || state.attestationRevision === 0;
+    || state.attestationAt === 0;
 }
 
 async function publishIfDue() {
@@ -642,18 +660,8 @@ async function publishIfDue() {
 }
 
 async function loadOwnIdentity() {
-  const { identity: blob } = await api(`/api/identity/${state.me.pubkey}`);
-  const declaration = parseRecord(blob);
-
-  state.identityRevision = declaration?.revision || 0;
-  state.profile = {
-    handle: declaration?.handle || "anonymous",
-    bio: declaration?.bio || "",
-    icon: declaration?.icon || null,
-  };
-
-  const { attestation } = await api(`/api/attestation/${state.me.pubkey}`);
-  state.attestationRevision = parseRecord(attestation)?.revision || 0;
+  const { identity: blob } = await api(`/api/identity/${state.me.account}`);
+  state.profile = profileOf(parseRecord(blob)) || { handle: "anonymous", bio: "", icon: null };
 }
 
 // Walks outward from the viewer, fetching a whole hop per request. Bounded by
@@ -662,18 +670,18 @@ async function loadOwnIdentity() {
 async function loadNetwork() {
   const { max_hops: maxHops, max_accounts: maxAccounts } = state.config.ladder;
   state.graph = new Graph();
-  state.graph.add(state.me.pubkey, state.ratings);
-  state.profiles = new Map([[state.me.pubkey, state.profile]]);
+  state.graph.add(state.me.account, state.ratings);
+  state.profiles = new Map([[state.me.account, state.profile]]);
 
   // The default friends' first declarations are committed files rather than
   // published records, so their names come from the copies already in hand.
   // Seeded before the walk, so one they have published since wins over it.
   for (const record of [state.genesis, state.host]) {
     const profile = declarationProfile(record);
-    if (profile) state.profiles.set(record.pubkey, profile);
+    if (profile) state.profiles.set(record.account, profile);
   }
 
-  let frontier = [state.me.pubkey];
+  let frontier = [state.me.account];
   const seen = new Set(frontier);
 
   for (let hop = 0; hop < maxHops && seen.size < maxAccounts; hop++) {
@@ -689,13 +697,13 @@ async function loadNetwork() {
     if (!wanted.length) break;
 
     await fetchConfigs(wanted);
-    wanted.forEach((pubkey) => seen.add(pubkey));
+    wanted.forEach((account) => seen.add(account));
     frontier = wanted;
   }
 }
 
-async function fetchConfigs(pubkeys) {
-  const fresh = pubkeys.filter((key) => key && !state.graph.has(key));
+async function fetchConfigs(accounts) {
+  const fresh = accounts.filter((key) => key && !state.graph.has(key));
   if (!fresh.length) return;
 
   // MVP: signatures are taken on trust (session.verify_signatures). The
@@ -707,24 +715,27 @@ async function fetchConfigs(pubkeys) {
   // never rated anybody, and a brand new account has not published an
   // attestation yet.
   const [{ attestations }, { identities }] = await Promise.all([
-    post("/api/attestation/batch", { pubkeys: fresh }),
-    post("/api/identity/batch", { pubkeys: fresh }),
+    post("/api/attestation/batch", { accounts: fresh }),
+    post("/api/identity/batch", { accounts: fresh }),
   ]);
+
+  // A record names its account by id, or is the account's first declaration,
+  // whose own hash is the ID. One that says otherwise is not that account's.
+  const owns = (blob, payload) => (payload.id || blob.hash) === blob.account;
 
   for (const blob of attestations) {
     const payload = parseRecord(blob);
-    if (!payload || payload.pubkey !== blob.pubkey) continue;
+    if (!payload || !owns(blob, payload) || blob.state === "void") continue;
 
-    state.graph.add(blob.pubkey, payload.scores || {});
+    state.graph.add(blob.account, payload.scores || {});
   }
 
   for (const blob of identities) {
     const payload = parseRecord(blob);
-    if (!payload || payload.pubkey !== blob.pubkey) continue;
+    if (!payload || !owns(blob, payload) || blob.state === "void") continue;
 
-    state.profiles.set(blob.pubkey, {
-      handle: payload.handle, bio: payload.bio, icon: payload.icon,
-    });
+    const profile = profileOf(payload);
+    if (profile) state.profiles.set(blob.account, profile);
   }
 
   for (const key of fresh) if (!state.graph.has(key)) state.graph.add(key, {});
@@ -751,7 +762,7 @@ async function enterChat() {
   await loadNetwork();
   rebuildSession();
 
-  $("me").textContent = `${state.profile.handle} · ${fingerprint(state.me.pubkey)}`;
+  $("me").textContent = `${state.profile.handle} · ${fingerprint(state.me.account)}`;
   refreshMessages();
   setInterval(refreshMessages, 4000);
   // Local first, pushed on a timer. The interval is the server's advice, and
@@ -762,39 +773,44 @@ async function enterChat() {
 
 async function refreshMessages() {
   let messages;
-  let emotes;
+  let reactions;
   try {
-    [{ messages }, { emotes }] = await Promise.all([
+    [{ messages }, { reactions }] = await Promise.all([
       api("/api/messages"),
-      api("/api/emotes"),
+      api("/api/reactions"),
     ]);
   } catch (error) {
     return status($("chat-status"), error.message, "error");
   }
 
-  await fetchConfigs([...new Set([...messages.map((m) => m.pubkey), ...emotes.map((e) => e.pubkey)])]);
+  // A void record stays on the chain and does nothing (rules, section 1), so
+  // it is not shown and not counted.
+  messages = messages.filter((m) => m.state !== "void");
+  reactions = reactions.filter((r) => r.state !== "void");
+
+  await fetchConfigs([...new Set([...messages.map((m) => m.account), ...reactions.map((r) => r.account)])]);
   state.tip = chooseTip(messages);
   recordSightings(messages);
   recomputeNames();
 
   // Most polls find nothing new. Rebuilding the list anyway costs a full DOM
   // teardown, drops any text selection, and closes an open hover menu.
-  const key = renderKey(messages, emotes);
+  const key = renderKey(messages, reactions);
   if (key === state.renderedKey) return;
 
   state.renderedKey = key;
-  state.reactions = tallyReactions(emotes);
+  state.reactions = tallyReactions(reactions);
   render(messages);
 }
 
 // Everything the rendered list depends on. The undo stubs are in here because
 // they expire on a timer, so they have to redraw even when nothing arrives.
-function renderKey(messages, emotes) {
+function renderKey(messages, reactions) {
   const stubs = [...state.recentlyBlocked.keys()].filter((key) => withinUndoWindow(key));
 
   return [
-    messages.map((m) => m.hash).join(","),
-    emotes.map((e) => `${e.message}${e.emote}${e.pubkey}`).join(","),
+    messages.map((m) => `${m.hash}${m.state}`).join(","),
+    reactions.map((r) => r.hash).join(","),
     stubs.join(","),
     state.renderEpoch,
   ].join("|");
@@ -818,13 +834,13 @@ function render(messages) {
   const byHash = new Map(messages.map((m) => [m.hash, m]));
 
   for (const message of messages) {
-    const mine = message.pubkey === state.me.pubkey;
-    const bucket = mine ? "trusted" : state.session.bucketOf(message.pubkey);
+    const mine = message.account === state.me.account;
+    const bucket = mine ? "trusted" : state.session.bucketOf(message.account);
 
     if (bucket === "blocked") {
       // Someone you blocked moments ago leaves a stub you can undo. Everyone
       // else blocked simply is not here.
-      if (withinUndoWindow(message.pubkey)) list.append(blockedStub(message));
+      if (withinUndoWindow(message.account)) list.append(blockedStub(message));
       continue;
     }
 
@@ -837,6 +853,12 @@ function render(messages) {
 
     const row = document.createElement("div");
     row.className = `msg ${bucket}`;
+    // Waiting on the author's adjudicators (rules, section 8): shown, and
+    // marked as not settled.
+    if (message.state === "disputed") {
+      row.classList.add("disputed");
+      row.title = "Disputed: this account's records wait on its adjudicators.";
+    }
     row.id = domId(message.hash);
 
     const main = document.createElement("div");
@@ -844,18 +866,18 @@ function render(messages) {
 
     const who = document.createElement("span");
     who.className = "who";
-    // displayName already carries a key suffix when the handle is contested,
+    // displayName already carries a suffix when the handle is contested,
     // so a separate fingerprint beside it would be the same eight characters
     // twice on the names that need them and clutter on the ones that do not.
-    who.textContent = displayName(message.pubkey);
-    who.addEventListener("click", () => showProfile(message.pubkey));
+    who.textContent = displayName(message.account);
+    who.addEventListener("click", () => showProfile(message.account));
 
     const body = document.createElement("div");
     body.textContent = payload.body; // textContent, never innerHTML
 
-    if (payload.reply_to) main.append(replyQuote(payload.reply_to, byHash));
+    if (payload.target?.length) main.append(replyQuote(payload.target[0], byHash));
     main.append(who, body, reactionBar(message, mine));
-    row.append(avatarFor(message.pubkey), main);
+    row.append(avatarFor(message.account), main);
     list.append(row);
   }
 
@@ -864,19 +886,30 @@ function render(messages) {
 
 // message record hash -> emote -> the people who gave it.
 //
-// Reactions from blocked people are dropped, so a pile of spam accounts cannot
-// inflate a count. Counts are therefore per-viewer, like everything else here.
-function tallyReactions(emotes) {
+// One reaction per person per message: the chain holds every reaction anybody
+// signs, and their latest to a message is the one that counts. Reactions from
+// blocked people are dropped, so a pile of spam accounts cannot inflate a
+// count. Counts are therefore per-viewer, like everything else here.
+function tallyReactions(reactions) {
+  const latest = new Map(); // message -> author -> emote
+
+  for (const { target, body: emote, account: author } of reactions) {
+    if (author !== state.me.account && state.session.bucketOf(author) === "blocked") continue;
+
+    for (const message of target) {
+      if (!latest.has(message)) latest.set(message, new Map());
+      latest.get(message).set(author, emote);
+    }
+  }
+
   const tally = new Map();
-
-  for (const { message, emote, pubkey: author } of emotes) {
-    if (author !== state.me.pubkey && state.session.bucketOf(author) === "blocked") continue;
-
-    if (!tally.has(message)) tally.set(message, new Map());
-    const perEmote = tally.get(message);
-
-    if (!perEmote.has(emote)) perEmote.set(emote, new Set());
-    perEmote.get(emote).add(author);
+  for (const [message, byAuthor] of latest) {
+    const perEmote = new Map();
+    for (const [author, emote] of byAuthor) {
+      if (!perEmote.has(emote)) perEmote.set(emote, new Set());
+      perEmote.get(emote).add(author);
+    }
+    tally.set(message, perEmote);
   }
 
   return tally;
@@ -890,13 +923,13 @@ function polarityOf(emote) {
 
 // True only for people this session blocked, and only until the grace period
 // runs out. Nothing is persisted, so logging out ends it too.
-function withinUndoWindow(pubkey) {
-  const blockedAt = state.recentlyBlocked.get(pubkey);
+function withinUndoWindow(account) {
+  const blockedAt = state.recentlyBlocked.get(account);
   if (!blockedAt) return false;
 
   const grace = (state.config.display.block_grace_seconds ?? 3600) * 1000;
   if (Date.now() - blockedAt > grace) {
-    state.recentlyBlocked.delete(pubkey);
+    state.recentlyBlocked.delete(account);
     return false;
   }
 
@@ -915,7 +948,7 @@ function blockedStub(message) {
   const undo = document.createElement("button");
   undo.type = "button";
   undo.textContent = "undo report";
-  undo.addEventListener("click", () => undoReport(message.pubkey, { confirm: false }).catch(
+  undo.addEventListener("click", () => undoReport(message.account, { confirm: false }).catch(
     (e) => status($("chat-status"), e.message, "error"),
   ));
   actions.append(undo);
@@ -924,8 +957,8 @@ function blockedStub(message) {
   return row;
 }
 
-// Names are not unique, so an avatar derived from the key gives every person a
-// stable look even before they upload one. Same key, same colour, always.
+// Names are not unique, so an avatar derived from the account ID gives every person a
+// stable look even before they upload one. Same account, same colour, always.
 // Where an icon comes from, in order: a declaration fetched during the walk,
 // then the committed declaration of a default friend, which the client holds
 // before it has fetched anything.
@@ -933,14 +966,14 @@ function blockedStub(message) {
 // The second is why the default friends have faces on the account creation
 // screen, where nothing has been fetched and nothing can be -- the account
 // doing the looking does not exist yet.
-function iconFor(pubkey) {
-  const known = state.profiles?.get(pubkey)?.icon;
+function iconFor(account) {
+  const known = state.profiles?.get(account)?.icon;
   if (known) return known;
 
-  return declarationProfile(committedFor(pubkey))?.icon || null;
+  return declarationProfile(committedFor(account))?.icon || null;
 }
 
-function avatarFor(pubkey, extra = "", icon = iconFor(pubkey)) {
+function avatarFor(account, extra = "", icon = iconFor(account)) {
   // The avatar already on somebody's profile is the end of the journey, so it
   // enlarges. Everywhere else an avatar is a way to get there.
   const onProfile = extra.includes("avatar-large");
@@ -952,20 +985,20 @@ function avatarFor(pubkey, extra = "", icon = iconFor(pubkey)) {
     img.className = `avatar ${extra}`.trim();
     img.src = `/images/${icon}`;
     img.alt = "";
-    if (onProfile) enlarges(img, `/images/${icon}`); else opensProfile(img, pubkey);
+    if (onProfile) enlarges(img, `/images/${icon}`); else opensProfile(img, account);
     return img;
   }
 
   let hash = 0;
-  for (const character of pubkey) hash = ((hash * 31) + character.charCodeAt(0)) >>> 0;
+  for (const character of account) hash = ((hash * 31) + character.charCodeAt(0)) >>> 0;
 
   const placeholder = document.createElement("span");
   placeholder.className = `avatar placeholder ${extra}`.trim();
   placeholder.style.background = `hsl(${hash % 360} 42% 30%)`;
-  placeholder.textContent = pubkey.slice(0, 2);
+  placeholder.textContent = account.slice(0, 2);
   // A placeholder is two letters on a colour. There is nothing to enlarge, so
   // on a profile it does nothing at all.
-  if (!onProfile) opensProfile(placeholder, pubkey);
+  if (!onProfile) opensProfile(placeholder, account);
   return placeholder;
 }
 
@@ -974,19 +1007,19 @@ function avatarFor(pubkey, extra = "", icon = iconFor(pubkey)) {
 // on the way past, which is worse than no hover at all.
 const HOVER_INTENT_MS = 400;
 
-function opensProfile(element, pubkey) {
+function opensProfile(element, account) {
   let waiting = null;
 
   element.classList.add("enlargeable");
   element.addEventListener("mouseenter", () => {
-    waiting = setTimeout(() => showProfile(pubkey), HOVER_INTENT_MS);
+    waiting = setTimeout(() => showProfile(account), HOVER_INTENT_MS);
   });
   element.addEventListener("mouseleave", () => clearTimeout(waiting));
   element.addEventListener("click", (event) => {
     // A tap fires this without ever hovering, so it must not wait.
     clearTimeout(waiting);
     event.stopPropagation();
-    showProfile(pubkey);
+    showProfile(account);
   });
 }
 
@@ -1045,13 +1078,13 @@ function replyQuote(targetHash, byHash) {
   arrow.textContent = "\u21B1";
 
   const name = document.createElement("span");
-  name.textContent = displayName(target.pubkey);
+  name.textContent = displayName(target.account);
 
   const snippet = document.createElement("span");
   snippet.className = "snippet";
   snippet.textContent = body;
 
-  quote.append(arrow, avatarFor(target.pubkey), name, snippet);
+  quote.append(arrow, avatarFor(target.account), name, snippet);
   quote.addEventListener("click", () => scrollToMessage(targetHash));
   return quote;
 }
@@ -1069,7 +1102,7 @@ function scrollToMessage(hash) {
 function startReply(message) {
   state.replyingTo = message;
   $("replying").classList.remove("hidden");
-  $("replying-to").textContent = `Replying to ${displayName(message.pubkey)}`;
+  $("replying-to").textContent = `Replying to ${displayName(message.account)}`;
   $("body").focus();
 }
 
@@ -1083,8 +1116,8 @@ function cancelReply() {
 // already on screen is called.
 function recomputeNames() {
   const handles = {};
-  for (const [pubkey, profile] of state.profiles || []) {
-    if (profile?.handle) handles[pubkey] = profile.handle;
+  for (const [account, profile] of state.profiles || []) {
+    if (profile?.handle) handles[account] = profile.handle;
   }
 
   state.names = names.resolveNames({
@@ -1094,9 +1127,9 @@ function recomputeNames() {
   });
 }
 
-function displayName(pubkey) {
-  const resolved = state.names?.[pubkey];
-  if (!resolved) return state.profiles?.get(pubkey)?.handle || "someone";
+function displayName(account) {
+  const resolved = state.names?.[account];
+  if (!resolved) return state.profiles?.get(account)?.handle || "someone";
 
   return resolved.suffix ? `${resolved.handle} ${resolved.suffix}` : resolved.handle;
 }
@@ -1107,20 +1140,20 @@ function displayName(pubkey) {
 // Recorded first, then anyone the record does not know about -- a rating from
 // before the vault carried this, or from another device mid-merge.
 function friendsInOrder() {
-  const friends = Object.entries(state.ratings).filter(([, r]) => r.friend).map(([pubkey]) => pubkey);
-  const known = state.friendList.map((entry) => entry.pubkey).filter((pubkey) => friends.includes(pubkey));
+  const friends = Object.entries(state.ratings).filter(([, r]) => r.friend).map(([account]) => account);
+  const known = state.friendList.map((entry) => entry.account).filter((account) => friends.includes(account));
 
-  return [...known, ...friends.filter((pubkey) => !known.includes(pubkey))];
+  return [...known, ...friends.filter((account) => !known.includes(account))];
 }
 
-function rememberFriend(pubkey) {
+function rememberFriend(account) {
   state.friendList = names.rememberFriend(
-    state.friendList, pubkey, state.profiles?.get(pubkey)?.handle || null, now(),
+    state.friendList, account, state.profiles?.get(account)?.handle || null, now(),
   );
 }
 
-function forgetFriend(pubkey) {
-  state.friendList = names.forgetFriend(state.friendList, pubkey);
+function forgetFriend(account) {
+  state.friendList = names.forgetFriend(state.friendList, account);
 }
 
 const now = () => Math.floor(Date.now() / 1000);
@@ -1133,8 +1166,8 @@ function recordSightings(messages) {
   let seen = state.seen;
 
   for (const message of messages) {
-    const author = message.pubkey;
-    if (!author || author === state.me?.pubkey) continue;
+    const author = message.account;
+    if (!author || author === state.me?.account) continue;
 
     const rating = state.ratings[author];
     if (rating?.friend || rating?.reported) {
@@ -1154,8 +1187,8 @@ function recordSightings(messages) {
   const friendsBefore = state.friendList;
   let friends = state.friendList;
   for (const entry of friendsBefore) {
-    const handle = state.profiles?.get(entry.pubkey)?.handle;
-    if (handle) friends = names.refreshFriendHandle(friends, entry.pubkey, handle, now());
+    const handle = state.profiles?.get(entry.account)?.handle;
+    if (handle) friends = names.refreshFriendHandle(friends, entry.account, handle, now());
   }
 
   if (seen === before && friends === friendsBefore) return;
@@ -1177,7 +1210,7 @@ function reactionBar(message, mine) {
     const pill = document.createElement("button");
     pill.type = "button";
     pill.className = "pill";
-    if (people.has(state.me.pubkey)) pill.classList.add("mine");
+    if (people.has(state.me.account)) pill.classList.add("mine");
     pill.disabled = reacted;
     pill.title = `${people.size} ${people.size === 1 ? "person" : "people"}`;
     pill.textContent = `${emote} ${people.size}`;
@@ -1211,7 +1244,7 @@ function reactionBar(message, mine) {
   const report = document.createElement("button");
   report.type = "button";
   report.textContent = "report";
-  report.addEventListener("click", () => reportUser(message.pubkey));
+  report.addEventListener("click", () => reportUser(message.account));
   lower.append(report);
 
   actions.append(upper, lower);
@@ -1237,8 +1270,8 @@ function emoteRow(message, emotes, kind) {
   return row;
 }
 
-// One reaction per comment, which the server enforces too. The message's
-// record hash is its id.
+// One reaction per message from this client; the tally counts only each
+// person's latest anyway. The message's record hash is its target.
 async function react(message, emote) {
   if (state.voted.has(message.hash)) return;
 
@@ -1250,17 +1283,13 @@ async function react(message, emote) {
     if (!sure) return;
   }
 
-  const ts = Math.floor(Date.now() / 1000);
-  const ack = currentAck();
-  const payload = identity.emotePayload({
-    pubkey: state.me.pubkey, message: message.hash, emote, ack, ts,
+  const payload = identity.reactionPayload({
+    id: state.me.account, pubkey: state.me.pubkey, body: emote,
+    target: [message.hash], ack: currentAck(), ts: now(),
   });
 
   try {
-    await post("/api/emote", {
-      message: message.hash, emote, ack, ts,
-      signature: await identity.sign(state.me, payload),
-    });
+    await publishRecord(payload);
 
     // Buckets do not move for emotes until the next login, by design; the
     // refresh only repaints the reaction counts.
@@ -1276,25 +1305,20 @@ async function compose(event) {
   const body = $("body").value.trim();
   if (!body) return;
 
-  const ts = Math.floor(Date.now() / 1000);
   const replyingTo = state.replyingTo;
-  const replyTo = replyingTo ? replyingTo.hash : null;
-  const ack = currentAck();
   const payload = identity.messagePayload({
-    pubkey: state.me.pubkey, body, ack, ts, replyTo,
+    id: state.me.account, pubkey: state.me.pubkey, body,
+    ack: currentAck(), ts: now(), target: replyingTo ? [replyingTo.hash] : null,
   });
 
   try {
-    await post("/api/message", {
-      body, ack, ts, reply_to: replyTo,
-      signature: await identity.sign(state.me, payload),
-    });
+    await publishRecord(payload);
     $("body").value = "";
     cancelReply();
 
     // Replying counts like reacting: one vote per message either way, so
     // replying to something you already reacted to does not vote twice.
-    if (replyingTo && replyingTo.pubkey !== state.me.pubkey) await countAsVote(replyingTo, 1);
+    if (replyingTo && replyingTo.account !== state.me.account) await countAsVote(replyingTo, 1);
 
     refreshMessages();
   } catch (error) {
@@ -1307,8 +1331,8 @@ async function compose(event) {
 async function countAsVote(message, polarity) {
   if (state.voted.has(message.hash)) return;
 
-  const current = state.ratings[message.pubkey] || { friend: false, reported: false, net_votes: 0 };
-  state.ratings[message.pubkey] = { ...current, net_votes: (current.net_votes || 0) + polarity };
+  const current = state.ratings[message.account] || { friend: false, reported: false, net_votes: 0 };
+  state.ratings[message.account] = { ...current, net_votes: (current.net_votes || 0) + polarity };
   state.voted.add(message.hash);
   touch();
 
@@ -1323,10 +1347,10 @@ function showPanel(id) {
   for (const panel of ["login", "chat", "profile"]) $(panel).classList.toggle("hidden", panel !== id);
 }
 
-function showProfile(pubkey) {
-  state.viewing = pubkey;
-  const own = pubkey === state.me.pubkey;
-  const profile = state.profiles?.get(pubkey) || { handle: "someone", bio: "", icon: null };
+function showProfile(account) {
+  state.viewing = account;
+  const own = account === state.me.account;
+  const profile = state.profiles?.get(account) || { handle: "someone", bio: "", icon: null };
 
   $("profile-title").textContent = own ? "Your profile" : "Profile";
   $("profile-edit").classList.toggle("hidden", !own);
@@ -1337,28 +1361,28 @@ function showProfile(pubkey) {
   if (own) {
     $("my-username").value = state.profile.handle;
     $("my-message").value = state.profile.bio || "";
-    $("my-key").value = pubkey;
+    $("my-key").value = account;
     $("show-unrated").checked = Boolean(state.settings.display?.show_unrated);
     $("add-key").value = "";
-    $("my-avatar").replaceChildren(avatarFor(pubkey, "avatar-large", state.profile.icon));
+    $("my-avatar").replaceChildren(avatarFor(account, "avatar-large", state.profile.icon));
     renderRelations();
   } else {
     // iconFor rather than the fetched profile's icon, so an account with no
     // declaration to fetch -- a default friend -- still has a face here.
-    $("profile-icon").replaceChildren(avatarFor(pubkey, "avatar-large"));
+    $("profile-icon").replaceChildren(avatarFor(account, "avatar-large"));
     $("profile-name").textContent = profile.handle || "someone";
-    $("profile-fp").textContent = fingerprint(pubkey);
+    $("profile-fp").textContent = fingerprint(account);
     $("profile-message").textContent = profile.bio || "";
-    $("profile-bucket").textContent = `Currently ${state.session.bucketOf(pubkey)} this session.`;
+    $("profile-bucket").textContent = `Currently ${state.session.bucketOf(account)} this session.`;
   }
 
   showPanel("profile");
 }
 
 async function friendUser() {
-  const pubkey = state.viewing;
-  const current = state.ratings[pubkey] || { friend: false, reported: false, net_votes: 0 };
-  state.ratings[pubkey] = { ...current, friend: true, reported: false };
+  const account = state.viewing;
+  const current = state.ratings[account] || { friend: false, reported: false, net_votes: 0 };
+  state.ratings[account] = { ...current, friend: true, reported: false };
 
   scoreChanged();
   await publishIfDue();
@@ -1385,8 +1409,8 @@ function confirmAction(message, confirmLabel) {
   });
 }
 
-async function reportUser(pubkey) {
-  const target = pubkey || state.viewing;
+async function reportUser(account) {
+  const target = account || state.viewing;
   const sure = await confirmAction(
     `Report ${displayName(target)}? You will stop seeing their messages.`, "Report",
   );
@@ -1397,7 +1421,7 @@ async function reportUser(pubkey) {
   scoreChanged();
   await publishIfDue();
   // Your own report blocks at once — waiting a whole session defeats the point.
-  state.session.report(target, state.me.pubkey);
+  state.session.report(target, state.me.account);
   state.recentlyBlocked.set(target, Date.now());
   touch();
   refreshMessages();
@@ -1411,22 +1435,22 @@ async function reportUser(pubkey) {
 // `confirm` defaults on, so a call site added later asks by default. The undo
 // beside a just-blocked message passes it off: that one exists for a misclick,
 // and a dialog guarding an undo is a dialog guarding the wrong direction.
-async function undoReport(pubkey, { confirm = true } = {}) {
+async function undoReport(account, { confirm = true } = {}) {
   if (confirm) {
     const sure = await confirmAction(
-      `Unblock ${displayName(pubkey)}? Their messages become visible to you again.`,
+      `Unblock ${displayName(account)}? Their messages become visible to you again.`,
       "Yes, unblock",
     );
     if (!sure) return;
   }
 
-  const current = state.ratings[pubkey];
-  if (current) state.ratings[pubkey] = { ...current, reported: false };
+  const current = state.ratings[account];
+  if (current) state.ratings[account] = { ...current, reported: false };
 
   scoreChanged();
   await publishIfDue();
-  state.session.unreport(pubkey, state.me.pubkey);
-  state.recentlyBlocked.delete(pubkey);
+  state.session.unreport(account, state.me.account);
+  state.recentlyBlocked.delete(account);
   touch();
 
   refreshMessages();
@@ -1434,17 +1458,17 @@ async function undoReport(pubkey, { confirm = true } = {}) {
   status($("chat-status"), "Report undone.", "ok");
 }
 
-async function unfriend(pubkey) {
+async function unfriend(account) {
   const sure = await confirmAction(
-    `Remove ${displayName(pubkey)} from your friends? Everything they vouch for ` +
+    `Remove ${displayName(account)} from your friends? Everything they vouch for ` +
     "stops reaching you, and anyone only they made visible becomes invisible.",
     "Yes, unfriend",
   );
   if (!sure) return;
 
-  const current = state.ratings[pubkey];
-  if (current) state.ratings[pubkey] = { ...current, friend: false };
-  forgetFriend(pubkey);
+  const current = state.ratings[account];
+  if (current) state.ratings[account] = { ...current, friend: false };
+  forgetFriend(account);
   vaultChanged();
 
   scoreChanged();
@@ -1480,17 +1504,17 @@ function renderRatings() {
     return box.append(empty);
   }
 
-  for (const [pubkey, rating] of entries) {
+  for (const [account, rating] of entries) {
     const row = document.createElement("div");
     row.className = "row";
 
     const name = document.createElement("span");
     name.className = "name";
-    name.textContent = displayName(pubkey);
+    name.textContent = displayName(account);
 
     const fp = document.createElement("span");
     fp.className = "fp";
-    fp.textContent = fingerprint(pubkey);
+    fp.textContent = fingerprint(account);
 
     const score = document.createElement("span");
     score.className = "score";
@@ -1504,7 +1528,7 @@ function renderRatings() {
     // nothing for this to do until one of them is undone above.
     button.disabled = Boolean(rating.friend || rating.reported);
     button.title = button.disabled ? "unfriend or unblock them first" : "set their rating to zero";
-    button.addEventListener("click", () => clearRating(pubkey).catch(
+    button.addEventListener("click", () => clearRating(account).catch(
       (e) => status($("profile-status"), e.message, "error"),
     ));
 
@@ -1515,9 +1539,9 @@ function renderRatings() {
 
 // Pins someone to zero. `cleared` survives later emotes and replies, so this
 // is not undone the next time they are voted on.
-async function clearRating(pubkey) {
-  const current = state.ratings[pubkey] || { friend: false, reported: false, net_votes: 0 };
-  state.ratings[pubkey] = { ...current, cleared: true };
+async function clearRating(account) {
+  const current = state.ratings[account] || { friend: false, reported: false, net_votes: 0 };
+  state.ratings[account] = { ...current, cleared: true };
 
   scoreChanged();
   await publishIfDue();
@@ -1527,11 +1551,11 @@ async function clearRating(pubkey) {
 
 function fillRelations(box, predicate, verb, action, order = null) {
   const entries = Object.entries(state.ratings).filter(predicate);
-  // The stored ratings come back in public-key order, because canonical
+  // The stored ratings come back in account-ID order, because canonical
   // serialization sorts. Anything that should read as "first added" has to be
   // sorted by the order the vault remembers.
   if (order) {
-    const position = new Map(order.map((pubkey, index) => [pubkey, index]));
+    const position = new Map(order.map((account, index) => [account, index]));
     entries.sort((a, b) => (position.get(a[0]) ?? Infinity) - (position.get(b[0]) ?? Infinity));
   }
   box.replaceChildren();
@@ -1543,70 +1567,70 @@ function fillRelations(box, predicate, verb, action, order = null) {
     return box.append(empty);
   }
 
-  for (const [pubkey] of entries) {
+  for (const [account] of entries) {
     const row = document.createElement("div");
     row.className = "row";
 
     const name = document.createElement("span");
     name.className = "name";
-    name.textContent = displayName(pubkey);
+    name.textContent = displayName(account);
     // The avatar enlarges now, so the name is what opens a profile -- which is
     // already how a message row behaves.
-    name.addEventListener("click", () => showProfile(pubkey));
+    name.addEventListener("click", () => showProfile(account));
 
-    // The whole key, not a fingerprint. This is the list where somebody
-    // checks that the person they vouched for is the person they meant, and a
-    // prefix is exactly what an impersonator would match.
+    // The whole account ID, not a fingerprint. This is the list where
+    // somebody checks that the person they vouched for is the person they
+    // meant, and a prefix is exactly what an impersonator would match.
     const key = document.createElement("span");
-    key.className = "pubkey";
-    key.textContent = pubkey;
+    key.className = "account-id";
+    key.textContent = account;
 
     const button = document.createElement("button");
     button.type = "button";
     button.className = "secondary";
     button.textContent = verb;
-    button.addEventListener("click", () => action(pubkey).catch(
+    button.addEventListener("click", () => action(account).catch(
       (e) => status($("profile-status"), e.message, "error"),
     ));
 
-    row.append(avatarFor(pubkey), name, key, button);
+    row.append(avatarFor(account), name, key, button);
     box.append(row);
   }
 }
 
 async function copyKey() {
   try {
-    await navigator.clipboard.writeText(state.me.pubkey);
-    status($("profile-status"), "Key copied.", "ok");
+    await navigator.clipboard.writeText(state.me.account);
+    status($("profile-status"), "Account ID copied.", "ok");
   } catch {
     // Clipboard access needs a secure context and permission; selecting the
     // text is always available.
     $("my-key").select();
-    status($("profile-status"), "Press Ctrl+C to copy the selected key.");
+    status($("profile-status"), "Press Ctrl+C to copy the selected account ID.");
   }
 }
 
 async function addByKey() {
-  const pubkey = $("add-key").value.trim();
-  if (!PUBKEY.test(pubkey)) return status($("profile-status"), "that does not look like a key", "error");
-  if (pubkey === state.me.pubkey) return status($("profile-status"), "that is your own key", "error");
+  const account = $("add-key").value.trim();
+  if (!ACCOUNT.test(account)) return status($("profile-status"), "that does not look like an account ID", "error");
+  if (account === state.me.account) return status($("profile-status"), "that is your own account", "error");
 
-  const current = state.ratings[pubkey] || { friend: false, reported: false, net_votes: 0 };
-  state.ratings[pubkey] = { ...current, friend: true, reported: false };
-  rememberFriend(pubkey);
-  state.seen = names.forget(state.seen, pubkey);
+  const current = state.ratings[account] || { friend: false, reported: false, net_votes: 0 };
+  state.ratings[account] = { ...current, friend: true, reported: false };
+  rememberFriend(account);
+  state.seen = names.forget(state.seen, account);
   vaultChanged();
 
   scoreChanged();
   await publishIfDue();
-  await fetchConfigs([pubkey]);
+  await fetchConfigs([account]);
   rebuildSession();
   touch();
   refreshMessages();
 
   $("add-key").value = "";
   renderRelations();
-  status($("profile-status"), `Added. They are now ${state.session.bucketOf(pubkey)}.`, "ok");
+  status($("profile-status"), `Added. They are now ${state.session.bucketOf(account)}.`, "ok");
 }
 
 // Rebuilds rather than just re-rendering: the bucket a user lands in depends on
@@ -1661,7 +1685,7 @@ function recalculate() {
     const cells = [
       String(level.hops),
       toNumber(level.weight).toFixed(6),
-      level.raters.map((r) => `${displayName(r.pubkey)}(${fingerprint(r.pubkey)})${r.reported ? " reported" : ""}`).join(", "),
+      level.raters.map((r) => `${displayName(r.account)}(${fingerprint(r.account)})${r.reported ? " reported" : ""}`).join(", "),
       toNumber(level.mean).toFixed(4),
       toNumber(level.contribution).toFixed(8),
     ];
@@ -1695,9 +1719,9 @@ async function saveProfile() {
   }
 
   await publishIdentity();
-  state.profiles.set(state.me.pubkey, state.profile);
-  $("me").textContent = `${state.profile.handle} · ${fingerprint(state.me.pubkey)}`;
-  $("my-avatar").replaceChildren(avatarFor(state.me.pubkey, "avatar-large", state.profile.icon));
+  state.profiles.set(state.me.account, state.profile);
+  $("me").textContent = `${state.profile.handle} · ${fingerprint(state.me.account)}`;
+  $("my-avatar").replaceChildren(avatarFor(state.me.account, "avatar-large", state.profile.icon));
   $("my-icon").value = "";
   touch();
   refreshMessages();
@@ -1725,7 +1749,7 @@ async function boot() {
   $("logout").addEventListener("click", logOff);
   $("composer").addEventListener("submit", compose);
   $("cancel-reply").addEventListener("click", cancelReply);
-  $("my-profile").addEventListener("click", () => showProfile(state.me.pubkey));
+  $("my-profile").addEventListener("click", () => showProfile(state.me.account));
   $("profile-close").addEventListener("click", () => showPanel("chat"));
   $("profile-friend").addEventListener("click", () => friendUser().catch((e) => status($("profile-status"), e.message, "error")));
   $("profile-report").addEventListener("click", () => reportUser().catch((e) => status($("profile-status"), e.message, "error")));

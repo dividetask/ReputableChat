@@ -99,6 +99,26 @@ class HistoryRulesSpec < Minitest::Test
     refuse(notice("tim", tim, "quorum", ack: [quorum.digest], target: [theirs.digest]), /already void/)
   end
 
+  # A quorum confirms the record it names and the disputed records in its
+  # history, and voids only the other disputed records: A -> B -> C -> D in
+  # one line, then A -> F and D -> G concurrent with each other.
+  def test_a_quorum_confirms_the_line_it_names_and_voids_only_the_rival
+    ab = accept(notice("carol", @carol, "key-change", ack: [@carol], body: pub("carol-b")))
+    bc = accept(notice("carol-b", @carol, "key-change", ack: [ab.digest], body: pub("carol-c")))
+    cd = accept(notice("carol-c", @carol, "key-change", ack: [bc.digest], body: pub("carol-d")))
+    af = accept(notice("carol", @carol, "key-change", ack: [@carol], body: pub("carol-f"), ts: @now + 1))
+    dg = accept(notice("carol-d", @carol, "key-change", ack: [cd.digest], body: pub("carol-g")))
+    endorsement = accept(post("tim", tim, ack: [af.digest, dg.digest], endorse: [dg.digest]))
+    quorum = accept(notice("tim", tim, "quorum", ack: [endorsement.digest], target: [dg.digest],
+                                                 endorse: [endorsement.digest]))
+
+    accept(post("carol-g", @carol, ack: [quorum.digest]))
+    %w[carol-c carol-f].each do |obsolete_or_void|
+      refuse(post(obsolete_or_void, @carol, ack: [quorum.digest]), /neither the account's last confirmed key/)
+    end
+    refuse(notice("tim", tim, "quorum", ack: [quorum.digest], target: [af.digest]), /already void/)
+  end
+
   def test_compromised_is_signed_by_the_account_or_one_of_its_adjudicators
     refuse(notice("bob", @bob, "compromised", ack: [@carol], target: [@carol]), /the account or one of its adjudicators/)
     accept(notice("carol", @carol, "compromised", ack: [@carol], target: [@carol]))

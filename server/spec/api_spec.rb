@@ -104,4 +104,38 @@ class ApiSpec < Minitest::Test
     post "/api/records", "{nope", "CONTENT_TYPE" => "application/json"
     assert_equal 400, last_response.status
   end
+
+  # --- what an app reads to decide what to show ------------------------------------
+
+  def test_a_record_is_served_with_its_state
+    record = signed_note("Stated.")
+    post_json "/api/records", record.to_wire
+
+    get "/api/records/#{record.digest}"
+    assert_equal "valid", json["state"]
+
+    post_json "/api/states", { "hashes" => [record.digest, "f" * 64] }
+    assert_equal({ record.digest => "valid", "f" * 64 => nil }, json["states"])
+  end
+
+  def test_a_working_key_names_the_account_it_signs_for
+    get "/api/keys/#{@server.host.pubkey}"
+    assert_equal @server.host.id, json["account"]
+
+    get "/api/keys/#{'A' * 43}"
+    assert_nil json["account"]
+  end
+
+  def test_an_account_is_summarised_by_its_newest_records
+    note = signed_note("Latest.")
+    post_json "/api/records", note.to_wire
+
+    get "/api/accounts/#{@server.host.id}"
+    assert_equal @server.host.id, JSON.parse(json["declaration"]["payload"]).then { |p| p["id"] || json["declaration"]["hash"] }
+    assert_nil json["attestation"]
+    assert_equal note.digest, json["latest"]
+
+    post_json "/api/accounts", { "accounts" => [@server.host.id, "f" * 64] }
+    assert_equal [@server.host.id], json["accounts"].map { |a| a["account"] }
+  end
 end

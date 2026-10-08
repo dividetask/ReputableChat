@@ -61,9 +61,9 @@ module ReputableChat
     # The one record that acknowledges nothing, because there was nothing to
     # acknowledge.
     def check_ack!(path)
-      return if declaration["ack"].nil?
+      return if declaration["ack"] == [] && declaration.key?("rules")
 
-      raise Corrupt, "#{path} acknowledges #{declaration['ack']}, but the genesis is the bottom " \
+      raise Corrupt, "#{path} acknowledges #{declaration['ack'].inspect}, but the genesis is the bottom " \
                      "of the chain and acknowledges nothing"
     end
   end

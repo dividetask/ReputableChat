@@ -85,7 +85,7 @@ module Agnostic
   class KeyState
     FIELDS = { "key-change" => "pubkey", "master-key-change" => "mpubkey" }.freeze
 
-    attr_reader :confirmed, :tentative, :voided
+    attr_reader :confirmed, :tentative, :voided, :confirmed_records
 
     def initialize(view, account)
       @view = view
@@ -93,6 +93,7 @@ module Agnostic
       @confirmed = { "pubkey" => first&.[]("pubkey"), "mpubkey" => first&.[]("mpubkey") }
       @tentative = { "pubkey" => [], "mpubkey" => [] }
       @voided = Set.new
+      @confirmed_records = Set.new
       replay(account)
     end
 
@@ -108,7 +109,18 @@ module Agnostic
       leaves.empty? ? [confirmed[field]].compact : leaves.map { |c| c["body"] }.uniq
     end
 
+    # The newest tentative changes of this kind, whose keys current returns.
+    def current_changes(field)
+      changes = tentative[field]
+      changes.reject { |c| changes.any? { |o| o != c && @view.histories.ancestor?(c.digest, o.digest) } }
+    end
+
     def void?(hash) = voided.include?(hash)
+
+    # The keys of void key changes: whatever they sign is void too (section 8).
+    def void_keys
+      @view.store.fetch_many(voided.to_a).select { |c| FIELDS.key?(c.notice_kind) }.map { |c| c["body"] }.to_set
+    end
 
     private
 
@@ -123,17 +135,29 @@ module Agnostic
       end
     end
 
-    # A quorum naming a key change confirms it, and voids every other change of
-    # the same kind that was tentative when the quorum was signed.
+    # A quorum confirms the record it names and the disputed records in its
+    # history, and voids the other disputed records it settles; it voids
+    # nothing else (section 8). Naming a key change also confirms the earlier
+    # changes of that kind along its acks, whose keys are then obsolete
+    # (section 7): neither tentative nor void, and no longer able to sign.
     def confirm(quorum)
       named = @view.store.fetch(quorum.target.first)
-      field = named && FIELDS[named.notice_kind]
-      return unless field
+      return unless named
 
-      seen = @view.histories.of(quorum.digest)
-      @confirmed[field] = named["body"]
-      @tentative[field].each { |c| @voided << c.digest if c.digest != named.digest && seen.include?(c.digest) }
-      @tentative[field] = @tentative[field].reject { |c| c.digest == named.digest || @voided.include?(c.digest) }
+      kept = ->(c) { c.digest == named.digest || @view.histories.ancestor?(c.digest, named.digest) }
+      settled = @view.disputes(named.account).causes.select { |cause| Disputes.settles?(@view, quorum, named, cause) }
+      settled.flat_map(&:records).each do |r|
+        kept.call(r) ? @confirmed_records << r.digest : @voided << r.digest
+      end
+      @confirmed_records << named.digest
+
+      field = FIELDS[named.notice_kind]
+      @confirmed[field] = named["body"] if field
+      FIELDS.each_value do |f|
+        @tentative[f] = @tentative[f].reject do |c|
+          (f == field && kept.call(c) && @confirmed_records << c.digest) || @voided.include?(c.digest)
+        end
+      end
     end
   end
 
@@ -150,8 +174,17 @@ module Agnostic
       @causes = compromised + contests + key_conflicts + spend_conflicts + endorsement_conflicts
       quorums = view.about(account, "quorum")
       @unsettled = @causes.reject do |cause|
-        quorums.any? { |q| cause.records.all? { |r| view.histories.of(q.digest).include?(r.digest) } }
+        quorums.any? { |q| (named = view.store.fetch(q.target.first)) && Disputes.settles?(view, q, named, cause) }
       end
+    end
+
+    # A quorum settles a cause when it names one of the cause's records or one
+    # in the named record's history -- the rest are decided by that, whether
+    # or not the quorum's history holds them -- or when its history holds all
+    # of them.
+    def self.settles?(view, quorum, named, cause)
+      cause.records.any? { |r| r.digest == named.digest || view.histories.ancestor?(r.digest, named.digest) } ||
+        cause.records.all? { |r| view.histories.of(quorum.digest).include?(r.digest) }
     end
 
     def records = unsettled.flat_map(&:records).uniq(&:digest)
@@ -167,7 +200,10 @@ module Agnostic
     def compromised = @view.about(@account, "compromised").map { |n| Cause.new(:compromised, [n]) }
 
     def contests
-      @view.records_of(@account).select { |r| r.facts["contests"] }.map { |r| Cause.new(:contest, [r]) }
+      @view.records_of(@account).select { |r| r.facts["contests"] }.map do |r|
+        contested = Array(r.facts["contests"]).filter_map { |h| h.is_a?(String) ? @view.store.fetch(h) : nil }
+        Cause.new(:contest, [r, *contested])
+      end
     end
 
     def key_conflicts

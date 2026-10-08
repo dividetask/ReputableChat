@@ -21,7 +21,8 @@ What it does:
   this server's clock is ignored.
 
 It holds no vault, signs nobody in, stores no images, and computes no
-reputation.
+reputation. Apps run beside it and use it for the chain: the chat passes its
+users' records here and reads back what it shows.
 
 ## Running it
 
@@ -30,7 +31,7 @@ cd server
 bundle install
 bundle exec rake spec          # the suite
 bundle exec rake setup         # a fresh server: handle, address, other servers
-bundle exec puma               # http://localhost:9292
+bundle exec puma               # http://localhost:9393 (config/puma.rb), beside the chat's 9292
 bundle exec rake peers         # the servers it syncs with, or has forgotten
 bundle exec rake "sweep[<url>,<url>]"  # copy the chain from servers, generation by generation
 bundle exec rake host          # this server's host account
@@ -64,7 +65,9 @@ signs the rules' record shapes.
 ## The host account
 
 On first boot the server makes two 12-word seed phrases and writes each 0600
-into `data/<environment>/`:
+into `host/<environment>/` at the root of the repository (`host_dir`,
+`HOST_DIR`). That is outside this app on purpose: every app beside this server
+-- the chat -- signs as the same account, one account per server.
 
 - `host.seed`, the working phrase. The server signs with it, and refuses to
   boot without it rather than quietly becoming a new account.
@@ -257,6 +260,23 @@ other trust would suggest it does. An attestation holds
 only the ratings that changed since the last one, so most heartbeats publish
 none. It is signed just before a heartbeat, which then carries it.
 
+### By hand
+
+The operator can set any account's rating, trust included, from the machine
+the server runs on. It stands in for what reachability says until removed,
+and goes out in the attestation published with the next heartbeat; an
+account nobody has an opinion of any more is published as 0 with trust 0,
+since an attestation can amend an entry but not delete one.
+
+```bash
+bundle exec rake "rate[<account id>,<reputation>,<trust>]"   # decimals from -1 to 1
+bundle exec rake "unrate[<account id>]"                      # back to reachability
+bundle exec rake ratings                                     # what it says of whom, and why
+```
+
+The apps beside the server read the current ratings at `GET /api/ratings`:
+the chat uses them to choose which other chat servers to ask for files.
+
 ## The API
 
 | | |
@@ -265,7 +285,12 @@ none. It is signed just before a heartbeat, which then carries it.
 | `GET /api/genesis` | the genesis record |
 | `GET /api/host` | the host account: id, key, and its declaration |
 | `GET /api/records?since=&limit=&type=&account=&target=` | records accepted after the cursor, oldest first; `next` is the cursor for the following page |
-| `GET /api/records/<hash>` | one record, or 404 |
+| `GET /api/records/<hash>` | one record with its `state`, or 404 |
+| `POST /api/states` | `{"hashes": [...]}`: each record's state -- valid, tentative, disputed, confirmed or void -- as seen by everything here; null for one not held |
+| `GET /api/accounts/<id>` | an account's newest identity declaration and attestation, and the record accepted from it last |
+| `POST /api/accounts` | `{"accounts": [...]}`: the same for several |
+| `GET /api/keys/<pubkey>` | the account a working key signs for, or null |
+| `GET /api/ratings` | this server's current ratings of other accounts, each by hand or by reachability |
 | `GET /api/frontier` | hashes of the records nothing here acknowledges |
 | `POST /api/records` | `{"records": [...]}`, or one record on its own |
 | `GET /api/sweep?account=&generation=&part=` | one capped part of one generation of an account, and the `next` part to ask for; 429 when asked too often |

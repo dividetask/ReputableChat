@@ -17,7 +17,7 @@ class SeedSpec < Minitest::Test
   # the browser derives from it.
   def test_a_phrase_derives_the_key_the_browser_derives
     phrase = File.read(File.join(CHAT, "config/genesis/development.seed"))
-    assert_equal "xK9fSKZEuhJvSCkdJoOeCQbM0wrBgFCsmhiwmNMf2hI",
+    assert_equal "DRaBa2gChkx35qTlH8xqTG96uOX_T8TEDmuGQqy6Ndk",
                  Agnostic::Keys.public_key(Agnostic::Seed.signing_key(phrase))
   end
 

@@ -6,15 +6,19 @@ tmp/
 .bundle/
 vendor/bundle/
 # Every seed is ignored, and development's are then un-ignored -- the genesis
-# account's and the host account's alike. The accident worth guarding against
+# account's. (A server's host account is its agnostic server's, under
+# server/data/, which is ignored whole.) The accident worth guarding against
 # is committing a seed, so the default is to refuse and the exception is
 # explicit. Development's are public on purpose: anyone who clones the
-# repository owns those identities, which is what makes a fresh clone able to
-# run both accounts locally.
+# repository owns that identity, which is what makes a fresh clone able to
+# run it locally.
 chat/config/genesis/*.seed
 !chat/config/genesis/development.seed
-chat/config/host/*.seed
-!chat/config/host/development.seed
+!chat/config/genesis/development.master.seed
+
+# The host account a server's agnostic server and apps share: made on the
+# agnostic server's first boot, never committed.
+/host/
 
 # Browser tests only. The application itself ships no JavaScript dependencies.
 node_modules/

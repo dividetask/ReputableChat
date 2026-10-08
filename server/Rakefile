@@ -98,4 +98,29 @@ task :forgive, [:account] do |_task, args|
   puts removed.zero? ? "#{args[:account]} was not ignored" : "no longer ignoring #{args[:account]}"
 end
 
+# Ratings by hand. They go out in this server's next attestation, published
+# after its next heartbeat; until then nothing has changed on the chain.
+desc "Set an account's rating by hand: rake \"rate[<account id>,<reputation>,<trust>]\", decimals from -1 to 1"
+task :rate, [:account, :reputation, :trust] do |_task, args|
+  $LOAD_PATH.unshift File.expand_path("lib", __dir__)
+  require "agnostic/manual_ratings"
+  puts Agnostic::ManualRatings.open.set(args[:account], args[:reputation], args[:trust])
+rescue ArgumentError => e
+  abort e.message
+end
+
+desc "Remove a rating set by hand: rake \"unrate[<account id>]\""
+task :unrate, [:account] do |_task, args|
+  $LOAD_PATH.unshift File.expand_path("lib", __dir__)
+  require "agnostic/manual_ratings"
+  puts Agnostic::ManualRatings.open.clear(args[:account])
+end
+
+desc "List what this server rates each account, and whether by hand or by reachability"
+task :ratings do
+  $LOAD_PATH.unshift File.expand_path("lib", __dir__)
+  require "agnostic/manual_ratings"
+  Agnostic::ManualRatings.open.list.each { |line| puts line }
+end
+
 task default: :spec

@@ -328,7 +328,12 @@ module Agnostic
         end
 
         key = record[field]
-        record.facts["contests"] = true unless keys.current(field).include?(key)
+        # The changes it contests: the newest of this kind, whose key it is not
+        # signing with. Kept by hash, so a quorum can settle the contest by
+        # naming either side.
+        unless keys.current(field).include?(key)
+          record.facts["contests"] = keys.current_changes(field).map(&:digest)
+        end
       end
       record.signer_field = field
       record.signer = record[field]

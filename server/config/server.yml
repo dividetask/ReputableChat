@@ -6,13 +6,18 @@
 # not be able to switch the server off quietly.
 #
 # Environment variables win over this file for the keys deployment tooling is
-# most likely to inject: DATABASE_URL, DATA_DIR, GENESIS, PEERS (comma
-# separated), HOST_URL and HEARTBEAT_INTERVAL_SECONDS.
+# most likely to inject: DATABASE_URL, DATA_DIR, HOST_DIR, GENESIS, PEERS
+# (comma separated), HOST_URL and HEARTBEAT_INTERVAL_SECONDS.
 
-# Where the server keeps its database and its host account. That account's
-# working and master seed phrases are written here 0600 on first boot; move
-# the master phrase (host-master.seed) off the machine.
+# Where the server keeps its database.
 data_dir: "data"
+
+# Where the host account lives: this server's own, which every app beside it
+# (the chat) signs as too, so it is outside both app directories, at the root
+# of the repository. Its working and master seed phrases are written into
+# <host_dir>/<environment>/ 0600 on first boot, beside its declaration; move
+# the master phrase (host-master.seed) off the machine. HOST_DIR overrides.
+host_dir: "../host"
 
 # The genesis record this server's chain starts from. %{environment} is
 # replaced by RACK_ENV (development unless set). Production has no committed

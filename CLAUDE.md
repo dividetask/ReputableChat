@@ -44,26 +44,29 @@ specs; run commands from inside the one you are working on.
 # In server/
 bundle exec rake spec       # the agnostic server's suite
 bundle exec rake setup      # a fresh server: handle, address, other servers
-bundle exec puma            # http://localhost:9292; PEERS=url,url to sync
+bundle exec puma            # http://localhost:9393; PEERS=url,url to sync
 bundle exec rake peers      # servers it syncs with, failing, or forgotten
 bundle exec rake "sweep[<url>,<url>]"   # copy the chain from servers at once
 bundle exec rake status     # stopped for a chain split? which server is on which side
 bundle exec rake "choose[<url>]"  # follow that server's side and go live
 bundle exec rake "forget[<url>]"  # stop syncing with a server
 bundle exec rake host       # this server's host account (made on first boot)
+bundle exec rake "rate[<account>,<reputation>,<trust>]"   # a rating by hand
+bundle exec rake "unrate[<account>]"                      # back to reachability
+bundle exec rake ratings                                  # what it rates whom
 bundle exec rake ignored    # peers ignored for a clock over 10 minutes off
 bundle exec rake "forgive[<host account id>]"   # stop ignoring one
 
-# In chat/
-bundle exec rake spec       # full suite (browser tests skip without `npm install`)
+# In chat/, beside an agnostic server at chain_url (http://localhost:9393):
+#   cd server && bundle exec puma
+bundle exec rake spec       # full suite; starts its own agnostic server
+                            # (browser tests skip without `npm install`)
 npm install                 # once, for the browser tests
 bundle exec rake curve      # print current curve and ladder
 bundle exec rake dump       # readable dump of the database
-bundle exec rake "dump[messages,emotes]"      # just those sections
+bundle exec rake "dump[messages,reactions]"   # just those sections
 bundle exec rake genesis    # development genesis (already committed)
 RACK_ENV=production bundle exec rake genesis   # production genesis (once, ever)
-bundle exec rake host       # development host account (already committed)
-RACK_ENV=production bundle exec rake host      # a server's production host account
 # Handle, bio and icon: run the script directly with --handle, --bio, --icon.
 bundle exec ruby script/generate_genesis.rb --host --production --handle Ops --icon ops.png
 
@@ -71,8 +74,8 @@ bundle exec ruby script/generate_genesis.rb --host --production --handle Ops --i
 # as the host account instead.
 bundle exec ruby script/tim.rb status             # uses this environment's seed
 bundle exec ruby script/tim.rb --host post "Planned outage 02:00-03:00 UTC on Friday"
-bundle exec ruby script/tim.rb visible <pubkey>   # least rating that makes them visible
-bundle exec ruby script/tim.rb friend <pubkey>
+bundle exec ruby script/tim.rb visible <account>  # least rating that makes them visible
+bundle exec ruby script/tim.rb friend <account>   # by account ID
 ```
 
 See [docs/project/reputation.md](docs/project/reputation.md) and
@@ -92,22 +95,30 @@ inventing a word for something that already has one.
 - **Signed payload shapes.** `cryptography/payload.rb` and the `*Payload` helpers in
   `public/js/identity.js` must stay in lockstep for the same reason.
 - **Record hashes.** `cryptography/record.rb` and `public/js/record.js` must
-  agree. If they drift, every `ack` points at a record the other side cannot
+  agree, and both must be what the rules say: SHA-256 over the payload, a
+  newline and the signature, with nothing in front. If they drift, every `ack` points at a record the other side cannot
   find and no reference resolves. `spec/record_parity_spec.rb` guards it.
 - **The genesis record.** `config/genesis/<environment>.json` is the bottom of
   the chain. Regenerating one orphans every record that acknowledged the old
   one, which is the whole chain. `script/generate_genesis.rb` refuses to
   overwrite either it or the seed beside it.
-- **Two accounts, two environments each, and only development's are public.**
-  The genesis account is the developer's; the host account
-  (`config/host/`) is a server's own, optional, and must acknowledge the
-  genesis. `config/genesis/development.seed` and `config/host/development.seed`
-  are **committed on purpose** — those identities are public, so a fresh clone
-  can sign as either without being handed a secret. Every other seed is
-  gitignored, 0600, and never printed. `.gitignore` ignores every `*.seed` in
-  both folders and then un-ignores development's, so a new environment's seed
-  is refused by default rather than committed by omission.
-  A production deployment **refuses to boot on either development account**,
+- **Two accounts.** The genesis account is the developer's.
+  `config/genesis/development.seed` and the `.master.seed` beside it are
+  **committed on purpose** — that identity is public, so a fresh clone can
+  sign as it without being handed a secret. It has a working key and a master
+  key, from two separate seed phrases. Every other seed is gitignored, 0600,
+  and never printed. `.gitignore` ignores every `*.seed` and then un-ignores
+  development's, so a new environment's seed is refused by default rather than
+  committed by omission.
+  The host account is a server's own, and **every chat server has one: its
+  agnostic server's.** The chat reads that server's working seed (`host_seed`,
+  `HOST_SEED`, by default `../host/<env>/host.seed`) and refuses to
+  boot if it is not the account the agnostic server names. One account per
+  server, whatever apps it runs. The chat announces itself with it: a notice
+  of kind `service` typed `:chat` carrying `url`, on the first boot with an
+  address and whenever the address changes (`chain/service.rb`); other chat
+  servers fetch files from it (`file_peers.rb`).
+  A production deployment **refuses to boot on the development genesis**,
   compared by key rather than by filename, because the realistic mistake is
   copying the record into place rather than misnaming it. The production
   genesis seed belongs with the developer, never on a server.
@@ -142,10 +153,16 @@ inventing a word for something that already has one.
   states, verifies every record, and checks each against the rules it is an
   example of. `spec/fixtures/examples_broken.md` holds three correctly signed
   records that each break a rule, because a checker that has quietly stopped
-  looking passes everything.
+  looking passes everything. `server/spec/examples_spec.rb` runs both files
+  through the agnostic server, which is what decides what is accepted.
+- **The genesis carries the rules file.** The development genesis's `rules`
+  field is `docs/project/rules/v0.001.md`, stripped of surrounding whitespace.
+  Edit that file and `spec/chain_spec.rb` fails until the genesis is
+  regenerated, which orphans everything that acknowledged it.
 - **The rules and the server's checks.** `server/lib/agnostic/rules.rb` and
-  `server/lib/agnostic/view.rb` enforce `docs/project/rules/v0.001.md`, and
-  change with it: a rule edited in prose and not in code means the server
+  `server/lib/agnostic/view.rb` enforce `docs/project/rules/v0.001.md` -- the
+  only implementation of the rules; the chat checks none of them and passes
+  records to its agnostic server instead -- and change with the prose: a rule edited in prose and not in code means the server
   accepts records the rules call invalid, or refuses valid ones, and every
   signature still verifies. `server/spec/examples_spec.rb` runs the whole
   example chain and the broken fixture through the server, so changing a rule
@@ -155,14 +172,17 @@ inventing a word for something that already has one.
 - **The server's genesis carries the rules file.** The rules field of
   `server/config/genesis/development.json` is `docs/project/rules/v0.001.md`
   less its trailing newline, and `server/spec/server_spec.rb` fails if they
-  differ. That is deliberate: a published rules file is never edited. Before
+  differ. It is the same record as `config/genesis/development.json`, and the
+  same spec fails if the two copies differ: two genesis records are two chains. That is deliberate: a published rules file is never edited. Before
   launch, the fix is a new development genesis, which orphans every
   development record that acknowledged the old one.
-- **The server's host account phrases** are generated on first boot into
-  `server/data/<environment>/`: `host.seed` (working) and `host-master.seed`
-  (master, to be moved off the server; never read again), both 0600, with the
-  master public key in `host-master.pub`. The declaration `host.json` is
-  written only when the server goes live, after catching up. The server refuses to boot without the working
+- **The host account's phrases** are generated on the agnostic server's first
+  boot into `host/<environment>/` at the repository root, outside both apps,
+  since every app on the server shares the account: `host.seed` (working) and
+  `host-master.seed` (master, to be moved off the server; never read again),
+  both 0600, with the master public key in `host-master.pub`. The declaration
+  `host.json` is written only when the server goes live, after catching up.
+  The server refuses to boot without the working
   phrase or when it does not match the declaration. `server/lib/agnostic/seed.rb`
   derives keys the browser's way, and `server/spec/seed_spec.rb` holds its KDF
   parameters equal to `seed.kdf` in `config/reputation.yml` -- change one

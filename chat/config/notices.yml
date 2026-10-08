@@ -1,22 +1,17 @@
-# Notice kinds.
+# Notice kinds this client knows how to show.
 #
-# A notice is an official statement signed by a publisher -- an outage, a
-# release, a change of policy. The kinds are a closed list for the same reason
-# emotes are: an arbitrary string would be stored and then rendered back to
-# everyone, and a client cannot decide how to present something it has never
-# heard of.
-#
-# `founding` is the first notice a chain has and the only one that cannot
-# supersede anything. It is what a reader walking back to the genesis arrives
-# at: the statement of what this network is and what its records mean.
+# The rules accept a notice of any kind and give meaning to four of them
+# (compromised, key-change, master-key-change, quorum). This list is narrower
+# and is the chat's own: the kinds a client renders as an announcement, and the
+# only kinds this server accepts from its own clients. A notice of another kind
+# passed on by another server is still held and served; a client that does not
+# know the kind does not show it.
 #
 # Adding a kind is cheap. Removing one is not -- notices already signed under
 # it stay on the chain forever, so a client has to keep being able to render
-# what it no longer accepts.
+# what it no longer offers.
 
 kinds:
-  - founding    # what this network is; one per chain, at the bottom
   - policy      # a rule changed, or a rule stated for the first time
   - outage      # planned or unplanned unavailability
-  - release     # a published version of the client
   - advisory    # something users should know; no action required

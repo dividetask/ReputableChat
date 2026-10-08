@@ -79,8 +79,12 @@ class ServerConfigSpec < Minitest::Test
   end
 
   def test_a_missing_or_empty_file_still_yields_defaults
-    expected = ReputableChat::ServerConfig::DEFAULTS
-               .merge("origin" => [], "limits" => ReputableChat::ServerConfig::LIMITS)
+    expected = ReputableChat::ServerConfig::DEFAULTS.merge(
+      "origin" => [], "limits" => ReputableChat::ServerConfig::LIMITS,
+      # Resolved: the agnostic server's seed in this environment, beside the chat.
+      "host_seed" => File.expand_path("../../host/development/host.seed", __dir__),
+      "allow_private_peers" => true
+    )
 
     assert_equal expected, Settings.load(path: File.join(@dir, "absent.yml"), env: {})
     assert_equal expected, Settings.load(path: write(""), env: {})

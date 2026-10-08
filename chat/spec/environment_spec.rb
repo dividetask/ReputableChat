@@ -105,6 +105,8 @@ class EnvironmentSpec < Minitest::Test
     %w[production staging whatever].each do |environment|
       assert ignored?("config/genesis/#{environment}.seed"),
              "#{environment}'s seed must be ignored"
+      assert ignored?("config/genesis/#{environment}.master.seed"),
+             "#{environment}'s master seed must be ignored"
     end
   end
 
@@ -112,7 +114,7 @@ class EnvironmentSpec < Minitest::Test
     tracked, = Open3.capture2("git", "ls-files", "config/genesis/")
     seeds = tracked.split("\n").grep(/\.seed\z/)
 
-    assert_equal ["config/genesis/development.seed"], seeds
+    assert_equal ["config/genesis/development.master.seed", "config/genesis/development.seed"], seeds
   end
 
   def ignored?(path)

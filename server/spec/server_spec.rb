@@ -18,6 +18,14 @@ class ServerSpec < Minitest::Test
     assert_equal File.read(RULES, encoding: "UTF-8").strip, committed_genesis["rules"]
   end
 
+  # RULE: one network, one development genesis. The chat and this server
+  # each commit it, and two different records would be two chains.
+  def test_the_development_genesis_is_the_chats
+    chat = JSON.parse(File.read(File.expand_path("../../chat/config/genesis/development.json", __dir__)))
+    ours = JSON.parse(File.read(GENESIS))
+    assert_equal [chat["payload"], chat["signature"]], [ours["payload"], ours["signature"]]
+  end
+
   def test_the_development_genesis_is_valid_under_the_rules_it_carries
     store = Agnostic::Store.new("sqlite:/")
     verdict = Agnostic::Rules.new(store: store, genesis: committed_genesis).check(committed_genesis)

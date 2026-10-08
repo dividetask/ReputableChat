@@ -10,7 +10,8 @@ require "tmpdir"
 # nothing failed; the records were checked by a script that lived outside the
 # repository and went stale with them.
 #
-# spec/examples.mjs does the checking and prints a line per problem. This spec
+# spec/examples.mjs does the checking and prints a line per problem. Whether
+# the server that decides what is valid agrees is server/spec/examples_spec.rb. This spec
 # asserts there are none, asserts the chain still contains what the file claims
 # it does, and -- because a checker that silently stops looking passes
 # everything -- asserts that it rejects records written to break a rule.

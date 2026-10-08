@@ -25,6 +25,28 @@
 #   - "https://chat.example.org"
 #   - "http://203.0.113.7:9292"
 
+# The agnostic server this chat runs beside: it holds the chain, judges every
+# record against the rules and syncs with other servers. The chat passes its
+# clients' records to it and keeps a copy of the ones it shows. CHAIN_URL
+# overrides. Start one with `cd server && bundle exec puma` (port 9393).
+chain_url: "http://localhost:9393"
+
+# The host account's working seed, which lives outside both apps (host/ at the
+# root of the repository): a chat server shares its agnostic server's host
+# account, and refuses to boot if this is not it. HOST_SEED
+# overrides; %{environment} is development or production.
+host_seed: "../host/%{environment}/host.seed"
+
+# Where other chat servers reach this one to fetch files its people uploaded.
+# Announced on the chain when first set and whenever it changes; unset, this
+# server does not announce itself. PUBLIC_URL overrides.
+# url: "https://chat.example.org"
+
+# Whether other chat servers at private, loopback or link-local addresses may
+# be fetched from. Unset: yes in development, no in production, where they
+# must also be https. ALLOW_PRIVATE_PEERS overrides.
+# allow_private_peers: false
+
 database_url: "sqlite://data/reputablechat.db"
 image_root: "data/images"
 
@@ -51,14 +73,17 @@ limits:
   # only limit it has -- it cannot count your friends, so it counts your bytes.
   vault_bytes: 1048576
   image_bytes: 262144
+  # The next four are stricter than the rules allow, and apply only to records
+  # this server's own clients send.
   message_bytes: 4000
+  bio_bytes: 280
   # An attestation holds an entry per person its author has an opinion about, so
   # it is the one record whose size the author decides. Bounded in bytes rather
-  # than in entries: the bytes are what the server has to hold and serve, and a
-  # server can raise this without anybody re-signing anything.
-  attestation_bytes: 4194304
+  # than in entries: the bytes are what the server has to hold and serve. The
+  # rules allow 1 MiB of scores and derived together; this counts the whole
+  # record.
+  attestation_bytes: 1048576
   notice_bytes: 16000
-  note_bytes: 16000
   # Advice rather than a limit: nothing rejects a vault for holding more. It
   # tells a client how many first-seen entries to keep before pruning, since it
   # is the client that has to decide what to drop. Friends and blocked accounts

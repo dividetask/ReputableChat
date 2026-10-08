@@ -24,10 +24,7 @@ module ReputableChat
   # that it is the same thing a person would type into the UI and there is only
   # one secret to look after rather than two.
   module Operator
-    DIRECTORIES = {
-      genesis: File.expand_path("../../config/genesis", __dir__),
-      host:    File.expand_path("../../config/host", __dir__)
-    }.freeze
+    DIRECTORIES = { genesis: File.expand_path("../../config/genesis", __dir__) }.freeze
     DIRECTORY = DIRECTORIES.fetch(:genesis)
     HELPER    = File.expand_path("../../script/derive_key.mjs", __dir__)
 
@@ -45,10 +42,13 @@ module ReputableChat
 
     module_function
 
+    # The host account's seed is the agnostic server's, which the chat shares
+    # (host_seed in config/server.yml).
     def seed_path(account: :genesis)
       return ENV.fetch("GENESIS_SEED") { Operator.path_for } if account == :genesis
 
-      Operator.path_for(account: account)
+      require_relative "server_config"
+      ServerConfig.load.fetch("host_seed")
     end
 
     # Read, normalized and checked. A seed file that has picked up a stray edit

@@ -102,7 +102,7 @@ Do not reintroduce these; they each have a current name above.
 | compromised (as the state of an account) | disputed; `compromised` remains the notice saying a key was stolen |
 | compromising record, disputing record | (removed; nothing needs it) |
 | stale (of a record), left behind | orphaned |
-| `within`, `waiting` (heartbeat fields) | (removed; a guideline sets the pace) |
+| `within`, `waiting` (heartbeat fields), heartbeat pace | (removed; nothing says how often a publisher heartbeats) |
 | following (of a heartbeat publisher) | (removed; orphaned records do its work) |
 | takes no effect | void, or disputed while a decision is waited on |
 

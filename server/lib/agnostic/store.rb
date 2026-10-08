@@ -295,6 +295,20 @@ module Agnostic
 
     def published_rating(account) = db[:published_ratings].where(account: account).first
 
+    def published_ratings = db[:published_ratings].order(:account).all
+
+    # Ratings the operator set by hand (rake rate). Each stands in for what
+    # reachability would say, trust included, until removed.
+    def rating_override(account) = db[:rating_overrides].where(account: account).first
+
+    def rating_overrides = db[:rating_overrides].order(:account).all
+
+    def override_rating(account, reputation:, trust:, at:)
+      db[:rating_overrides].insert_conflict(:replace).insert(account: account, reputation: reputation, trust: trust, at: at)
+    end
+
+    def clear_rating_override(account) = db[:rating_overrides].where(account: account).delete
+
     def save_published_rating(account, reputation:, trust:, at:)
       db[:published_ratings].insert_conflict(:replace).insert(account: account, reputation: reputation, trust: trust, at: at)
     end
@@ -417,6 +431,12 @@ module Agnostic
         TrueClass :offline, null: false, default: false
       end
       db.create_table?(:published_ratings) do
+        String :account, primary_key: true
+        String :reputation, null: false
+        String :trust, null: false
+        Integer :at, null: false
+      end
+      db.create_table?(:rating_overrides) do
         String :account, primary_key: true
         String :reputation, null: false
         String :trust, null: false

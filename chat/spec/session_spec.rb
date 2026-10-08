@@ -147,7 +147,7 @@ class SessionSpec < Minitest::Test
 
     level = result[:levels].first
     assert_equal 1, level[:hops]
-    assert_equal ["a"], level[:raters].map { |r| r[:pubkey] },
+    assert_equal ["a"], level[:raters].map { |r| r[:account] },
                  "the breakdown must name who was responsible"
   end
 

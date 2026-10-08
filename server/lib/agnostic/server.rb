@@ -7,6 +7,7 @@ require "uri"
 require_relative "formats"
 require_relative "host_account"
 require_relative "app"
+require_relative "accounts"
 require_relative "heartbeat"
 require_relative "ingest"
 require_relative "peers"
@@ -21,10 +22,14 @@ module Agnostic
   # Everything wired together: the genesis, the store, the rules, this
   # server's host account, its heartbeats and its peers.
   class Server
-    # The development genesis account's key. Public on purpose, so a production
-    # server refuses to boot on any genesis it signed -- compared by key, since
+    # The development genesis account's keys, working and master. Public on
+    # purpose, so a production server refuses to boot on any genesis they signed
+    # or declare -- compared by key, since
     # the realistic mistake is copying the development record into place.
-    DEVELOPMENT_KEY = "xK9fSKZEuhJvSCkdJoOeCQbM0wrBgFCsmhiwmNMf2hI"
+    DEVELOPMENT_KEYS = [
+      "DRaBa2gChkx35qTlH8xqTG96uOX_T8TEDmuGQqy6Ndk", # working key
+      "qSJtJXOef6yQPcp5T6-aa4INc5qmdBdpuAyGOgHyxVo"  # master key
+    ].freeze
 
     class BootError < StandardError; end
 
@@ -64,22 +69,25 @@ module Agnostic
       # anyone on the same network could claim to be anyone; here it trusts
       # only the proxies named.
       Rack::Request.ip_filter = ->(ip) { trusted.include?(ip) }
+      klass.accounts = Accounts.new(store: store, genesis: genesis)
+      klass.ratings = ratings
       klass.limiter = RateLimit.new(per_minute: settings.integer("limits", "sweep_requests_per_minute"), clock: @clock)
       klass.freeze.app
     end
 
-    # Catches up, then heartbeats at the configured interval, each followed
-    # at once by a sync with every server. Until it has caught up -- and,
-    # after a split, until an administrator has chosen a side -- the server is
-    # not live: it publishes nothing and answers no one.
+    # Gets ready to serve: catches up and, after a split, waits for the
+    # administrator's choice. config.ru calls this before Puma opens its port,
+    # so a server not yet live is not listening at all.
+    def prepare!
+      catch_up
+      wait_for_choice while state == :halted
+      self
+    end
+
+    # Heartbeats at the configured interval, each followed at once by a sync
+    # with every server, once the server is live.
     def start
       Thread.new do
-        begin
-          catch_up
-          wait_for_choice while state == :halted
-        rescue StandardError => e
-          warn "#{e.class}: #{e.message}"
-        end
         loop do
           begin
             beat_and_sync
@@ -211,7 +219,7 @@ module Agnostic
       raise BootError, "no genesis at #{path}: see server/README.md" unless File.exist?(path)
 
       record = Record.from_wire(JSON.parse(File.read(path)))
-      if settings.environment == "production" && [record["pubkey"], record["mpubkey"]].include?(DEVELOPMENT_KEY)
+      if settings.environment == "production" && !([record["pubkey"], record["mpubkey"]] & DEVELOPMENT_KEYS).empty?
         raise BootError, "#{path} is signed by the development genesis account, whose key is public"
       end
 
@@ -237,7 +245,7 @@ module Agnostic
     # has one, goes back into the store in case the database is new.
     def load_host
       check_url
-      host = HostAccount.load_or_create(dir: settings.data_dir, words: settings.integer("host", "seed_words"))
+      host = HostAccount.load_or_create(dir: settings.host_dir, words: settings.integer("host", "seed_words"))
       submit_declaration(host.declaration) if host.declared?
       host
     end

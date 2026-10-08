@@ -23,36 +23,36 @@
 // fingerprint are the same string rather than two things to learn.
 export const SUFFIX_LENGTH = 8;
 
-export const suffixOf = (pubkey) => pubkey.slice(0, SUFFIX_LENGTH);
+export const suffixOf = (account) => account.slice(0, SUFFIX_LENGTH);
 
-// pubkey -> { handle, suffix } where suffix is null for whoever holds the
+// account -> { handle, suffix } where suffix is null for whoever holds the
 // handle outright.
 export function resolveNames({ handles = {}, friends = [], seen = [] } = {}) {
   const rank = new Map();
   // Sorted by when the handle was taken, not by position, so the friend list
   // can stay in the order somebody built it.
   [...friends].sort((a, b) => (a.at || 0) - (b.at || 0)).forEach((entry, index) => {
-    if (entry?.pubkey && !rank.has(entry.pubkey)) rank.set(entry.pubkey, [0, index]);
+    if (entry?.account && !rank.has(entry.account)) rank.set(entry.account, [0, index]);
   });
   seen.forEach((entry, index) => {
-    if (entry?.pubkey && !rank.has(entry.pubkey)) rank.set(entry.pubkey, [1, index]);
+    if (entry?.account && !rank.has(entry.account)) rank.set(entry.account, [1, index]);
   });
 
   const holders = new Map();
-  for (const [pubkey, handle] of Object.entries(handles)) {
+  for (const [account, handle] of Object.entries(handles)) {
     if (!handle) continue;
     if (!holders.has(handle)) holders.set(handle, []);
-    holders.get(handle).push(pubkey);
+    holders.get(handle).push(account);
   }
 
   const names = {};
   for (const [handle, group] of holders) {
     const ordered = [...group].sort((a, b) => compare(rank.get(a), rank.get(b), a, b));
 
-    ordered.forEach((pubkey, position) => {
-      names[pubkey] = {
+    ordered.forEach((account, position) => {
+      names[account] = {
         handle,
-        suffix: group.length > 1 && position > 0 ? suffixOf(pubkey) : null,
+        suffix: group.length > 1 && position > 0 ? suffixOf(account) : null,
       };
     });
   }
@@ -80,20 +80,20 @@ function compare(left, right, leftKey, rightKey) {
 // would be worse than worthless: an account seen long ago could rename itself
 // to somebody else's handle and outrank them on seniority it never earned
 // under that name. So a rename starts them over.
-export function recordSighting(seen, pubkey, handle, at) {
-  if (!pubkey || !handle) return seen;
+export function recordSighting(seen, account, handle, at) {
+  if (!account || !handle) return seen;
 
-  const existing = seen.find((entry) => entry.pubkey === pubkey);
+  const existing = seen.find((entry) => entry.account === account);
   if (existing && existing.handle === handle) return seen;
 
-  const without = existing ? seen.filter((entry) => entry.pubkey !== pubkey) : seen;
-  return [...without, { pubkey, handle, at }];
+  const without = existing ? seen.filter((entry) => entry.account !== account) : seen;
+  return [...without, { account, handle, at }];
 }
 
 // Friends and blocked accounts are not in the set by definition: one is ranked
 // above it and the other is never shown.
-export function forget(seen, pubkey) {
-  return seen.filter((entry) => entry.pubkey !== pubkey);
+export function forget(seen, account) {
+  return seen.filter((entry) => entry.account !== account);
 }
 
 // Over budget, the newest sightings go. Seniority is the entire content of this
@@ -109,40 +109,40 @@ export function prune(seen, limit) {
 // Merging two devices: the earlier sighting wins, because when it happened is
 // the whole point of the record. See docs/project/identity.md.
 export function merge(mine = [], theirs = []) {
-  const byPubkey = new Map();
+  const byAccount = new Map();
 
   for (const entry of [...theirs, ...mine]) {
-    if (!entry?.pubkey) continue;
-    const seen = byPubkey.get(entry.pubkey);
-    if (!seen || entry.at < seen.at) byPubkey.set(entry.pubkey, entry);
+    if (!entry?.account) continue;
+    const seen = byAccount.get(entry.account);
+    if (!seen || entry.at < seen.at) byAccount.set(entry.account, entry);
   }
-  return [...byPubkey.values()].sort((a, b) => a.at - b.at);
+  return [...byAccount.values()].sort((a, b) => a.at - b.at);
 }
 
 // --- friends -------------------------------------------------------------
 //
-// An entry is { pubkey, handle, at }, the same shape as a sighting, and for the
+// An entry is { account, handle, at }, the same shape as a sighting, and for the
 // same reason: a name claim is only as old as the name. Array order is when
 // they were added and never changes; `at` is when they took the handle they are
 // using now and resets when they change it.
 
-export function rememberFriend(friends, pubkey, handle, at) {
-  if (friends.some((entry) => entry.pubkey === pubkey)) return friends;
+export function rememberFriend(friends, account, handle, at) {
+  if (friends.some((entry) => entry.account === account)) return friends;
 
-  return [...friends, { pubkey, handle, at }];
+  return [...friends, { account, handle, at }];
 }
 
-export function forgetFriend(friends, pubkey) {
-  return friends.filter((entry) => entry.pubkey !== pubkey);
+export function forgetFriend(friends, account) {
+  return friends.filter((entry) => entry.account !== account);
 }
 
 // A rename resets the claim and leaves the position alone.
-export function refreshFriendHandle(friends, pubkey, handle, at) {
-  const existing = friends.find((entry) => entry.pubkey === pubkey);
+export function refreshFriendHandle(friends, account, handle, at) {
+  const existing = friends.find((entry) => entry.account === account);
   if (!existing || !handle || existing.handle === handle) return friends;
 
   return friends.map((entry) => (
-    entry.pubkey === pubkey ? { ...entry, handle, at } : entry
+    entry.account === account ? { ...entry, handle, at } : entry
   ));
 }
 
@@ -151,6 +151,6 @@ export function refreshFriendHandle(friends, pubkey, handle, at) {
 // were, and pick up a handle the first time one is seen.
 export function normalizeFriends(stored = []) {
   return stored.map((entry) => (
-    typeof entry === "string" ? { pubkey: entry, handle: null, at: 0 } : entry
-  )).filter((entry) => entry?.pubkey);
+    typeof entry === "string" ? { account: entry, handle: null, at: 0 } : entry
+  )).filter((entry) => entry?.account);
 }

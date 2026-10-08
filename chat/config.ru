@@ -23,9 +23,29 @@ ReputableChat::App.genesis = ReputableChat::Genesis.current
 # naming it is read before any client has fetched anything. Adopting it into
 # the image store keeps one serving path for every image.
 ReputableChat::App.genesis.install_icon(ReputableChat::App.images)
-# This server's own account, when it has one, checked the same way and against
-# the genesis it has to acknowledge.
-ReputableChat::App.host = ReputableChat::Host.current
-ReputableChat::App.host&.install_icon(ReputableChat::App.images)
+# The chain is the agnostic server's. The chat refuses to run against one on
+# another genesis, and keeps a copy of the records it shows.
+ReputableChat::App.chain = ReputableChat::ChainClient.new(settings.fetch("chain_url"))
+ReputableChat::Chain::Connection.connect!(ReputableChat::App.chain, genesis: ReputableChat::App.genesis)
+ReputableChat::App.mirror = ReputableChat::Chain::Mirror.new(
+  ReputableChat::App.store, ReputableChat::App.chain, chat_notices: ReputableChat::App::NOTICE_KINDS
+)
+# Every chat server has a host account, and it is the agnostic server's: the
+# chat signs with that server's working seed, and refuses to run if the two
+# are not one account.
+ReputableChat::App.host = ReputableChat::Host.join(ReputableChat::App.chain, seed_path: settings.fetch("host_seed"))
+# Announced to other chat servers on the first boot with an address, and again
+# only when the address changes, so they can fetch its people's files.
+ReputableChat::Chain::Service.announce!(chain: ReputableChat::App.chain, mirror: ReputableChat::App.mirror,
+                                        host: ReputableChat::App.host, url: settings.fetch("url"))
+ReputableChat::App.files = ReputableChat::FilePeers.new(
+  mirror: ReputableChat::App.mirror, chain: ReputableChat::App.chain, images: ReputableChat::App.images,
+  host: ReputableChat::App.host, allow_private: settings.fetch("allow_private_peers"),
+  require_https: ReputableChat::Environment.production?,
+  # What it finds counts toward each account's rating on the agnostic server.
+  reporter: lambda do |account, reached|
+    ReputableChat::App.chain.report_contact(*ReputableChat::App.host.contact_report(account, reached: reached))
+  end
+)
 
 run ReputableChat::App.freeze.app
