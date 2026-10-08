@@ -59,7 +59,7 @@ It is one Argon2id pass, not two. The vault key is taken off the same output the
 
 ## The encryption key
 
-An account can publish an encryption key, `epubkey` on its identity declaration, so that others can send it messages only it can read. See [apps/messaging.md](apps/messaging.md). The identity key cannot do this, for the reason the vault key exists: it is Ed25519, and its private half is non-extractable.
+An account can publish an encryption key, `epubkey` on its identity declaration, so that others can send it messages only it can read. The identity key cannot do this, for the reason the vault key exists: it is Ed25519, and its private half is non-extractable.
 
 It comes from the seed the same way the vault key does: off the same Argon2id output, separated through HKDF by a domain of its own, giving the 32 bytes of an X25519 private key. A fresh computer and the seed are therefore enough to read one's messages again, and the seed is the only thing a user is expected to keep. The domain is to be `seed.kdf.encryption_domain`, versioned like the others, since changing it gives every account a key nobody has published. It goes into `config/reputation.yml` with the code that first uses it, not before.
 

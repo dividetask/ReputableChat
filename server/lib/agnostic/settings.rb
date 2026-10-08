@@ -38,7 +38,7 @@ module Agnostic
 
     # The least each number may be. The heartbeat floor is the rules' own.
     # The least each number may be. The heartbeat floor is the rules' own; the
-    # seed floor is the chat's, below which a phrase is guessable.
+    # seed floor is the least a phrase may have before it is guessable.
     MINIMUMS = { %w[heartbeat interval_seconds] => 480, %w[host seed_words] => 8 }.freeze
 
     attr_reader :environment
