@@ -175,11 +175,12 @@ record the rules refuse for holding both sides of a split, or their latest
 records taken together hold a record and the heartbeat that orphaned it
 (section 10), the server stops and waits for its administrator to pick a side.
 
-**Not live until then.** Until a server has caught up -- and after a split,
-until a side is picked -- it has published nothing, not even its account's
-declaration, and its API answers every request with 503: it has nothing yet
-it should vouch for, and since no other server has its declaration, none has
-reason to contact it. The check runs on every start, so a server that was
+**Not listening until then.** Until a server has caught up -- and after a
+split, until a side is picked -- it has published nothing, not even its
+account's declaration, and it has not opened its port: catching up happens
+in `config.ru`, which Puma loads before it binds, so nobody can reach a
+server that is not ready. (In Puma's cluster mode that holds only with
+`preload_app!`.) The API also answers 503 if it is ever reached early. The check runs on every start, so a server that was
 offline through a split wakes up stopped rather than settling it alone.
 
 **Picking a side.** `bundle exec rake status` lists what split, and for each
@@ -253,6 +254,10 @@ address its account declared. Every value is in `ratings:` in
 | the same, a year after | `established.rating`, 0.02 |
 | anything else | nothing published |
 
+A server this one rates -1 -- by reachability, or by an operator's hand -- is
+ignored from then on: its syncs are refused and it is not contacted, until
+an administrator brings it back with `bundle exec rake "forgive[<account>]"`.
+Every other server, one that went offline included, comes back by itself.
 An account a server has published nothing about counts as 0. Each rating
 carries a trust of 0, always: that a server reliably produces heartbeats says
 nothing about whether its ratings are worth believing, and publishing any

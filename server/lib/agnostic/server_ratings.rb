@@ -9,7 +9,7 @@ module Agnostic
   #
   # - Never reached, then forgotten: the declared address never worked.
   #   ratings.never_reached (-1).
-  # - Reached for a while, then forgotten: ratings.went_offline (0).
+  # - Reached for a while, then forgotten: ratings.went_offline (-0.01).
   # - Reached at least ratings.reliable_ratio of the times it was tried:
   #   ratings.reliable.rating once ratings.reliable.after_seconds (about four
   #   months) have passed since it was first reached, and
@@ -20,6 +20,10 @@ module Agnostic
   # The operator can set any account's rating by hand, trust included (rake
   # rate); that stands in for the rating above until it is removed (rake
   # unrate), and is published the same way.
+  #
+  # An account this server publishes a rating of -1 for, either way, is
+  # ignored from then on -- no contact either way -- until an administrator
+  # forgives it (rake forgive). Every other server can come back by itself.
   #
   # It is published as an attestation of the host account, holding only the
   # ratings that changed since the last one -- a later attestation amends the
@@ -84,6 +88,9 @@ module Agnostic
       if result.status == :accepted
         scores.each do |account, score|
           @store.save_published_rating(account, reputation: score["reputation"], trust: score["trust"], at: @clock.call)
+          next unless score["reputation"] == "-1"
+
+          @store.ignore(account, reason: "this server rated it -1", at: @clock.call, until_at: Store::FOREVER)
         end
       end
       result

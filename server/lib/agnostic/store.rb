@@ -315,6 +315,9 @@ module Agnostic
 
     # --- servers this one ignores -------------------------------------------------
 
+    # An ignore that lasts until an administrator lifts it.
+    FOREVER = 2**62
+
     def ignored?(account, at:) = !db[:ignored].where(account: account).where { expires_at > at }.empty?
 
     def ignore(account, reason:, at:, until_at:)

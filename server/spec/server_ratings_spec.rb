@@ -191,3 +191,50 @@ class ServerRatingsSpec < Minitest::Test
     assert_equal 400, report(reached: false, ts: @now - 3_600).status
   end
 end
+
+# A server rated -1 is ignored until an administrator brings it back; any
+# other comes back by itself.
+class RatedOutSpec < Minitest::Test
+  include Servers
+
+  DAY = 86_400
+
+  def setup
+    @now = Time.now.to_i
+    @alpha = boot("alpha", clock: -> { @now }, host: { "url" => "http://alpha" })
+    @beta = boot("beta", peers: ["alpha"], clock: -> { @now }, host: { "url" => "http://beta" })
+    @beta.beat_and_sync
+  end
+
+  def offer
+    beat = @beta.host.sign("heartbeat", { "ack" => [@beta.heartbeat.previous.digest], "body" => "", "ts" => @now })
+    Rack::MockRequest.new(@alpha.app).post("/api/sync", input: JSON.generate("heartbeat" => beat.to_wire),
+                                                        "CONTENT_TYPE" => "application/json").status
+  end
+
+  def test_a_server_rated_minus_one_is_ignored_until_forgiven
+    network.apps.delete("http://beta")
+    @alpha.peers.pull_all
+    @now += 8 * DAY
+    @alpha.peers.pull_all
+    @alpha.ratings.publish
+
+    assert @alpha.store.ignored?(@beta.host.id, at: @now + (10 * 365 * DAY)), "the ignore ran out"
+    assert_equal 403, offer
+    refute_includes @alpha.peers.urls, "http://beta"
+
+    @alpha.store.forgive(@beta.host.id)
+    assert_equal 200, offer
+  end
+
+  def test_a_server_that_went_offline_is_not_ignored
+    @alpha.peers.pull_all
+    network.apps.delete("http://beta")
+    @now += 8 * DAY
+    @alpha.peers.pull_all
+    @alpha.ratings.publish
+
+    refute @alpha.store.ignored?(@beta.host.id, at: @now)
+    assert_equal 200, offer, "a server that comes back is let back in"
+  end
+end

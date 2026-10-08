@@ -85,7 +85,8 @@ task :ignored do
   require "agnostic/settings"
   require "agnostic/store"
   Agnostic::Store.new(Agnostic::Settings.load.database_url).ignored(at: Time.now.to_i).each do |row|
-    puts "#{row[:account]}  until #{Time.at(row[:expires_at]).utc}  #{row[:reason]}"
+    until_when = row[:expires_at] >= Agnostic::Store::FOREVER ? "until forgiven" : "until #{Time.at(row[:expires_at]).utc}"
+    puts "#{row[:account]}  #{until_when}  #{row[:reason]}"
   end
 end
 
