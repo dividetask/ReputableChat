@@ -179,7 +179,33 @@ module Agnostic
     def peer_host(url) = db[:peers].where(url: url).get(:host)
 
     def save_peer_host(url, host)
-      db[:peers].insert_conflict(target: :url, update: { host: host }).insert(url: url, cursor: 0, host: host)
+      db[:peers].insert_conflict(target: :url, update: { host: host }).insert(url: url, cursor: 0, host: host, added_at: 0)
+    end
+
+    def peer(url) = db[:peers].where(url: url).first
+
+    def peers = db[:peers].order(:added_at, :url).all
+
+    # A server to sync with: named at setup, in the settings, or learned from
+    # a declaration passed along by another server. A server already known is
+    # left as it is, unless it had been forgotten, which hearing of it again
+    # undoes.
+    def add_peer(url, source:, at:, host: nil, revive: true)
+      existing = peer(url)
+      if existing
+        update_peer(url, forgotten: false, failures: 0, next_attempt_at: 0, added_at: at) if revive && existing[:forgotten]
+        update_peer(url, host: host) if host && existing[:host].nil?
+        return
+      end
+
+      db[:peers].insert(url: url, cursor: 0, host: host, source: source, added_at: at)
+    end
+
+    def update_peer(url, **values) = db[:peers].where(url: url).update(values)
+
+    # Servers with this host account, after it contacted this one itself.
+    def peer_alive(host, at:)
+      db[:peers].where(host: host).update(failures: 0, next_attempt_at: 0, forgotten: false, last_success_at: at)
     end
 
     # --- servers this one ignores -------------------------------------------------
@@ -274,7 +300,14 @@ module Agnostic
         String :url, primary_key: true
         Integer :cursor, null: false, default: 0
       end
-      db.alter_table(:peers) { add_column :host, String } unless db[:peers].columns.include?(:host)
+      {
+        host: [String], source: [String, { null: false, default: "settings" }],
+        added_at: [Integer, { null: false, default: 0 }], last_success_at: [Integer],
+        failures: [Integer, { null: false, default: 0 }], next_attempt_at: [Integer, { null: false, default: 0 }],
+        forgotten: [TrueClass, { null: false, default: false }]
+      }.each do |column, (type, options)|
+        db.alter_table(:peers) { add_column column, type, **(options || {}) } unless db[:peers].columns.include?(column)
+      end
       db.create_table?(:ignored) do
         String :account, primary_key: true
         String :reason, text: true, null: false

@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "bigdecimal"
 require "yaml"
 
 module Agnostic
@@ -18,7 +19,9 @@ module Agnostic
       "records" => { "max_future_seconds" => 600 },
       "pending" => { "max_records" => 10_000, "max_age_seconds" => 3_600 },
       "peers" => {
-        "urls" => [], "max_clock_skew_seconds" => 600, "ignore_seconds" => 604_800, "fetch_missing" => 1_000, "timeout_seconds" => 10
+        "urls" => [], "max_clock_skew_seconds" => 600, "ignore_seconds" => 604_800,
+        "forget_after_seconds" => 604_800,
+        "retry" => { "first_seconds" => 600, "multiplier" => "2", "max_seconds" => 86_400 }, "fetch_missing" => 1_000, "timeout_seconds" => 10
       },
       "limits" => { "request_bytes" => 8_388_608, "batch_records" => 500, "page_records" => 500 }
     }.freeze
@@ -28,9 +31,19 @@ module Agnostic
 
     attr_reader :environment
 
+    LOCAL = "settings.yml"
+
+    # config/server.yml, then what `rake setup` wrote for this server into
+    # its data directory, which is not committed.
     def self.load(path: PATH, env: ENV)
       file = File.exist?(path) ? (YAML.safe_load_file(path) || {}) : {}
+      local = File.join(new(file, env: env).data_dir, LOCAL)
+      file = deep_merge(file, YAML.safe_load_file(local) || {}) if File.exist?(local)
       new(file, env: env)
+    end
+
+    def self.deep_merge(a, b)
+      a.merge(b) { |_, x, y| x.is_a?(Hash) && y.is_a?(Hash) ? deep_merge(x, y) : y }
     end
 
     def initialize(file = {}, env: ENV)
@@ -47,6 +60,16 @@ module Agnostic
       parsed = Integer(dig(*keys).to_s, exception: false)
       parsed = default unless parsed&.positive?
       [parsed, MINIMUMS.fetch(keys, 0)].max
+    end
+
+    # A decimal setting, never below its minimum.
+    def decimal(*keys, minimum:)
+      value = begin
+        BigDecimal(dig(*keys).to_s)
+      rescue ArgumentError, TypeError
+        nil
+      end
+      value && value >= minimum ? value : BigDecimal(DEFAULTS.dig(*keys).to_s)
     end
 
     def data_dir = File.expand_path(File.join(dig("data_dir"), environment), ROOT)

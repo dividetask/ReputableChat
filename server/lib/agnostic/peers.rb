@@ -23,24 +23,101 @@ module Agnostic
   #    the missing ancestors fetched from that peer by hash.
   #
   # A peer whose host account this server ignores is skipped.
+  #
+  # Which servers: those named at setup or in the settings, and those learned
+  # from records -- an account that publishes heartbeats and declares a url is
+  # a server, and it is synced with once it answers at that url as that
+  # account. A server that cannot be reached is tried less and less often,
+  # and forgotten once it has gone peers.forget_after_seconds without being
+  # reached; hearing from it again brings it back.
   class Peers
-    def initialize(store:, ingest:, settings:, http: nil, clock: -> { Time.now.to_i })
+    def initialize(store:, ingest:, settings:, http: nil, clock: -> { Time.now.to_i }, host: nil)
       @clock = clock
       @store = store
       @ingest = ingest
       @settings = settings
+      @host = host
       @http = http || method(:request)
       @outbox = Queue.new
-      ingest.on_accept { |record, source| @outbox << [record, source] }
+      ingest.on_accept do |record, source|
+        @outbox << [record, source]
+        learn(record)
+      end
     end
 
-    def urls = @settings.peers
+    attr_writer :host
+
+    # The servers due a contact now.
+    def urls
+      now = @clock.call
+      @store.peers.reject { |p| p[:forgotten] || p[:next_attempt_at] > now || own?(p) }.map { |p| p[:url] }
+    end
+
+    # Servers named in the settings or at setup. Ones already known keep
+    # their state, so a forgotten one stays forgotten across restarts.
+    def seed(urls) = urls.each { |url| @store.add_peer(url, source: "settings", at: @clock.call) unless @store.peer(url) }
+
+    # --- learning about servers -------------------------------------------------
+
+    # An account is a server once it has published a heartbeat; its url is the
+    # one its latest identity declaration names.
+    def learn(record)
+      return unless %w[identity heartbeat].include?(record.kind)
+      return if @host && record.account == @host.id
+
+      account = record.account
+      return unless record.heartbeat? || @store.by_account(account, kind: "heartbeat").any?
+
+      declaration = record.kind == "identity" ? record : @store.by_account(account, kind: "identity").max_by(&:seq)
+      url = declaration && Peers.url(declaration["url"])
+      # A new declaration brings a forgotten server back; its heartbeats alone
+      # do not, or one that is unreachable at its url would be retried at full
+      # pace for as long as its heartbeats travel through others.
+      @store.add_peer(url, source: "learned", host: account, at: @clock.call, revive: record.kind == "identity") if url
+    end
+
+    def self.url(value)
+      return unless value.is_a?(String)
+
+      uri = URI.parse(value)
+      %w[http https].include?(uri.scheme) && uri.host ? value.chomp("/") : nil
+    rescue URI::InvalidURIError
+      nil
+    end
+
+    # --- reachability -----------------------------------------------------------
+
+    # Each failure waits longer before the next try: retry.first_seconds, times
+    # retry.multiplier for each failure after the first, at most
+    # retry.max_seconds.
+    def retry_delay(failures)
+      first = @settings.integer("peers", "retry", "first_seconds")
+      factor = @settings.decimal("peers", "retry", "multiplier", minimum: 1)
+      most = @settings.integer("peers", "retry", "max_seconds")
+      [(first * (factor**(failures - 1))).to_i, most].min
+    end
+
+    def reached(url)
+      @store.update_peer(url, failures: 0, next_attempt_at: 0, last_success_at: @clock.call)
+    end
+
+    def failed(url, reason)
+      peer = @store.peer(url)
+      return unless peer
+
+      now = @clock.call
+      failures = peer[:failures] + 1
+      silent_since = peer[:last_success_at] || peer[:added_at]
+      forget = now - silent_since >= @settings.integer("peers", "forget_after_seconds")
+      @store.update_peer(url, failures: failures, next_attempt_at: now + retry_delay(failures), forgotten: forget)
+      warn "#{url}: #{reason}#{forget ? '; not reached in too long, so forgotten' : ''}"
+    end
 
     # --- pull -------------------------------------------------------------------
 
-    def pull_all = urls.each { |url| pull(url) unless ignored_peer?(url) }
+    def pull_all = urls.each { |url| pull(url) if contact(url) }
 
-    def pull(url)
+    def pull(url, raise_errors: false)
       page = @settings.integer("limits", "page_records")
       budget = @settings.integer("peers", "fetch_missing")
       loop do
@@ -55,6 +132,8 @@ module Agnostic
         break if records.size < page
       end
     rescue StandardError => e
+      raise if raise_errors
+
       warn "pull from #{url} failed: #{e.message}"
     end
 
@@ -82,24 +161,40 @@ module Agnostic
       batch.reject! { |record, _| record.digest == beat.digest }
 
       urls.each do |url|
-        next if ignored_peer?(url)
+        next unless contact(url)
 
         push(url, batch.reject { |_, source| source == url }.map(&:first))
         body = post(url, "/api/sync", { "heartbeat" => beat.to_wire })
         push_missing(url, body)
-        pull(url)
+        pull(url, raise_errors: true)
+        reached(url)
       rescue StandardError => e
-        warn "sync with #{url} failed: #{e.message}"
+        failed(url, "sync failed: #{e.message}")
       end
     end
 
-    # A peer is known by the host account it reports; the account, not the
-    # address, is what gets ignored.
-    def ignored_peer?(url)
+    # Asks the server at url who it is. A peer is known by its host account,
+    # which is what gets ignored; a learned one must answer as the account
+    # whose declaration named the url. False when it is not to be synced
+    # with, a failure when it could not be reached.
+    def contact(url)
       host = get(url, "/api")["host"]
+      known = @store.peer_host(url)
+      if known && host != known
+        failed(url, "answers as #{host}, not as #{known}, whose declaration named it")
+        return false
+      end
+
       @store.save_peer_host(url, host) if Record.hash?(host)
-      host && @store.ignored?(host, at: @clock.call)
+      return false if @host && host == @host.id
+
+      !(host && @store.ignored?(host, at: @clock.call))
+    rescue StandardError => e
+      failed(url, "unreachable: #{e.message}")
+      false
     end
+
+    def own?(peer) = @host && peer[:host] == @host.id
 
     def push(url, records)
       records.each_slice(@settings.integer("limits", "batch_records")) do |slice|

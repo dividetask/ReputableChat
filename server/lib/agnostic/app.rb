@@ -119,6 +119,9 @@ module Agnostic
       end
 
       result = server.ingest.submit(record).to_h
+      # It just reached this server, so it is not offline, whatever this
+      # server's own attempts to reach it say.
+      store.peer_alive(author, at: now) unless result["status"] == "refused"
       response.status = 202 if result["status"] == "pending"
       { "results" => [result] }
     rescue ArgumentError, Canonical::NotCanonical

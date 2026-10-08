@@ -29,7 +29,9 @@ reputation.
 cd server
 bundle install
 bundle exec rake spec          # the suite
+bundle exec rake setup         # a fresh server: handle, address, other servers
 bundle exec puma               # http://localhost:9292
+bundle exec rake peers         # the servers it syncs with, or has forgotten
 bundle exec rake host          # this server's host account
 BACKGROUND=0 bundle exec puma  # the API alone: no heartbeats, no syncing
 PEERS=https://a.example,https://b.example HOST_URL=https://me.example bundle exec puma
@@ -110,6 +112,24 @@ Right after each heartbeat, the server syncs with every peer in turn:
 
 So records posted here reach the peers with the next heartbeat, not sooner.
 
+**Which servers.** `rake setup` asks a fresh server for the servers it should
+know, and the list may be empty: the server then runs alone until another
+reaches it. Every other server is learned from the records passed along. An
+account that has published a heartbeat and whose latest identity declaration
+names a `url` is taken for a server, and synced with once it answers at that
+url as that account; one answering as anyone else is a failed try. So a
+server that wants live updates declares its address (`host.url`), and one
+that does not is still synced with by the servers it reaches itself.
+
+**Servers that cannot be reached** are tried less and less often: after the
+first failure the next try waits `peers.retry.first_seconds` (10 minutes),
+and each further failure multiplies the wait by `peers.retry.multiplier` (2),
+up to `peers.retry.max_seconds` (a day). A server not reached for
+`peers.forget_after_seconds` (a week) is forgotten at its next failed try. A
+new identity declaration from it, or a sync from it, brings it back; its
+heartbeats arriving through others do not, or a server whose address cannot
+be reached would be tried at full pace for as long as they travel.
+
 **Clocks.** A heartbeat offered for sync was signed a moment ago, so its `ts`
 is the sending server's clock. When it is more than
 `peers.max_clock_skew_seconds` (600) from the receiving server's clock, either
@@ -121,7 +141,7 @@ forged heartbeat cannot get an honest server ignored. Only the offered
 heartbeat is checked this way; older records sent as missing ancestors are
 not, since being old is what they are.
 
-Ignoring lasts a week (`peers.ignore_seconds`), and covers direct contact
+Ignoring lasts `peers.ignore_seconds`, a week by default, and covers direct contact
 only: the ignored server's records still arrive through other peers, since
 refusing valid records would cut this server off from the network rather than
 it. `bundle exec rake ignored` lists who is ignored, until when and why, and

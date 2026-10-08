@@ -39,7 +39,8 @@ module Agnostic
       @ingest = Ingest.new(store: store, rules: rules, settings: settings, clock: clock)
       @host = declare_host
       @heartbeat = Heartbeat.new(store: store, ingest: ingest, host: host, settings: settings, clock: clock)
-      @peers = Peers.new(store: store, ingest: ingest, settings: settings, http: http, clock: clock)
+      @peers = Peers.new(store: store, ingest: ingest, settings: settings, http: http, clock: clock, host: host)
+      peers.seed(settings.peers)
     end
 
     def app

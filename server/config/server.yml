@@ -48,15 +48,27 @@ pending:
   max_age_seconds: "3600"
 
 peers:
-  # Other servers to sync with after each heartbeat: pushing what arrived here,
+  # Servers to sync with after each heartbeat: pushing what arrived here,
   # offering the heartbeat, and pulling what they hold. Base URLs, such as
-  # "https://chain.example.org".
+  # "https://chain.example.org". `rake setup` asks for these and writes them
+  # to data/<environment>/settings.yml; any listed here are added to those.
+  # More are learned from the records passed along (server/README.md).
   urls: []
   # A peer's heartbeat whose ts is further than this from this server's clock,
-  # either way, gets the peer ignored for good (rake ignored, rake forgive).
+  # either way, gets the peer ignored (rake ignored, rake forgive).
   max_clock_skew_seconds: "600"
   # How long such a peer is ignored: a week.
   ignore_seconds: "604800"
+  # A server not reached for this long is forgotten, at its next failed try: a
+  # week. A new identity declaration from it, or a sync from it, brings it back.
+  forget_after_seconds: "604800"
+  # The wait before the next try after a failed one: first_seconds after the
+  # first failure, multiplied by multiplier for each failure after that, and
+  # never more than max_seconds. With these: 10 minutes, 20, 40, ... a day.
+  retry:
+    first_seconds: "600"
+    multiplier: "2"
+    max_seconds: "86400"
   # How many missing ancestors one pull may fetch from a peer by hash.
   fetch_missing: "1000"
   timeout_seconds: "10"
