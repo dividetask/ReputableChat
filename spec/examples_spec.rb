@@ -122,9 +122,9 @@ class ExamplesSpec < Minitest::Test
     records.drop(1).each { |record| ledger.add(record) }
     state = ->(prefix) { ledger.state(records.find { |r| r.record_hash.start_with?(prefix) }.record_hash) }
 
-    assert_equal "void", state.call("19ba432b"), "the thief's key change"
-    assert_equal "void", state.call("d99dd7ca"), "the thief's message"
-    assert_equal "confirmed", state.call("86f0baf3"), "Dana's key change"
+    assert_equal "void", state.call("2e59fd55"), "the thief's key change"
+    assert_equal "void", state.call("a14714e2"), "the thief's message"
+    assert_equal "confirmed", state.call("e39a3e42"), "Dana's key change"
     assert_equal "confirmed", state.call("9cb36d78"), "Alice's payment"
     assert_equal "void", state.call("9cfb8f27"), "Alice's lunch"
     assert_equal "void", state.call("35eb6dbc"), "the change made with Alice's stolen master key"
