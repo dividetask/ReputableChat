@@ -148,7 +148,7 @@ A reader reaching for it has run out of its own reach and uses it to cheaply ext
 
 ### Fetching a record by hash
 
-`GET /api/record/<hash>` resolves any record hash to its record, for anyone. `ack` names records that may be of another kind, or from somebody the viewer never fetched, so walking the chain needs it, and it has to serve any record to anyone, for the reason above.
+Any record hash resolves to its record, whatever its kind and whoever wrote it: `GET /api/records/<hash>` on the agnostic server, `GET /api/record/<hash>` on the chat server. `ack` names records that may be of another kind, or from somebody the viewer never fetched, so walking the chain needs all of them, for the reason above.
 
 ### Not built: loading the client from a release
 

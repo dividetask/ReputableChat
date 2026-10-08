@@ -1,0 +1,6 @@
+{
+  "account": "28512cc11d1a615c89c12abc017269b8e022d3f6999df31e81b76c94d14719c1",
+  "payload": "{\"ack\":[\"e5b804e1610e1c22e718a23968ee54ead9c5eb400888005429ba39e76a6ff645\"],\"body\":\"This server's own account\",\"mpubkey\":\"Etbecvehao8cZrkSVD2cgQ9phPQABXtFY5EJ0LCLid8\",\"pubkey\":\"AedaKoXjgxBTbW6IFdLTpDBwVVO5lFlGX_qdN1SzNqw\",\"title\":\"Host\",\"ts\":1791484571,\"type\":\"reputablechat:identity:v0.001\"}",
+  "signature": "_LcjeRWBL67wTaxgxTx-bilFPX3fNyfT5FO2wh2DtUpxwa6YDrGP8tXe0qYtDtRhtPiWmQuUCVykxlFh6phmAg",
+  "hash": "28512cc11d1a615c89c12abc017269b8e022d3f6999df31e81b76c94d14719c1"
+}

@@ -21,6 +21,18 @@
   user decides how to proceed.
 - Analyze an error before taking any further action.
 
+## Layout
+
+Two apps, each a self-contained Ruby project with its own Gemfile, Rakefile and
+specs; run commands from inside the one you are working on.
+
+- `server/` — the **agnostic server**: checks records against the rules, stores
+  and serves them, heartbeats, and exchanges records with peers. It knows no
+  app. See [server/README.md](server/README.md).
+- `chat/` — the chat app, browser client and its server. **Paths in this file
+  are inside `chat/`** unless they start with `server/` or `docs/`.
+- `docs/` stays at the root: the rules belong to the chain, not to either app.
+
 ## Environment
 
 - Ruby 3.3.6 via rbenv. `rake` and other gem binaries are at
@@ -29,6 +41,14 @@
 - Linux, vim. Node 22 is available and is used by the parity spec.
 
 ```bash
+# In server/
+bundle exec rake spec       # the agnostic server's suite
+bundle exec puma            # http://localhost:9292; PEERS=url,url to sync
+bundle exec rake host       # this server's host account (made on first boot)
+bundle exec rake ignored    # peers ignored for a clock over 10 minutes off
+bundle exec rake "forgive[<host account id>]"   # stop ignoring one
+
+# In chat/
 bundle exec rake spec       # full suite (browser tests skip without `npm install`)
 npm install                 # once, for the browser tests
 bundle exec rake curve      # print current curve and ladder
@@ -45,8 +65,8 @@ bundle exec ruby script/generate_genesis.rb --host --production --handle Ops --i
 # as the host account instead.
 bundle exec ruby script/tim.rb status             # uses this environment's seed
 bundle exec ruby script/tim.rb --host post "Planned outage 02:00-03:00 UTC on Friday"
-bundle exec ruby script/tim.rb visible <pubkey>   # least rating that makes them visible
-bundle exec ruby script/tim.rb friend <pubkey>
+bundle exec ruby script/tim.rb visible <account>  # least rating that makes them visible
+bundle exec ruby script/tim.rb friend <account>   # by account ID
 ```
 
 See [docs/project/reputation.md](docs/project/reputation.md) and
@@ -126,6 +146,31 @@ inventing a word for something that already has one.
   field is `docs/project/rules/v0.001.md`, stripped of surrounding whitespace.
   Edit that file and `spec/chain_spec.rb` fails until the genesis is
   regenerated, which orphans everything that acknowledged it.
+- **The rules and the server's checks.** `server/lib/agnostic/rules.rb` and
+  `server/lib/agnostic/view.rb` enforce `docs/project/rules/v0.001.md`, and so
+  does `lib/reputable_chat/chain/` in the chat -- two implementations of one
+  set of rules, which must change together and with the prose: a rule edited in prose and not in code means the server
+  accepts records the rules call invalid, or refuses valid ones, and every
+  signature still verifies. `server/spec/examples_spec.rb` runs the whole
+  example chain and the broken fixture through the server, so changing a rule
+  and its examples without the code fails there. Where the server reads the
+  rules one way out of several, `server/README.md` says so under **Reading
+  the rules**.
+- **The server's genesis carries the rules file.** The rules field of
+  `server/config/genesis/development.json` is `docs/project/rules/v0.001.md`
+  less its trailing newline, and `server/spec/server_spec.rb` fails if they
+  differ. It is the same record as `config/genesis/development.json`, and the
+  same spec fails if the two copies differ: two genesis records are two chains. That is deliberate: a published rules file is never edited. Before
+  launch, the fix is a new development genesis, which orphans every
+  development record that acknowledged the old one.
+- **The server's host account phrases** are generated on first boot into
+  `server/data/<environment>/`: `host.seed` (working) and `host-master.seed`
+  (master, to be moved off the server; never read again), both 0600, beside
+  the declaration `host.json`. The server refuses to boot without the working
+  phrase or when it does not match the declaration. `server/lib/agnostic/seed.rb`
+  derives keys the browser's way, and `server/spec/seed_spec.rb` holds its KDF
+  parameters equal to `seed.kdf` in `config/reputation.yml` -- change one
+  without the other and the same phrase is two different accounts.
 - **One home per rule.** A rule written in two places gets edited in one of
   them, and the two copies then disagree about which records are valid. That
   happened three times in one afternoon of editing, each time as a paraphrase
@@ -181,5 +226,6 @@ downloading one. The application itself still ships no JavaScript dependencies.
 - `public/js/vendor-argon2.umd.min.js` — hash-wasm 4.12.0, `dist/argon2.umd.min.js`,
   from the npm registry. sha256
   `dcec617a2e1b700fa132d1583a186cb70611113395e869f2dd6cc82b415d3094`.
-- `config/bip39-english.txt` — canonical BIP39 English wordlist, sha256
+- `config/bip39-english.txt` and `server/config/bip39-english.txt` — canonical
+  BIP39 English wordlist, the same file in both apps, sha256
   `2f5eed53a4727b4bf8880d8f3f199efc90e58503646d9ff8eff3a2ed3b24dbda`.

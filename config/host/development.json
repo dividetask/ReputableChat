@@ -1,5 +1,0 @@
-{
-  "payload": "{\"ack\":[\"64e2871ebe82b150166fb49980318d5755a1fed92bcfb219c39b17de30f79a10\"],\"body\":\"This server's own account\",\"mpubkey\":\"Etbecvehao8cZrkSVD2cgQ9phPQABXtFY5EJ0LCLid8\",\"pubkey\":\"AedaKoXjgxBTbW6IFdLTpDBwVVO5lFlGX_qdN1SzNqw\",\"title\":\"Host\",\"ts\":1791484571,\"type\":\"reputablechat:identity:v0.001\"}",
-  "signature": "2wuRoc6tIqHF61rMJhiPFBYThRcPsHj4zID97bldYV5nVw-Y0icANQBtkaxOcSf3yPOhxgvMqO-mezlhTFXAAg",
-  "hash": "7885b38c3e1c2ebbda0374751c3165e613998eeb223f62f3a25bda97b9cc080a"
-}

@@ -11,12 +11,12 @@ vendor/bundle/
 # explicit. Development's are public on purpose: anyone who clones the
 # repository owns those identities, which is what makes a fresh clone able to
 # run both accounts locally.
-config/genesis/*.seed
-!config/genesis/development.seed
-!config/genesis/development.master.seed
-config/host/*.seed
-!config/host/development.seed
-!config/host/development.master.seed
+chat/config/genesis/*.seed
+!chat/config/genesis/development.seed
+!chat/config/genesis/development.master.seed
+chat/config/host/*.seed
+!chat/config/host/development.seed
+!chat/config/host/development.master.seed
 
 # Browser tests only. The application itself ships no JavaScript dependencies.
 node_modules/

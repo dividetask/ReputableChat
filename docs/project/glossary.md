@@ -14,9 +14,11 @@ record, payload, signature, record hash, text, decimal, signing key, encryption 
 
 **Genesis account** — the developer's account, which signs the genesis. The same on every server, because there is one network and one chain. Every new account starts with it as a friend. By convention it signs what covers the whole network: releases and the rules. Tim by default, but the handle is only a handle. The development's seed is public on github, production's is not. 
 
-**Host account** — a server's own account, optional. Its first identity declaration acknowledges the genesis, so it hangs off the one chain. Committed beside the genesis under `config/host/`. Where a server has one, a new account starts with it as a second friend. By convention it signs what concerns one server, such as an outage notice, as well as provides initial trust through a verification method for new users. Nothing enforces either convention. [chain.md](chain.md)
+**Host account** — a server's own account. Its first identity declaration acknowledges the genesis, so it hangs off the one chain. The chat app's is optional and committed beside the genesis under `chat/config/host/`; the agnostic server generates its own on first boot and signs its heartbeats with it. Where a server has one, a new account starts with it as a second friend. By convention it signs what concerns one server, such as an outage notice, as well as provides initial trust through a verification method for new users. Nothing enforces either convention. [chain.md](chain.md)
 
 **Founding notice** — the first rules, `docs/project/rules/v0.001.md`, as the `rules` field of the genesis record. Not a record of its own. There is one per chain. [chain.md](chain.md)
+
+**Agnostic server** — the server in `server/`: it checks records against the rules, stores and serves them, publishes heartbeats, and exchanges records with other servers, and knows nothing about any app. [server/README.md](../../server/README.md)
 
 **App** — a program that shows some of the chain's records to people, such as the chat or the forum, named by a further part of a record's type after the rules version: `reputablechat:message:v0.001:forum`. The chain ignores that part; each app has its own document in `docs/project/apps/` saying what it means. The rules acknowledge apps but do not define them.
 
@@ -100,7 +102,7 @@ Do not reintroduce these; they each have a current name above.
 | compromised (as the state of an account) | disputed; `compromised` remains the notice saying a key was stolen |
 | compromising record, disputing record | (removed; nothing needs it) |
 | stale (of a record), left behind | orphaned |
-| `within`, `waiting` (heartbeat fields) | (removed; a guideline sets the pace) |
+| `within`, `waiting` (heartbeat fields), heartbeat pace | (removed; nothing says how often a publisher heartbeats) |
 | following (of a heartbeat publisher) | (removed; orphaned records do its work) |
 | takes no effect | void, or disputed while a decision is waited on |
 
