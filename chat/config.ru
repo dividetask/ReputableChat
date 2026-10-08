@@ -26,6 +26,9 @@ ReputableChat::App.genesis.install_icon(ReputableChat::App.images)
 # The chain is the agnostic server's. The chat refuses to run against one on
 # another genesis, and keeps a copy of the records it shows.
 ReputableChat::App.chain = ReputableChat::ChainClient.new(settings.fetch("chain_url"))
+# Nothing happens, the port included, until the agnostic server is live:
+# Puma loads this file before it binds.
+ReputableChat::Chain::Connection.wait_until_live(ReputableChat::App.chain)
 ReputableChat::Chain::Connection.connect!(ReputableChat::App.chain, genesis: ReputableChat::App.genesis)
 ReputableChat::App.mirror = ReputableChat::Chain::Mirror.new(
   ReputableChat::App.store, ReputableChat::App.chain, chat_notices: ReputableChat::App::NOTICE_KINDS

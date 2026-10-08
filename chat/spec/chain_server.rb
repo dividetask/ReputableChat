@@ -48,8 +48,7 @@ module ChainServer
   # Another agnostic server, for a spec that needs more than one: its own
   # data and host directories under dir, stopped when the run ends. Its host
   # account's working seed is at dir/development/host.seed.
-  def launch(dir)
-    port = TCPServer.open("127.0.0.1", 0) { |s| s.addr[1] }
+  def launch(dir, port: free_port)
     log = File.join(dir, "server.log")
     env = { "RACK_ENV" => "development", "BACKGROUND" => "0", "DATA_DIR" => dir, "HOST_DIR" => dir,
             "BUNDLE_GEMFILE" => File.join(SERVER, "Gemfile") }
@@ -71,6 +70,8 @@ module ChainServer
     end
     raise "the agnostic server did not start; its log:\n#{File.read(log)}"
   end
+
+  def free_port = TCPServer.open("127.0.0.1", 0) { |s| s.addr[1] }
 
   # The chat's bundle must not leak into the server's.
   def clean_env(&block)

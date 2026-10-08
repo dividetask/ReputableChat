@@ -28,7 +28,9 @@
 # The agnostic server this chat runs beside: it holds the chain, judges every
 # record against the rules and syncs with other servers. The chat passes its
 # clients' records to it and keeps a copy of the ones it shows. CHAIN_URL
-# overrides. Start one with `cd server && bundle exec puma` (port 9393).
+# overrides. Start one with `cd server && bundle exec puma` (port 9393). The
+# chat waits for it to be live -- caught up, not stopped for a split -- before
+# it opens its own port.
 chain_url: "http://localhost:9393"
 
 # The host account's working seed, which lives outside both apps (host/ at the

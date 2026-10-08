@@ -13,6 +13,9 @@ module ReputableChat
   # See server/README.md for the API.
   class ChainClient
     class Unreachable < StandardError; end
+    # Not answering yet: not listening, or answering 503 while it catches up
+    # or is stopped for a chain split. Worth waiting for; anything else is not.
+    class NotReady < Unreachable; end
 
     # What submitting a record came to: accepted, known (already held),
     # pending (waiting on records it acknowledges, listed in missing) or
@@ -87,6 +90,7 @@ module ReputableChat
       status, parsed = @http ? @http.call(method, "#{url}#{path}", body) : over_the_network(method, path, body)
       return nil if status == 404 && missing.nil?
       return parsed if status.between?(200, 299)
+      raise NotReady, "the agnostic server at #{url} is not live: #{parsed['error']}" if status == 503
 
       raise Unreachable, "the agnostic server at #{url} answered #{status} to #{path}: #{parsed['error']}"
     end
@@ -102,7 +106,7 @@ module ReputableChat
                                                      open_timeout: 5, read_timeout: 30) { |h| h.request(request) }
       [response.code.to_i, JSON.parse(response.body.to_s.empty? ? "{}" : response.body)]
     rescue Errno::ECONNREFUSED, Errno::EHOSTUNREACH, SocketError, Net::OpenTimeout => e
-      raise Unreachable, "the agnostic server at #{url} cannot be reached (#{e.class}). " \
+      raise NotReady, "the agnostic server at #{url} cannot be reached (#{e.class}). " \
                          "Start it (cd server && bundle exec puma), or set CHAIN_URL."
     rescue JSON::ParserError
       raise Unreachable, "the agnostic server at #{url} did not answer #{path} with JSON"
