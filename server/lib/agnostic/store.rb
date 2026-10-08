@@ -184,13 +184,13 @@ module Agnostic
 
     # --- servers this one ignores -------------------------------------------------
 
-    def ignored?(account) = !db[:ignored].where(account: account).empty?
+    def ignored?(account, at:) = !db[:ignored].where(account: account).where { expires_at > at }.empty?
 
-    def ignore(account, reason:, at:)
-      db[:ignored].insert_conflict(:replace).insert(account: account, reason: reason, at: at)
+    def ignore(account, reason:, at:, until_at:)
+      db[:ignored].insert_conflict(:replace).insert(account: account, reason: reason, at: at, expires_at: until_at)
     end
 
-    def ignored = db[:ignored].order(:at).all
+    def ignored(at:) = db[:ignored].where { expires_at > at }.order(:at).all
 
     def forgive(account) = db[:ignored].where(account: account).delete
 
@@ -279,7 +279,10 @@ module Agnostic
         String :account, primary_key: true
         String :reason, text: true, null: false
         Integer :at, null: false
+        Integer :expires_at, null: false, default: 0
       end
+      db.alter_table(:ignored) { add_column :expires_at, Integer, null: false, default: 0 } unless
+        db[:ignored].columns.include?(:expires_at)
       db.create_table?(:meta) do
         String :key, primary_key: true
         String :value, text: true

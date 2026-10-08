@@ -29,7 +29,7 @@ module Agnostic
 
     attr_reader :declaration, :signing_key
 
-    def self.load_or_create(dir:, genesis:, handle:, bio:, clock: -> { Time.now.to_i })
+    def self.load_or_create(dir:, genesis:, profile:, clock: -> { Time.now.to_i })
       FileUtils.mkdir_p(dir)
       seed = File.join(dir, SEED_FILE)
       path = File.join(dir, DECLARATION_FILE)
@@ -39,7 +39,7 @@ module Agnostic
       master = File.join(dir, MASTER_FILE)
       master_key = Seed.signing_key(write_seed(master, Seed.generate))
       warn "host account master phrase written to #{master}: move it off this server"
-      declaration = declare(key, master_key, genesis: genesis, handle: handle, bio: bio, ts: clock.call)
+      declaration = declare(key, master_key, genesis: genesis, profile: profile, ts: clock.call)
       File.write(path, JSON.pretty_generate(declaration.to_wire))
       new(signing_key: key, declaration: declaration)
     end
@@ -60,12 +60,12 @@ module Agnostic
       phrase
     end
 
-    def self.declare(key, master_key, genesis:, handle:, bio:, ts:)
-      sign(key, {
-             "ack" => [genesis.digest], "body" => bio, "mpubkey" => Keys.public_key(master_key),
-             "pubkey" => Keys.public_key(key), "title" => handle, "ts" => ts,
-             "type" => "reputablechat:identity:#{Rules::VERSION}"
-           })
+    # profile: the declaration's title (the handle), body (the bio) and url.
+    def self.declare(key, master_key, genesis:, profile:, ts:)
+      sign(key, profile.merge(
+                  "ack" => [genesis.digest], "mpubkey" => Keys.public_key(master_key),
+                  "pubkey" => Keys.public_key(key), "ts" => ts, "type" => "reputablechat:identity:#{Rules::VERSION}"
+                ))
     end
 
     def self.sign(key, fields)

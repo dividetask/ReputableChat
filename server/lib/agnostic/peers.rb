@@ -24,7 +24,8 @@ module Agnostic
   #
   # A peer whose host account this server ignores is skipped.
   class Peers
-    def initialize(store:, ingest:, settings:, http: nil)
+    def initialize(store:, ingest:, settings:, http: nil, clock: -> { Time.now.to_i })
+      @clock = clock
       @store = store
       @ingest = ingest
       @settings = settings
@@ -97,7 +98,7 @@ module Agnostic
     def ignored_peer?(url)
       host = get(url, "/api")["host"]
       @store.save_peer_host(url, host) if Record.hash?(host)
-      host && @store.ignored?(host)
+      host && @store.ignored?(host, at: @clock.call)
     end
 
     def push(url, records)

@@ -32,13 +32,13 @@ bundle exec rake spec          # the suite
 bundle exec puma               # http://localhost:9292
 bundle exec rake host          # this server's host account
 BACKGROUND=0 bundle exec puma  # the API alone: no heartbeats, no syncing
-PEERS=https://a.example,https://b.example bundle exec puma
+PEERS=https://a.example,https://b.example HOST_URL=https://me.example bundle exec puma
 ```
 
 Settings are in [config/server.yml](config/server.yml), which documents each
 one: heartbeat interval, peers, how many records to hold for missing
 ancestors, how far ahead of the clock a record may be, request limits.
-`DATABASE_URL`, `DATA_DIR`, `GENESIS`, `PEERS` and
+`DATABASE_URL`, `DATA_DIR`, `GENESIS`, `PEERS`, `HOST_URL` and
 `HEARTBEAT_INTERVAL_SECONDS` override the file.
 
 ## The genesis
@@ -72,7 +72,11 @@ into `data/<environment>/`:
   boot that makes it.
 
 The account's first identity declaration, in `host.json` beside them,
-acknowledges the genesis; its handle and bio come from `config/server.yml`.
+acknowledges the genesis. Its handle, bio and `url` come from `host:` in
+`config/server.yml`; when any of them changes, the next boot publishes a new
+declaration. The `url` is where other servers reach this one -- a server is
+known by its account, so a server that wants live updates from its peers
+declares the address they can reach it at.
 Keys are derived from the phrases exactly as the browser derives them
 (Argon2id under the chat's `seed.kdf` parameters, which a spec holds equal),
 so either phrase can be typed into a client to act as the account.
@@ -117,9 +121,11 @@ forged heartbeat cannot get an honest server ignored. Only the offered
 heartbeat is checked this way; older records sent as missing ancestors are
 not, since being old is what they are.
 
-Ignoring lasts until the operator says otherwise: `bundle exec rake ignored`
-lists who and why, and `bundle exec rake "forgive[<host account id>]"` stops
-ignoring one.
+Ignoring lasts a week (`peers.ignore_seconds`), and covers direct contact
+only: the ignored server's records still arrive through other peers, since
+refusing valid records would cut this server off from the network rather than
+it. `bundle exec rake ignored` lists who is ignored, until when and why, and
+`bundle exec rake "forgive[<host account id>]"` stops ignoring one early.
 
 ## The API
 
@@ -193,5 +199,3 @@ decision someone may want to make differently.
 - **Peers are a fixed list.** There is no discovery.
 - **Files are not served.** Records name files by hash; something has to hold
   the bytes, and that is not this version.
-- **Changing the handle or bio in the settings does not re-declare** the host
-  account; it applies to an account declared after the change.

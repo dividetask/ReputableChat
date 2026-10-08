@@ -84,7 +84,7 @@ class PeersSpec < Minitest::Test
     @beta.peers.pull_all
     response = offer(@alpha, @beta, skewed_beat(@alpha, -600))
     assert_equal 200, response.status, response.body
-    refute @beta.store.ignored?(@alpha.host.id)
+    refute @beta.store.ignored?(@alpha.host.id, at: @now)
   end
 
   def test_a_server_whose_heartbeat_is_more_than_ten_minutes_off_is_ignored
@@ -93,7 +93,7 @@ class PeersSpec < Minitest::Test
       @beta.store.forgive(@alpha.host.id)
       response = offer(@alpha, @beta, skewed_beat(@alpha, skew))
       assert_equal 403, response.status
-      assert @beta.store.ignored?(@alpha.host.id), "a heartbeat #{skew}s off did not get its server ignored"
+      assert @beta.store.ignored?(@alpha.host.id, at: @now), "a heartbeat #{skew}s off did not get its server ignored"
     end
   end
 
@@ -108,6 +108,16 @@ class PeersSpec < Minitest::Test
     refute @beta.store.known?(@alpha.heartbeat.previous.digest), "beta still pulled from a server it ignores"
   end
 
+  def test_a_server_is_ignored_for_a_week
+    @beta.peers.pull_all
+    offer(@alpha, @beta, skewed_beat(@alpha, -3_600))
+
+    @now += 604_799
+    assert_equal 403, offer(@alpha, @beta, skewed_beat(@alpha, 0)).status
+    @now += 1
+    assert_equal 200, offer(@alpha, @beta, skewed_beat(@alpha, 0)).status
+  end
+
   # Otherwise anyone could get an honest server ignored with a forged one.
   def test_a_forged_heartbeat_does_not_get_the_server_it_names_ignored
     @beta.peers.pull_all
@@ -119,6 +129,6 @@ class PeersSpec < Minitest::Test
     response = offer(@alpha, @beta, forged)
 
     assert_equal 422, response.status
-    refute @beta.store.ignored?(@alpha.host.id)
+    refute @beta.store.ignored?(@alpha.host.id, at: @now)
   end
 end

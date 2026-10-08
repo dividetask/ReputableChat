@@ -3,6 +3,8 @@
 require "fileutils"
 require "json"
 require "monitor"
+require "uri"
+require_relative "formats"
 require_relative "host_account"
 require_relative "app"
 require_relative "heartbeat"
@@ -37,7 +39,7 @@ module Agnostic
       @ingest = Ingest.new(store: store, rules: rules, settings: settings, clock: clock)
       @host = declare_host
       @heartbeat = Heartbeat.new(store: store, ingest: ingest, host: host, settings: settings, clock: clock)
-      @peers = Peers.new(store: store, ingest: ingest, settings: settings, http: http)
+      @peers = Peers.new(store: store, ingest: ingest, settings: settings, http: http, clock: clock)
     end
 
     def app
@@ -98,12 +100,44 @@ module Agnostic
     end
 
     def declare_host
-      host = HostAccount.load_or_create(dir: settings.data_dir, genesis: genesis, handle: settings.handle,
-                                       bio: settings.bio, clock: @clock)
-      result = ingest.submit(host.declaration)
-      return host if %i[accepted known].include?(result.status)
+      check_url
+      host = HostAccount.load_or_create(dir: settings.data_dir, genesis: genesis, profile: profile, clock: @clock)
+      submit_declaration(host.declaration)
+      redeclare(host)
+      host
+    end
+
+    # What the host account's identity declaration says, from the settings.
+    def profile = { "title" => settings.handle, "body" => settings.bio, "url" => settings.url }.compact
+
+    # A later declaration replaces the account's previous one (section 3), so
+    # a changed handle, bio or url is published as a new one.
+    def redeclare(host)
+      current = store.by_account(host.id, kind: "identity").max_by(&:seq)
+      return if %w[title body url].all? { |k| current[k] == profile[k] }
+
+      latest = store.by_account(host.id).max_by(&:seq)
+      submit_declaration(host.sign("identity", profile.merge("ack" => [latest.digest], "ts" => @clock.call)))
+    end
+
+    def submit_declaration(record)
+      result = ingest.submit(record)
+      return if %i[accepted known].include?(result.status)
 
       raise BootError, "this server's host account declaration was refused: #{Array(result.problems).join('; ')}"
+    end
+
+    def check_url
+      url = settings.url
+      return if url.nil?
+
+      uri = URI.parse(url)
+      return if %w[http https].include?(uri.scheme) && uri.host && Formats.text?(url, min: 1, max: 2_048) &&
+                !url.match?(/[[:space:]]/)
+
+      raise BootError, "host.url #{url.inspect} is not an http or https address"
+    rescue URI::InvalidURIError
+      raise BootError, "host.url #{url.inspect} is not an http or https address"
     end
   end
 end

@@ -26,11 +26,11 @@ module Servers
   def network = @network ||= Network.new({})
 
   # A server at http://<name>, peering with the others named.
-  def boot(name, peers: [], clock: -> { Time.now.to_i })
+  def boot(name, peers: [], clock: -> { Time.now.to_i }, host: {})
     dir = Dir.mktmpdir("agnostic-#{name}")
     (@dirs ||= []) << dir
     settings = Agnostic::Settings.new(
-      { "data_dir" => dir, "host" => { "handle" => name },
+      { "data_dir" => dir, "host" => { "handle" => name }.merge(host),
         "peers" => { "urls" => peers.map { |p| "http://#{p}" } } }, env: { "RACK_ENV" => "development" }
     )
     server = Agnostic::Server.new(settings: settings, clock: clock, http: network)

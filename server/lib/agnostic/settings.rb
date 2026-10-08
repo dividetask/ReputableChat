@@ -13,12 +13,12 @@ module Agnostic
       "data_dir" => "data",
       "database_url" => nil,
       "genesis" => "config/genesis/%{environment}.json",
-      "host" => { "handle" => "Agnostic server", "bio" => "" },
+      "host" => { "handle" => "Agnostic server", "bio" => "", "url" => nil },
       "heartbeat" => { "interval_seconds" => 600 },
       "records" => { "max_future_seconds" => 600 },
       "pending" => { "max_records" => 10_000, "max_age_seconds" => 3_600 },
       "peers" => {
-        "urls" => [], "max_clock_skew_seconds" => 600, "fetch_missing" => 1_000, "timeout_seconds" => 10
+        "urls" => [], "max_clock_skew_seconds" => 600, "ignore_seconds" => 604_800, "fetch_missing" => 1_000, "timeout_seconds" => 10
       },
       "limits" => { "request_bytes" => 8_388_608, "batch_records" => 500, "page_records" => 500 }
     }.freeze
@@ -61,6 +61,14 @@ module Agnostic
 
     def bio = dig("host", "bio").to_s
 
+    # Where other servers reach this one, declared in the host account's
+    # identity so a peer can find it by account. Unset, peers cannot push to
+    # this server; it still syncs with the peers it names.
+    def url
+      value = dig("host", "url").to_s.strip
+      value.empty? ? nil : value.chomp("/")
+    end
+
     private
 
     def merge(defaults, file)
@@ -74,6 +82,7 @@ module Agnostic
       @values["database_url"] = @env["DATABASE_URL"] if present?(@env["DATABASE_URL"])
       @values["data_dir"] = @env["DATA_DIR"] if present?(@env["DATA_DIR"])
       @values["genesis"] = @env["GENESIS"] if present?(@env["GENESIS"])
+      @values["host"]["url"] = @env["HOST_URL"] if present?(@env["HOST_URL"])
       @values["peers"]["urls"] = @env["PEERS"].split(",") if present?(@env["PEERS"])
       interval = @env["HEARTBEAT_INTERVAL_SECONDS"]
       @values["heartbeat"]["interval_seconds"] = interval if present?(interval)

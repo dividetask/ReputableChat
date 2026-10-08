@@ -21,8 +21,8 @@ task :ignored do
   $LOAD_PATH.unshift File.expand_path("lib", __dir__)
   require "agnostic/settings"
   require "agnostic/store"
-  Agnostic::Store.new(Agnostic::Settings.load.database_url).ignored.each do |row|
-    puts "#{row[:account]}  #{Time.at(row[:at]).utc}  #{row[:reason]}"
+  Agnostic::Store.new(Agnostic::Settings.load.database_url).ignored(at: Time.now.to_i).each do |row|
+    puts "#{row[:account]}  until #{Time.at(row[:expires_at]).utc}  #{row[:reason]}"
   end
 end
 

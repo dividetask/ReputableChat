@@ -70,6 +70,7 @@ module Agnostic
     def overview
       {
         "rules" => Rules::VERSION, "genesis" => server.genesis.digest, "host" => server.host.id,
+        "url" => server.settings.url,
         "records" => store.count, "cursor" => store.last_seq,
         "heartbeat_interval_seconds" => server.settings.integer("heartbeat", "interval_seconds"),
         "limits" => %w[request_bytes batch_records page_records].to_h { |k| [k, limit(k)] }
@@ -99,9 +100,10 @@ module Agnostic
       r.halt(400, { "error" => "heartbeat must be a heartbeat record" }) unless heartbeat?(record)
 
       author = record.account
-      r.halt(403, { "error" => "this server ignores #{author}" }) if store.ignored?(author)
+      now = server.clock.call
+      r.halt(403, { "error" => "this server ignores #{author}" }) if store.ignored?(author, at: now)
 
-      skew = record.ts - server.clock.call
+      skew = record.ts - now
       allowed = server.settings.integer("peers", "max_clock_skew_seconds")
       if skew.abs > allowed
         verdict = server.ingest.rules.check(record)
@@ -111,8 +113,9 @@ module Agnostic
         end
 
         reason = "its heartbeat #{record.digest} was #{skew} seconds from this server's clock, over the #{allowed} allowed"
-        store.ignore(author, reason: reason, at: server.clock.call)
-        r.halt(403, { "error" => "this server now ignores #{author}: #{reason}" })
+        period = server.settings.integer("peers", "ignore_seconds")
+        store.ignore(author, reason: reason, at: now, until_at: now + period)
+        r.halt(403, { "error" => "this server ignores #{author} until #{Time.at(now + period).utc}: #{reason}" })
       end
 
       result = server.ingest.submit(record).to_h

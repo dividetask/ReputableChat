@@ -7,7 +7,7 @@
 #
 # Environment variables win over this file for the keys deployment tooling is
 # most likely to inject: DATABASE_URL, DATA_DIR, GENESIS, PEERS (comma
-# separated) and HEARTBEAT_INTERVAL_SECONDS.
+# separated), HOST_URL and HEARTBEAT_INTERVAL_SECONDS.
 
 # Where the server keeps its database and its host account. That account's
 # working and master seed phrases are written here 0600 on first boot; move
@@ -23,6 +23,12 @@ genesis: "config/genesis/%{environment}.json"
 host:
   handle: "Agnostic server"
   bio: ""
+  # The address other servers reach this one at, such as
+  # "https://chain.example.org" or "http://203.0.113.7:9292". It goes into
+  # the host account's identity declaration, which is how peers find a server
+  # by its account. Without one, peers cannot send this server live updates.
+  # Changing any of these three publishes a new declaration on the next boot.
+  # url: "https://chain.example.org"
 
 heartbeat:
   # The rules set a floor of 480 seconds between one publisher's heartbeats and
@@ -49,6 +55,8 @@ peers:
   # A peer's heartbeat whose ts is further than this from this server's clock,
   # either way, gets the peer ignored for good (rake ignored, rake forgive).
   max_clock_skew_seconds: "600"
+  # How long such a peer is ignored: a week.
+  ignore_seconds: "604800"
   # How many missing ancestors one pull may fetch from a peer by hash.
   fetch_missing: "1000"
   timeout_seconds: "10"

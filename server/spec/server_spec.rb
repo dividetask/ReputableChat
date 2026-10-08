@@ -76,6 +76,33 @@ class ServerSpec < Minitest::Test
     assert_raises(Agnostic::HostAccount::MissingSeed) { Agnostic::Server.new(settings: server.settings) }
   end
 
+  # A peer finds a server by its account, so the address it is reached at
+  # goes into the account's identity declaration.
+  def test_the_host_account_declares_the_address_it_is_reached_at
+    server = boot("alpha", host: { "url" => "https://alpha.example/" })
+    assert_equal "https://alpha.example", server.host.declaration["url"]
+  end
+
+  def test_a_changed_handle_bio_or_url_is_published_as_a_new_declaration
+    server = boot("alpha")
+    settings = Agnostic::Settings.new({ "data_dir" => server.settings.dig("data_dir"),
+                                        "host" => { "handle" => "Alpha", "bio" => "Ops", "url" => "http://203.0.113.7:9292" } },
+                                      env: { "RACK_ENV" => "development" })
+    again = Agnostic::Server.new(settings: settings, http: network)
+    latest = again.store.by_account(again.host.id, kind: "identity").max_by(&:seq)
+
+    assert_equal server.host.id, again.host.id
+    assert_equal [server.host.id, "Alpha", "Ops", "http://203.0.113.7:9292"], latest.fields.values_at("id", "title", "body", "url")
+
+    third = Agnostic::Server.new(settings: settings, http: network)
+    assert_equal 2, third.store.by_account(again.host.id, kind: "identity").size, "an unchanged profile was declared again"
+  end
+
+  def test_a_host_url_that_is_not_an_http_address_stops_the_boot
+    error = assert_raises(Agnostic::Server::BootError) { boot("alpha", host: { "url" => "chain.example" }) }
+    assert_match(/host.url/, error.message)
+  end
+
   def test_settings_fall_back_to_defaults_rather_than_zero
     settings = Agnostic::Settings.new({ "pending" => { "max_records" => "lots" }, "peers" => { "max_clock_skew_seconds" => "0" } }, env: {})
     assert_equal 10_000, settings.integer("pending", "max_records")
