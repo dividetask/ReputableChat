@@ -28,9 +28,13 @@ module ReputableChat
   #   (the same account: a chat server shares its agnostic server's), and never
   #   one rated below zero;
   # - not one that failed lately: each failure puts it off for longer, as the
-  #   agnostic server does with servers it cannot reach.
+  #   agnostic server does with servers it cannot reach. One that answered but
+  #   did not have the file (a 404) is put off too, for missing_penalty of the
+  #   time a failure would cost -- it answered, so it loses less -- and a miss
+  #   does not make the next failure's wait any longer.
   #
-  # Every success and failure is reported to the agnostic server (reporter),
+  # Every outcome -- :reached, :missing or :unreached -- is reported to the
+  # agnostic server (reporter),
   # where it counts toward the account's rating with that server's own
   # contacts -- so what the chat learns outlasts a restart, and the next
   # choice takes it into account.
@@ -51,7 +55,7 @@ module ReputableChat
 
     def initialize(mirror:, chain:, images:, host:, allow_private:, require_https:,
                    http: nil, clock: -> { Time.now.to_i }, random: Random.new, resolver: Resolv,
-                   reporter: nil)
+                   reporter: nil, missing_penalty: BigDecimal("0.25"))
       @mirror = mirror
       @chain = chain
       @images = images
@@ -63,6 +67,7 @@ module ReputableChat
       @random = random
       @resolver = resolver
       @reporter = reporter
+      @missing_penalty = BigDecimal(missing_penalty.to_s).clamp(0, 1)
       @verified = {}
       @failures = Hash.new(0)
       @next_try = Hash.new(0)
@@ -76,9 +81,11 @@ module ReputableChat
 
       candidates(name).first(ATTEMPTS).each do |account, url|
         bytes = get("#{url}/images/#{name}")
+        next missed(account) if bytes == :missing
+
         # Checked before anything is stored, so a server answering with some
         # other image leaves nothing behind.
-        if bytes && Digest::SHA256.hexdigest(bytes) == name[0, 64] && @images.store(bytes) == name
+        if bytes.is_a?(String) && Digest::SHA256.hexdigest(bytes) == name[0, 64] && @images.store(bytes) == name
           succeeded(account)
           return name
         end
@@ -167,7 +174,7 @@ module ReputableChat
 
       body = get("#{url}/api/host")
       passed = begin
-        body && JSON.parse(body).dig("host", "account") == account
+        body.is_a?(String) && JSON.parse(body).dig("host", "account") == account
       rescue JSON::ParserError
         false
       end
@@ -180,27 +187,39 @@ module ReputableChat
         @failures.delete(account)
         @next_try.delete(account)
       end
-      report(account, true)
+      report(account, :reached)
     end
 
     def failed(account)
       @lock.synchronize do
         @failures[account] += 1
-        delay = [BACKOFF_FIRST * (2**(@failures[account] - 1)), BACKOFF_MOST].min
-        @next_try[account] = @clock.call + delay
+        @next_try[account] = @clock.call + backoff(@failures[account])
       end
-      report(account, false)
+      report(account, :unreached)
     end
 
+    # It answered without the file: put off for missing_penalty of what one
+    # more failure would cost, without counting as a failure.
+    def missed(account)
+      @lock.synchronize do
+        delay = (@missing_penalty * backoff(@failures[account] + 1)).round
+        @next_try[account] = [@next_try[account], @clock.call + delay].max
+      end
+      report(account, :missing)
+    end
+
+    def backoff(failures) = [BACKOFF_FIRST * (2**(failures - 1)), BACKOFF_MOST].min
+
     # Best effort: a report that does not arrive costs a rating one data point.
-    def report(account, reached)
-      @reporter&.call(account, reached)
+    def report(account, outcome)
+      @reporter&.call(account, outcome)
     rescue StandardError
       nil
     end
 
-    # The body, or nil for anything but a 200 within the image limit. The
-    # address checked is the one connected to.
+    # The body; :missing for a 404, which is an answer; or nil for anything
+    # else, or a body over the image limit. The address checked is the one
+    # connected to.
     def get(url)
       ip = address(url)
       ip && @http.call(url, @images.max_bytes, ip)
@@ -217,6 +236,7 @@ module ReputableChat
         request = Net::HTTP::Get.new(uri)
         request[PEER_HEADER] = "1"
         http.request(request) do |response|
+          return :missing if response.is_a?(Net::HTTPNotFound)
           return nil unless response.is_a?(Net::HTTPOK)
 
           body = +""

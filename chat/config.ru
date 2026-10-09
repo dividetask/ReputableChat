@@ -45,9 +45,14 @@ ReputableChat::App.files = ReputableChat::FilePeers.new(
   mirror: ReputableChat::App.mirror, chain: ReputableChat::App.chain, images: ReputableChat::App.images,
   host: ReputableChat::App.host, allow_private: settings.fetch("allow_private_peers"),
   require_https: ReputableChat::Environment.production?,
+  missing_penalty: settings.fetch("file_peers").fetch("missing_penalty"),
   # What it finds counts toward each account's rating on the agnostic server.
-  reporter: lambda do |account, reached|
-    ReputableChat::App.chain.report_contact(*ReputableChat::App.host.contact_report(account, reached: reached))
+  # A report says reached or not, so a server without the file is reported as
+  # not reached until the agnostic server takes "missing"
+  # (docs/agnostic-server-requests.md, 1).
+  reporter: lambda do |account, outcome|
+    report = ReputableChat::App.host.contact_report(account, reached: outcome == :reached)
+    ReputableChat::App.chain.report_contact(*report)
   end
 )
 

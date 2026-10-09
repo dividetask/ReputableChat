@@ -83,7 +83,8 @@ class ServerConfigSpec < Minitest::Test
       "origin" => [], "limits" => ReputableChat::ServerConfig::LIMITS,
       # Resolved: the agnostic server's seed in this environment, beside the chat.
       "host_seed" => File.expand_path("../../host/development/host.seed", __dir__),
-      "allow_private_peers" => true
+      "allow_private_peers" => true,
+      "file_peers" => { "missing_penalty" => BigDecimal(ReputableChat::ServerConfig::FILE_PEERS["missing_penalty"]) }
     )
 
     assert_equal expected, Settings.load(path: File.join(@dir, "absent.yml"), env: {})
@@ -113,5 +114,20 @@ class ServerConfigSpec < Minitest::Test
     path = write("session_secret: \"leaked\"\n")
 
     refute_includes Settings.load(path: path, env: {}).keys, "session_secret"
+  end
+
+  # RULE (yours): how much a server without the file is put off is the
+  # operator's, a decimal from 0 to 1; anything else is the default.
+  def test_the_missing_penalty_is_a_decimal_from_zero_to_one
+    assert_equal BigDecimal("0.25"), Settings.load(env: {})["file_peers"]["missing_penalty"]
+
+    path = write(%(file_peers:\n  missing_penalty: "0.5"\n))
+    assert_equal BigDecimal("0.5"), Settings.load(path: path, env: {})["file_peers"]["missing_penalty"]
+    assert_equal BigDecimal("1"), Settings.load(path: path, env: { "MISSING_PENALTY" => "1" })["file_peers"]["missing_penalty"]
+
+    %w[2 -0.1 lots].each do |bad|
+      assert_equal BigDecimal("0.25"), Settings.load(path: path, env: { "MISSING_PENALTY" => bad })["file_peers"]["missing_penalty"],
+                   "#{bad} must fall back to the default"
+    end
   end
 end

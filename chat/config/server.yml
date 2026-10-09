@@ -49,6 +49,13 @@ host_seed: "../host/%{environment}/host.seed"
 # must also be https. ALLOW_PRIVATE_PEERS overrides.
 # allow_private_peers: false
 
+# Fetching files from other chat servers. A server that answers without the
+# file is put off for missing_penalty of the time a server that did not answer
+# at all would be: "0" not at all, "1" the same. A decimal from 0 to 1, quoted;
+# anything else falls back to "0.25". MISSING_PENALTY overrides.
+file_peers:
+  missing_penalty: "0.25"
+
 database_url: "sqlite://data/reputablechat.db"
 image_root: "data/images"
 

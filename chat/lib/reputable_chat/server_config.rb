@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "bigdecimal"
 require "yaml"
 require_relative "origin"
 require_relative "environment"
@@ -58,6 +59,12 @@ module ReputableChat
       "vault_sync_seconds" => 3_600
     }.freeze
 
+    # Fetching files from other chat servers (FilePeers). missing_penalty is
+    # how much a server that answered without the file is put off, as a
+    # share of what a server that did not answer is: "0" not at all, "1" the
+    # same. MISSING_PENALTY overrides.
+    FILE_PEERS = { "missing_penalty" => "0.25" }.freeze
+
     module_function
 
     # Only the keys named above are read, so an unrecognised key in the file is
@@ -78,7 +85,8 @@ module ReputableChat
                      "host_seed" => File.expand_path(format(settings["host_seed"], environment: environment), root),
                      "url" => present(settings["url"]&.to_s)&.chomp("/"),
                      "allow_private_peers" => flag(settings["allow_private_peers"], environment != Environment::PRODUCTION),
-                     "limits" => limits(file["limits"] || {}, env))
+                     "limits" => limits(file["limits"] || {}, env),
+                     "file_peers" => file_peers(file["file_peers"] || {}, env))
     end
 
     # A limit that is absent, unparseable or not positive falls back to the
@@ -91,6 +99,16 @@ module ReputableChat
 
         [key, parsed&.positive? ? parsed : fallback]
       end
+    end
+
+    # A penalty that is not a decimal from 0 to 1 falls back to the default,
+    # for the same reason a bad limit does.
+    def file_peers(file, env)
+      raw = env["MISSING_PENALTY"] || file["missing_penalty"]
+      penalty = raw.nil? ? nil : BigDecimal(raw.to_s.strip, exception: false)
+      penalty = nil unless penalty&.between?(0, 1)
+
+      { "missing_penalty" => penalty || BigDecimal(FILE_PEERS.fetch("missing_penalty")) }
     end
 
     def flag(value, fallback)
