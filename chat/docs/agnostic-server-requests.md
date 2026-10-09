@@ -16,8 +16,8 @@ server's apps, so the two are separate facts and both count.
 
 **What to add.**
 
-- `POST /api/adjustments`, a signed upload (`UploadAuth`) that only this
-  server's own host account may make -- the account it shares with its apps.
+- `POST /api/adjustments`, taken only on the local listener (item 2), so
+  only an app beside this server can make one.
   Body: `{"app": "chat", "account": "<account ID>", "reputation": "0.004",
   "trust": "0"}`.
   - `app` names the app, as the further part of its record types does
@@ -52,7 +52,39 @@ Then `POST /api/contacts` has nothing left to do for the chat, which stops
 sending contact reports: what it learns goes into its adjustment instead,
 and counting it in both would count it twice.
 
-## 2. A `CLAUDE.md` per app
+## 2. A local listener for the apps beside the server
+
+**Why.** Signed uploads are meant to make outside servers prove who they are,
+not the apps on the same machine. Telling the two apart by address is unsafe:
+behind a reverse proxy on the same machine every outside request arrives
+from 127.0.0.1, and an operator who forgets to list the proxy in
+`trusted_proxies` lets outsiders upload unsigned without anything visibly
+breaking.
+
+**What to add.**
+
+- A second listener that only local apps can reach, and on which uploads need
+  no signature: a Unix socket under `host/<environment>/` (0600 or 0660, so
+  only the server's user or group can connect), or a port bound to 127.0.0.1
+  alone. Configured in `config/server.yml` (say `local.bind`), on by default
+  in development.
+- The server knows which listener a request came in on from the socket
+  itself, never from anything the request says: `Host`, `X-Forwarded-*` and
+  Rack's `SERVER_PORT` (taken from `Host`) are all the client's to choose.
+- On the local listener, `POST /api/records` needs no upload headers, and
+  records are judged against the rules exactly as on the public one.
+  `POST /api/contacts` and `POST /api/adjustments` (item 1) are taken only
+  there, with no signature at all. The public listener refuses both.
+- Everything else is the same on both. The public listener still requires
+  signed uploads, and a reverse proxy forwards only to it, so it cannot open
+  the local one by accident.
+
+**How the chat will use it.** `chain_url` points at the local listener; the
+chat stops signing uploads and contact reports, and `Host#upload_headers`
+goes. Until then it signs every upload as the host account, which works
+because only something that can read `host/<environment>/host.seed` can.
+
+## 3. A `CLAUDE.md` per app
 
 **Why.** Both branches edit the root `CLAUDE.md`, so they conflict at every
 merge.
@@ -65,7 +97,7 @@ instructions are already in `chat/CLAUDE.md`. Avoid wording such as "this
 branch is the agnostic server alone", which is true there and wrong once the
 file is merged into an app's branch.
 
-## 3. The genesis and its development phrases in `shared/`
+## 4. The genesis and its development phrases in `shared/`
 
 **Why.** Every app and the agnostic server should read the same genesis and
 the same development genesis account. Today there are two copies of each:
@@ -102,7 +134,7 @@ phrases and avatar from `shared/genesis/` and deletes its own copies.
 `chat/spec/compatibility_spec.rb` then has nothing left to compare and goes
 too.
 
-## 4. Tell the chat when these change
+## 5. Tell the chat when these change
 
 The chat's specs check these against `server/`
 (`chat/spec/compatibility_spec.rb`, and every spec that starts a real
