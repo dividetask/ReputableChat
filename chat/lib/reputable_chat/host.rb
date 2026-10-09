@@ -1,5 +1,8 @@
 # frozen_string_literal: true
 
+require "base64"
+require "digest"
+require "ed25519"
 require "json"
 require_relative "operator"
 require_relative "cryptography/canonical"
@@ -48,7 +51,9 @@ module ReputableChat
       @signature = record.fetch("signature")
       @hash = record.fetch("hash")
       @declaration = JSON.parse(@payload)
-      @private_key = private_key
+      # Signed in-process: the chat signs every upload as this account, too
+      # often to start Node for each as Operator does.
+      @signing_key = private_key && Ed25519::SigningKey.new(Base64.urlsafe_decode64(pad(private_key)))
     end
 
     def handle = declaration["title"]
@@ -65,12 +70,33 @@ module ReputableChat
       sign({ "purpose" => "reputablechat:contact:v1", "account" => account, "reached" => reached, "ts" => at.to_i })
     end
 
+    # The headers that make a request to the agnostic server a signed upload,
+    # which it requires before it takes records: the account, its working key,
+    # a timestamp and a signature over those with the method, path and the
+    # body's SHA-256. The agnostic server's UploadAuth checks them.
+    UPLOAD = "reputablechat:upload:v1"
+
+    def upload_headers(method, path, body, at: Time.now.to_i)
+      message = [UPLOAD, method.to_s.upcase, path, at.to_i.to_s, Digest::SHA256.hexdigest(body.to_s.b)].join("\n")
+      { "X-Reputablechat-Account" => account, "X-Reputablechat-Key" => pubkey,
+        "X-Reputablechat-Ts" => at.to_i.to_s, "X-Reputablechat-Signature" => sign_bytes(message) }
+    end
+
     # Signs a payload as the host account: [canonical payload, signature].
     def sign(payload)
-      raise Missing, "this host account was loaded without its seed and cannot sign" unless @private_key
-
       canonical = Cryptography::Canonical.dump(payload)
-      [canonical, Operator.sign(@private_key, canonical)]
+      [canonical, sign_bytes(canonical)]
     end
+
+    private
+
+    # Ed25519 over the bytes, as unpadded base64url.
+    def sign_bytes(message)
+      raise Missing, "this host account was loaded without its seed and cannot sign" unless @signing_key
+
+      Base64.urlsafe_encode64(@signing_key.sign(message.b), padding: false)
+    end
+
+    def pad(b64) = b64 + ("=" * ((4 - (b64.length % 4)) % 4))
   end
 end

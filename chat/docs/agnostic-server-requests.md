@@ -4,54 +4,55 @@ Changes the chat is waiting on in `server/`, which is the `Agnostic-Server-V0`
 branch's. Each says what to add and how the chat will use it. Remove an entry
 once it has landed and the chat has caught up with it.
 
-## 1. A contact report that says a server lacked a file
+## 1. Rating adjustments from apps
 
-**Why.** A chat server fetches a file it lacks from the other chat servers
-that announced themselves (`chat/lib/reputable_chat/file_peers.rb`), and tells
-its agnostic server how each attempt went (`POST /api/contacts`). A server
-that answers but does not have the file should lose reputation, though less
-than one that does not answer at all. Today a report can only say `reached`
-true or false, so a missing file has to be reported as one or the other.
+**Why.** An app learns things about other servers that the agnostic server
+cannot see. The chat, for one, learns whether another chat server answers
+and whether it has the files it is asked for. Each app should move the
+rating of the accounts it deals with by its own judgement, computed and
+configured in the app; the agnostic server should only add the moves up. The
+agnostic server's reachability measures the other agnostic server, not that
+server's apps, so the two are separate facts and both count.
 
 **What to add.**
 
-- `POST /api/contacts` accepts an `outcome` field in the signed payload, one
-  of `"reached"`, `"missing"` or `"unreached"`.
-  - `"missing"` means the server answered, as the account that announced it,
-    but did not have what it was asked for.
-  - `reached: true` / `reached: false` stay accepted, meaning `"reached"` /
-    `"unreached"`, so a chat built before the change keeps working.
-  - A report carrying both, or neither, is refused with 400.
-- The contacts table counts misses beside successes and attempts.
-- A configurable value in `config/server.yml` under `ratings:` sets how much a
-  miss counts against a server, as a quoted decimal from `"0"` to `"1"`, for
-  example `missing_penalty: "0.25"`.
-  - `"0"`: a miss counts as reached.
-  - `"1"`: a miss counts as not reached.
-  - Where `reliable?` compares successes with attempts, a miss adds
-    `1 - missing_penalty` to the successes.
-  - A miss never makes a server count as offline. It answered.
-- `bundle exec rake ratings` shows misses beside successes and attempts.
+- `POST /api/adjustments`, a signed upload (`UploadAuth`) that only this
+  server's own host account may make -- the account it shares with its apps.
+  Body: `{"app": "chat", "account": "<account ID>", "reputation": "0.004",
+  "trust": "0"}`.
+  - `app` names the app, as the further part of its record types does
+    (`:chat`).
+  - `reputation` and `trust` are decimals from -1 to 1, spelled as the rules
+    spell one. An app may move both.
+  - One adjustment per app and account; a new one replaces the old.
+    `"0"` and `"0"` clears it. Adjustments do not expire.
+- What the server rates an account:
+  - an operator's rating by hand (`rake rate`) when there is one, which
+    overrides everything, adjustments included;
+  - otherwise its own reachability rating plus every app's adjustment,
+    reputation and trust each summed and clamped to -1..1. With no
+    reachability rating the server's own part is 0.
+- `GET /api/ratings` gives, for each account, the rating it publishes and
+  where it came from: `"reachability"` (the server's own rating, if any),
+  `"adjustments"` (by app) and `"operator"` (if set). An app reads its own
+  adjustment back from there and the server's own rating beside it.
+- `rake ratings` shows the same.
+- Publishing stays as it is: an attestation of the host account carrying
+  only the ratings that changed.
 
-**How the chat will use it.** It reports `"missing"` when a server answers
-404 for a file. It already puts such a server off for less time than one that
-did not answer, by a chat setting of the same name (`file_peers.missing_penalty`
-in `chat/config/server.yml`). Until this lands, the chat reports a missing
-file as not reached, in one place in `chat/config.ru`.
+**How the chat will use it.** Over the last 30 days of its attempts to fetch
+files from a server, a reached fetch scores 1, a missing file
+`1 - missing_penalty` and no answer 0. Its adjustment is
+`step * (2 * average - 1)`, `step` being a chat setting, `"0.01"` by default:
++0.01 for a server that always has what it is asked for, -0.01 for one that
+never answers, nothing with no attempts. Trust it leaves at 0 for now. It
+sends the adjustment rounded to three decimals, and only when it changes.
 
-## 2. One-time contact reports (optional)
+Then `POST /api/contacts` has nothing left to do for the chat, which stops
+sending contact reports: what it learns goes into its adjustment instead,
+and counting it in both would count it twice.
 
-**Why.** A contact report is signed by the host account and checked against
-the server's clock (±600 seconds). Within those ten minutes the same report
-can be sent again and counted again. Reports travel only between an app and
-the agnostic server beside it, usually on one machine, so this matters only
-where that connection can be observed.
-
-**What to add.** An optional `nonce` field in the payload, 16 or more random
-bytes in base64url. The server refuses a nonce it has already seen within the
-window. The chat will start sending one once this is accepted.
-
-## 3. A `CLAUDE.md` per app
+## 2. A `CLAUDE.md` per app
 
 **Why.** Both branches edit the root `CLAUDE.md`, so they conflict at every
 merge.
@@ -64,7 +65,7 @@ instructions are already in `chat/CLAUDE.md`. Avoid wording such as "this
 branch is the agnostic server alone", which is true there and wrong once the
 file is merged into an app's branch.
 
-## 4. The genesis and its development phrases in `shared/`
+## 3. The genesis and its development phrases in `shared/`
 
 **Why.** Every app and the agnostic server should read the same genesis and
 the same development genesis account. Today there are two copies of each:
@@ -101,7 +102,7 @@ phrases and avatar from `shared/genesis/` and deletes its own copies.
 `chat/spec/compatibility_spec.rb` then has nothing left to compare and goes
 too.
 
-## 5. Tell the chat when these change
+## 4. Tell the chat when these change
 
 The chat's specs check these against `server/`
 (`chat/spec/compatibility_spec.rb`, and every spec that starts a real
@@ -112,7 +113,7 @@ agnostic server):
 - the key that phrase derives;
 - `GET /api/host`, `/api/genesis`, `/api/records`, `/api/states`,
   `/api/accounts`, `/api/keys/<pubkey>` and `/api/ratings`, and
-  `POST /api/records` and `/api/contacts`;
+  `POST /api/records` and `/api/contacts`, and the signed-upload headers;
 - not listening, or answering 503, until the server is live.
 
 A change to any of these is a change the chat must follow. Please note it in

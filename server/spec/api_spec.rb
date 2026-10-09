@@ -19,7 +19,10 @@ class ApiSpec < Minitest::Test
 
   def json = JSON.parse(last_response.body)
 
-  def post_json(path, body) = post(path, JSON.generate(body), "CONTENT_TYPE" => "application/json")
+  def post_json(path, body)
+    json = body.is_a?(String) ? body : JSON.generate(body)
+    post(path, json, upload_env(@server.host, path, json))
+  end
 
   def signed_note(body, ack: [@server.host.id])
     @server.host.sign("message", { "ack" => ack, "body" => body, "ts" => Time.now.to_i })
@@ -101,7 +104,7 @@ class ApiSpec < Minitest::Test
   end
 
   def test_a_body_that_is_not_json_is_refused
-    post "/api/records", "{nope", "CONTENT_TYPE" => "application/json"
+    post_json "/api/records", "{nope"
     assert_equal 400, last_response.status
   end
 

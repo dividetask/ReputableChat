@@ -52,6 +52,18 @@ class HostSpec < Minitest::Test
     assert_equal true, result["recorded"]
   end
 
+  # RULE: the agnostic server takes records only in uploads signed by an
+  # account on its chain; the chat's are signed by the host account.
+  def test_an_upload_must_be_signed_and_the_chats_are
+    unsigned = chain
+    error = assert_raises(ReputableChat::ChainClient::Unreachable) { unsigned.submit("{}", "x") }
+    assert_match(/401/, error.message)
+
+    signed = chain
+    signed.signer = ChainServer.host
+    assert_equal "refused", signed.submit("{}", "x").status, "signed, it reaches the rules, which refuse it"
+  end
+
   # RULE: the host account is served beside the genesis, so a new account can
   # start with both as friends before it has fetched anything else.
   def test_the_host_account_is_served

@@ -8,6 +8,8 @@ require "net/http"
 require "securerandom"
 require "socket"
 require "tmpdir"
+require "reputable_chat/chain_client"
+require "reputable_chat/host"
 require "reputable_chat/store/images"
 
 # Two real chat servers sharing files, each beside its own agnostic server.
@@ -38,8 +40,8 @@ class FileSharingSpec < Minitest::Test
     there = side("there")
     # Each chat announced itself to its own agnostic server; syncing would
     # carry each announcement to the other.
-    copy_records(from: there.chain, to: here.chain)
-    copy_records(from: here.chain, to: there.chain)
+    copy_records(from: there, to: here)
+    copy_records(from: here, to: there)
     { here: here, there: there }
   end
 
@@ -82,12 +84,17 @@ class FileSharingSpec < Minitest::Test
     raise "the chat server at #{url} did not start; its log:\n#{File.read(log)}"
   end
 
+  # Uploaded as the receiving side's host account, which the agnostic server
+  # there knows: it takes records only in signed uploads.
   def self.copy_records(from:, to:)
-    page = JSON.parse(Net::HTTP.get(URI("#{from}/api/records?since=0&limit=500")))
-    uri = URI("#{to}/api/records")
-    response = Net::HTTP.post(uri, JSON.generate("records" => page.fetch("records")),
-                              "Content-Type" => "application/json")
-    raise "#{to} refused the records from #{from}: #{response.body}" unless response.is_a?(Net::HTTPSuccess)
+    page = JSON.parse(Net::HTTP.get(URI("#{from.chain}/api/records?since=0&limit=500")))
+    signer = ReputableChat::Host.join(ReputableChat::ChainClient.new(to.chain),
+                                      seed_path: File.join(to.dir, "development", "host.seed"))
+    body = JSON.generate("records" => page.fetch("records"))
+    uri = URI("#{to.chain}/api/records")
+    headers = { "Content-Type" => "application/json" }.merge(signer.upload_headers("POST", uri.path, body))
+    response = Net::HTTP.post(uri, body, headers)
+    raise "#{to.chain} refused the records from #{from.chain}: #{response.body}" unless response.is_a?(Net::HTTPSuccess)
   end
 
   def image(fill)

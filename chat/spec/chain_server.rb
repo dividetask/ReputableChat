@@ -34,6 +34,7 @@ module ChainServer
     app.store = store
     app.genesis = ReputableChat::Genesis.load(path: ReputableChat::Genesis.path("development"))
     app.chain = ReputableChat::ChainClient.new(url)
+    app.chain.signer = host
     app.host = host
     app.files = nil
     app.mirror = ReputableChat::Chain::Mirror.new(store, app.chain, chat_notices: ReputableChat::App::NOTICE_KINDS)

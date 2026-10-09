@@ -86,8 +86,7 @@ class PeersSpec < Minitest::Test
   # --- clocks -------------------------------------------------------------------
 
   def offer(from, to, beat)
-    Rack::MockRequest.new(to.app).post("/api/sync", input: JSON.generate("heartbeat" => beat.to_wire),
-                                                    "CONTENT_TYPE" => "application/json")
+    signed_post(to, "/api/sync", { "heartbeat" => beat.to_wire }, signer: from.host, ts: @now)
   end
 
   def skewed_beat(server, seconds)

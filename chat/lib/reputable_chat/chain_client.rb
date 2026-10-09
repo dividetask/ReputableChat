@@ -25,6 +25,10 @@ module ReputableChat
     end
 
     attr_reader :url
+    # Signs what this client uploads: the host account the chat shares with
+    # its agnostic server (Host#upload_headers), which only accepts records
+    # from an account on its chain. Set once the host account is joined.
+    attr_accessor :signer
 
     def initialize(url, http: nil)
       @url = url.to_s.chomp("/")
@@ -95,12 +99,14 @@ module ReputableChat
       raise Unreachable, "the agnostic server at #{url} answered #{status} to #{path}: #{parsed['error']}"
     end
 
+    # A POST is signed when there is a signer, over the exact bytes sent.
     def over_the_network(method, path, body)
       uri = URI("#{url}#{path}")
       request = method == :get ? Net::HTTP::Get.new(uri) : Net::HTTP::Post.new(uri)
       if body
         request["Content-Type"] = "application/json"
         request.body = JSON.generate(body)
+        @signer&.upload_headers("POST", uri.path, request.body)&.each { |name, value| request[name] = value }
       end
       response = Net::HTTP.start(uri.host, uri.port, use_ssl: uri.scheme == "https",
                                                      open_timeout: 5, read_timeout: 30) { |h| h.request(request) }
