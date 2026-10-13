@@ -17,7 +17,7 @@ module Agnostic
       # beside this server sign as the same account.
       "host_dir" => nil,
       "database_url" => nil,
-      "genesis" => "config/genesis/%{environment}.json",
+      "genesis" => "../shared/genesis/%{environment}.json",
       "host" => { "handle" => "Agnostic server", "bio" => "", "url" => nil, "seed_words" => 12 },
       "heartbeat" => { "interval_seconds" => 600 },
       "records" => { "max_future_seconds" => 600 },

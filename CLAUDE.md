@@ -64,6 +64,10 @@ inventing a word for something that already has one.
 - **`shared/bip39-english.txt`** — canonical BIP39 English wordlist, the one
   copy every app reads, sha256
   `2f5eed53a4727b4bf8880d8f3f199efc90e58503646d9ff8eff3a2ed3b24dbda`.
+- **The genesis** is `shared/genesis/<environment>.json`, the one copy the
+  server and every app read; regenerating it orphans the whole chain. The
+  development genesis account's phrases and avatar beside it are public on
+  purpose; every other seed is gitignored.
 - **The host account** in `host/<environment>/` is one account for the
   server and every app beside it. Its seeds are 0600 and never printed or
   committed.

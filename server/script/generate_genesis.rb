@@ -13,11 +13,13 @@
 # base64url instead of a phrase.
 #
 # Refuses to overwrite: a new genesis orphans every record that acknowledged
-# the old one, which is the whole chain.
+# the old one, which is the whole chain. Writes to shared/genesis/ at the
+# root of the repository, which the server and every app read.
 
 $LOAD_PATH.unshift File.expand_path("../lib", __dir__)
 
 require "ed25519"
+require "fileutils"
 require "json"
 require "optparse"
 require "agnostic/host_account"
@@ -27,7 +29,7 @@ require "agnostic/seed"
 
 root = File.expand_path("..", __dir__)
 options = {
-  out: File.join(root, "config/genesis/#{ENV.fetch('RACK_ENV', 'development')}.json"),
+  out: File.expand_path("../shared/genesis/#{ENV.fetch('RACK_ENV', 'development')}.json", root),
   handle: "Tim", bio: "", ts: Time.now.to_i
 }
 OptionParser.new do |o|
@@ -62,5 +64,6 @@ if options[:master_seed_file]
 end
 
 record = Agnostic::HostAccount.sign(key, fields)
+FileUtils.mkdir_p(File.dirname(options[:out]))
 File.write(options[:out], "#{JSON.pretty_generate(record.to_wire)}\n")
 puts "genesis #{record.digest} written to #{options[:out]}"

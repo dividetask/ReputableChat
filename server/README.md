@@ -47,17 +47,23 @@ ancestors, how far ahead of the clock a record may be, request limits.
 
 ## The genesis
 
-`config/genesis/development.json` is the developer's first identity
-declaration in the rules' own format, signed with the development genesis key
-(public on purpose: its seed phrase is `spec/fixtures/development-genesis.seed`). Its `rules` field is
+`../shared/genesis/development.json` is the developer's first identity
+declaration in the rules' own format, signed with the development genesis key.
+It lives in `shared/` at the root, since the server and every app beside it
+must read the same one: two copies of a genesis are two chains the moment
+they differ. The development genesis account is public on purpose: its
+working and master phrases are `development.seed` and
+`development.master.seed` beside it, and its avatar `development.webp`. Its `rules` field is
 `docs/project/rules/v0.001.md` exactly, less its trailing newline, and a spec
 fails if the two drift.
 
 Production has no genesis yet, and a production server refuses to boot until
-one is placed at `config/genesis/production.json`. It also refuses one signed
+one is placed at `../shared/genesis/production.json` (or wherever `GENESIS`
+points). It also refuses one signed
 by the development key. `script/generate_genesis.rb` signs one from the
 genesis account's seed phrase (`--seed-file`, and `--master-seed-file` for its
-master key) and refuses to overwrite an existing genesis.
+master key), writes it to `shared/genesis/`, and refuses to overwrite an
+existing genesis.
 
 ## The host account
 

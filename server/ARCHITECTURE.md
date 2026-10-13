@@ -18,13 +18,14 @@ Every record on the chain is defined in [rules/v0.001.md](../docs/project/rules/
 
 ```
 docs/project/rules/       the rules, one file per version, and signed examples
-shared/                   files every app on a server reads: the BIP39 wordlist
+shared/                   files every app on a server reads: the BIP39 wordlist,
+  genesis/<env>.json      the genesis in the rules' own format, carrying the rules file,
+  genesis/development.*   and the development genesis account's public phrases and avatar
 host/                     (gitignored) the host account the server and its apps share
 coordination/             requests and todos passed between the server and the apps
 
 server/                   the agnostic server -- see server/README.md
   config/server.yml       heartbeat interval, peers, ratings, limits (env overrides)
-  config/genesis/<env>.json the genesis in the rules' own format, carrying the rules file
   lib/agnostic/
     rules.rb              the rules, enforced: what a record may hold, and what its history must
     view.rb               the chain as one record sees it: keys, disputes, adjudicators, currency

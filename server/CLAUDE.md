@@ -52,13 +52,14 @@ in a request to each app in `../coordination/requests/<app>/`:
 - **Record hashes.** `lib/agnostic/record.rb` must be what the rules say:
   SHA-256 over the payload, a newline and the signature, with nothing in
   front. If it drifts, every `ack` points at a record no one else can find.
-- **The genesis record.** `config/genesis/<environment>.json` is the bottom
+- **The genesis record.** `../shared/genesis/<environment>.json` is the bottom
   of the chain. Regenerating one orphans every record that acknowledged the
   old one, which is the whole chain. `script/generate_genesis.rb` refuses to
   overwrite it. A production server **refuses to boot on the development
   genesis**, compared by key, since the realistic mistake is copying the
   record into place. The development genesis account's phrase is public on
-  purpose (`spec/fixtures/development-genesis.seed`); every other seed is
+  purpose (`../shared/genesis/development.seed` and `development.master.seed`,
+  un-ignored by name in `.gitignore`); every other seed is
   gitignored, 0600, and never printed.
 - **The rules and their examples.** `../docs/project/rules/v0.001.md` is the
   rules in prose and `../docs/project/rules/v0.001-examples.md` is the same
@@ -75,7 +76,7 @@ in a request to each app in `../coordination/requests/<app>/`:
   signature still verifies. Where the server reads the rules one way out of
   several, `README.md` says so under **Reading the rules**.
 - **The genesis carries the rules file.** The rules field of
-  `config/genesis/development.json` is `../docs/project/rules/v0.001.md` less
+  `../shared/genesis/development.json` is `../docs/project/rules/v0.001.md` less
   its trailing newline, and `spec/server_spec.rb` fails if they differ. That
   is deliberate: a published rules file is never edited. Before launch, the
   fix is a new development genesis, which orphans every development record
