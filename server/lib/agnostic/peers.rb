@@ -310,7 +310,8 @@ module Agnostic
         failed(url, "split check failed: #{e.message}")
       end
 
-      view = View.new(store: @store, histories: Histories.new(@store), hashes: @store.closure(latest.uniq),
+      histories = Histories.new(@store)
+      view = View.new(store: @store, histories: histories, hashes: histories.from(latest.uniq),
                       genesis: @ingest.rules.genesis.digest)
       together = []
       @ingest.rules.split(nil, view, together)

@@ -182,8 +182,10 @@ records taken together hold a record and the heartbeat that orphaned it
 split, until a side is picked -- it has published nothing, not even its
 account's declaration, and it has not opened its port: catching up happens
 in `config.ru`, which Puma loads before it binds, so nobody can reach a
-server that is not ready. (In Puma's cluster mode that holds only with
-`preload_app!`.) The API also answers 503 if it is ever reached early. The check runs on every start, so a server that was
+server that is not ready. The server runs in Puma's single mode only, and
+refuses to start with workers (`-w`, `workers`, `WEB_CONCURRENCY`): it
+catches up and opens the local listener in one process, which workers would
+not inherit. The API also answers 503 if it is ever reached early. The check runs on every start, so a server that was
 offline through a split wakes up stopped rather than settling it alone.
 
 **Picking a side.** `bundle exec rake status` lists what split, and for each
@@ -451,11 +453,18 @@ decision someone may want to make differently.
 
 ## Known limits
 
-- **History is recomputed for each check** with a recursive query over the
-  acks, so checking gets slower as the chain grows. Fine at this size; it will
-  want caching before it is not.
-- **Anyone may post**, with no rate limit beyond the size of a request and the
-  bound on held records. Storage grows without a retention policy.
-- **Peers are a fixed list.** There is no discovery.
-- **Files are not served.** Records name files by hash; something has to hold
-  the bytes, and that is not this version.
+- **A forked publisher costs a full walk.** A record's history is answered
+  from the walk back to the nearest heartbeats and the generations behind
+  them, so a check costs what is new since the last heartbeats, not the whole
+  chain (`lib/agnostic/history.rb`). Behind a heartbeat of an account whose
+  heartbeats have forked -- two sharing a beat index -- the history is listed
+  in full instead, as it was before, and checks slow with the chain again.
+- **Disputes read all of an account's records.** Working out what disputes
+  an account lists everything it has published, which grows with the
+  account; it is read for quorums, endorsed spends and states, not on every
+  check.
+- **Any account may join.** `POST /api/introduce` takes any valid first
+  identity declaration, limited only per caller's address, and storage grows
+  without a retention policy. Who may post what is for the apps to decide.
+- **Files are not served.** Records name files by hash; the apps beside the
+  server hold the bytes.

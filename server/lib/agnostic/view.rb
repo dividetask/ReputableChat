@@ -1,21 +1,29 @@
 # frozen_string_literal: true
 
 require "set"
+require_relative "history"
 
 module Agnostic
   # Histories, memoized for the length of one check. A record's history never
   # changes once it is signed, so a cached one is never stale; the cache is
-  # dropped with the check only to bound memory.
+  # dropped with the check only to bound memory, and with it what it read of
+  # the heartbeats' forks, which only a new heartbeat changes.
   class Histories
     def initialize(store)
       @store = store
       @cache = {}
+      @forks = {}
     end
 
     attr_reader :store
 
     # The history of a stored record: everything its acks reach, itself excluded.
-    def of(hash) = @cache[hash] ||= store.closure([hash]).tap { |set| set.delete(hash) }
+    def of(hash) = @cache[hash] ||= History.new(self, store.acks_of(hash))
+
+    # The history of a record about to be checked, from its acks.
+    def from(acks) = History.new(self, acks)
+
+    def first_fork(account) = @forks.fetch(account) { @forks[account] = store.first_fork(account) }
 
     def ancestor?(a, b) = of(b).include?(a)
 
@@ -36,7 +44,7 @@ module Agnostic
     end
 
     def self.of(record, store:, histories:, genesis:)
-      new(store: store, histories: histories, hashes: store.closure(record.ack), genesis: genesis)
+      new(store: store, histories: histories, hashes: histories.from(record.ack), genesis: genesis)
     end
 
     # The view a stored record had when it was signed.
@@ -48,19 +56,34 @@ module Agnostic
 
     def records_of(account, kind: nil, notice_kind: nil)
       memo(:records_of, account, kind, notice_kind) do
-        store.by_account(account, kind: kind, notice_kind: notice_kind).select { |r| include?(r.digest) }
+        within(store.by_account(account, kind: kind, notice_kind: notice_kind))
       end
     end
 
     def about(subject, notice_kind)
       memo(:about, subject, notice_kind) do
-        store.by_subject(subject, notice_kind: notice_kind).select { |r| include?(r.digest) }
+        within(store.by_subject(subject, notice_kind: notice_kind))
       end
     end
 
-    def endorsers(hash) = store.endorsers(hash).select { |r| include?(r.digest) }
+    def endorsers(hash) = within(store.endorsers(hash))
 
-    def spenders(output, account) = store.spenders(output, account).select { |r| include?(r.digest) }
+    def spenders(output, account) = within(store.spenders(output, account))
+
+    # The highest beat index of the account's heartbeats in this view, or nil.
+    def newest_beat(account)
+      return hashes.newest_beat(account) if hashes.respond_to?(:newest_beat)
+
+      records_of(account, kind: "heartbeat").map(&:beat_index).max
+    end
+
+    # Those of these records in this view, in their order.
+    def within(records)
+      return records.select { |r| include?(r.digest) } unless hashes.respond_to?(:among)
+
+      held = hashes.among(records.map(&:digest))
+      records.select { |r| held.include?(r.digest) }
+    end
 
     def keys(account) = memo(:keys, account) { KeyState.new(self, account) }
 

@@ -201,4 +201,17 @@ class HistoryRulesSpec < Minitest::Test
     accept(joined_in_time)
     refuse(post("tim", tim, ack: [stale.digest, beats[256].digest], ts: @now + 1), /orphaned/)
   end
+
+  # The same, where the publisher's heartbeats forked early: they are no
+  # longer one line, and the rule still holds.
+  def test_no_history_holds_an_orphaned_record_after_its_publishers_heartbeats_forked
+    beats = [accept(beat(ack: [@carol], ts: @now))]
+    stale = accept(post("carol", @carol, ack: [beats.first.digest], body: "left behind"))
+    accept(beat(ack: [beats.first.digest], ts: @now + 500)) # a twin of the next one
+    257.times { beats << accept(beat(ack: [beats.last.digest], ts: @now += 480)) }
+    refute_equal Float::INFINITY, @store.first_fork(@bob)
+
+    accept(post("tim", tim, ack: [stale.digest, beats[255].digest]))
+    refuse(post("tim", tim, ack: [stale.digest, beats[256].digest], ts: @now + 1), /orphaned/)
+  end
 end

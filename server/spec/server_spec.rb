@@ -39,6 +39,13 @@ class ServerSpec < Minitest::Test
     assert_match(/nowhere.json/, error.message)
   end
 
+  # Workers would not inherit the local listener, whose socket would then
+  # answer nobody: the server refuses to boot rather than half work.
+  def test_the_server_refuses_puma_workers
+    [nil, 0, "0"].each { |w| Agnostic::Server.single_mode!(w) }
+    [2, "4", :auto].each { |w| assert_raises(Agnostic::Server::BootError) { Agnostic::Server.single_mode!(w) } }
+  end
+
   def test_the_host_account_is_made_once_from_two_phrases_kept_private
     server = boot("alpha")
     dir = server.settings.data_dir

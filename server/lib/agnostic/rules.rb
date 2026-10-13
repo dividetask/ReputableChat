@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "bigdecimal"
+require "set"
 require_relative "canonical"
 require_relative "formats"
 require_relative "keys"
@@ -494,9 +495,8 @@ module Agnostic
 
     # Section 10.
     def heartbeat(record, view, problems)
-      beats = view.records_of(record.account, kind: "heartbeat")
-      latest = beats.map(&:beat_index).max
-      previous = beats.select { |b| b.beat_index == latest }
+      latest = view.newest_beat(record.account)
+      previous = latest ? view.within(store.beats_at(record.account, latest)) : []
       previous.each do |prev|
         if prev.version == record.version && !record.ack.include?(prev.digest)
           problems.push("a heartbeat directly acks its author's previous heartbeat")
@@ -512,23 +512,67 @@ module Agnostic
     # Section 10, split: no history holds both a record and a heartbeat that
     # orphaned it.
     def split(_record, view, problems)
-      authors = store.heartbeat_authors
-      authors.each do |author|
-        beats = view.records_of(author, kind: "heartbeat")
-        next if beats.empty?
+      store.heartbeat_authors.each do |author|
+        newest = view.hashes.newest_beat(author)
+        next unless newest && newest > SPLIT_BEATS
 
-        top = beats.max_by(&:beat_index)
-        next if top.beat_index <= SPLIT_BEATS
+        if newest < view.histories.first_fork(author)
+          orphaned = orphaned_since(view, author, newest)
+          next unless orphaned
 
-        covered = view.histories.of(top.digest)
-        (view.hashes - covered - [top.digest]).each do |hash|
-          held = view.histories.of(hash)
-          newest = beats.select { |b| held.include?(b.digest) }.map(&:beat_index).max || 1
-          orphaner = beats.find { |b| b.beat_index == newest + SPLIT_BEATS }
-          next unless orphaner && !view.histories.of(orphaner.digest).include?(hash)
-
-          return problems.push("the history holds #{hash} and #{orphaner.digest}, a heartbeat that orphaned it")
+          return problems.push("the history holds #{orphaned[0]} and #{orphaned[1]}, a heartbeat that orphaned it")
         end
+        split_in_full(view, author, problems)
+        return unless problems.empty?
+      end
+    end
+
+    # The author's heartbeats are one line up to the newest in this history,
+    # top, so a record outside top's history is orphaned exactly when it does
+    # not hold the heartbeat 255 before top: the one 256 past it is then in
+    # the history and does not hold it. Only records outside top's history
+    # are looked at, walking back from the acks, and the walk stops at any
+    # record that holds top itself: that record was checked against this
+    # same top when it was stored, so nothing behind it is orphaned by it.
+    # Returns [orphaned record, orphaning heartbeat], or nil.
+    def orphaned_since(view, author, newest)
+      histories = view.histories
+      top = store.beat_at(author, newest)
+      bar = store.beat_at(author, newest - (SPLIT_BEATS - 1))
+      covered = histories.of(top)
+      seen = Set.new([top])
+      frontier = view.hashes.seeds.reject { |h| covered.include?(h) }
+      until frontier.empty?
+        nxt = []
+        frontier.each do |hash|
+          next unless seen.add?(hash)
+
+          held = histories.of(hash)
+          next if held.include?(top)
+
+          unless held.include?(bar)
+            beat = held.newest_beat(author) || 1
+            return [hash, store.beat_at(author, beat + SPLIT_BEATS)]
+          end
+          nxt.concat(store.acks_of(hash))
+        end
+        frontier = nxt.uniq.reject { |h| seen.include?(h) || covered.include?(h) }
+      end
+    end
+
+    # The same rule, listing the history in full: for an author whose
+    # heartbeats have forked, where one line of them cannot be assumed.
+    def split_in_full(view, author, problems)
+      beats = view.records_of(author, kind: "heartbeat")
+      top = beats.max_by(&:beat_index)
+      covered = view.histories.of(top.digest).to_set
+      (view.hashes.to_set - covered - [top.digest]).each do |hash|
+        held = view.histories.of(hash)
+        newest = beats.select { |b| held.include?(b.digest) }.map(&:beat_index).max || 1
+        orphaner = beats.find { |b| b.beat_index == newest + SPLIT_BEATS }
+        next unless orphaner && !view.histories.of(orphaner.digest).include?(hash)
+
+        return problems.push("the history holds #{hash} and #{orphaner.digest}, a heartbeat that orphaned it")
       end
     end
   end
