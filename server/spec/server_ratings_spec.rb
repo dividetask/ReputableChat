@@ -257,6 +257,43 @@ class RatedOutSpec < Minitest::Test
     assert_equal 200, offer
   end
 
+  def nudge(app, reputation)
+    @alpha.store.nudge_rating(app, @beta.host.id, reputation: reputation, trust: "0", at: @now)
+    @alpha.ratings.publish
+  end
+
+  def ignored? = @alpha.store.ignored?(@beta.host.id, at: @now)
+
+  # RULE (yours): an app may nudge a server to -1, and it is ignored like any
+  # server rated -1; but the app may take its nudge back, or another app
+  # nudge it up, and once the rating is above -1 it is no longer ignored,
+  # with no administrator needed.
+  def test_a_server_nudged_to_minus_one_is_ignored_until_the_app_takes_it_back
+    nudge("chat", "-1")
+    assert ignored?
+    assert_equal 403, offer
+
+    nudge("chat", "0")
+    refute ignored?
+    assert_equal 200, offer
+  end
+
+  def test_a_server_nudged_to_minus_one_is_let_back_in_when_another_app_nudges_it_up
+    nudge("chat", "-1")
+    assert ignored?
+
+    nudge("forum", "0.1")
+    assert_equal "-0.9", @alpha.store.published_rating(@beta.host.id)[:reputation]
+    refute ignored?
+  end
+
+  # A rating above -1 lifts only the ignore that a -1 rating put there.
+  def test_a_rating_above_minus_one_does_not_lift_an_ignore_for_the_clock
+    @alpha.store.ignore(@beta.host.id, reason: "its clock is off", at: @now, until_at: @now + DAY)
+    nudge("chat", "0.1")
+    assert ignored?
+  end
+
   def test_a_server_that_went_offline_is_not_ignored
     @alpha.peers.pull_all
     network.apps.delete("http://beta")

@@ -27,15 +27,20 @@ module Agnostic
   # rate); that overrides everything above, nudges included, until it is
   # removed (rake unrate), and is published the same way.
   #
-  # An account this server publishes a rating of -1 for, either way, is
-  # ignored from then on -- no contact either way -- until an administrator
-  # forgives it (rake forgive). Every other server can come back by itself.
+  # An account this server publishes a rating of -1 for, however it came to
+  # -1, is ignored -- no contact either way -- for as long as that is what it
+  # publishes: until an administrator forgives it (rake forgive), or a later
+  # rating above -1 is published, as when an app takes its nudge back or
+  # another app nudges it up. A server ignored for its clock stays ignored
+  # for its own reasons. Every other server can come back by itself.
   #
   # It is published as an attestation of the host account, holding only the
   # ratings that changed since the last one -- a later attestation amends the
   # earlier ones rather than replacing them -- so one is rare: a server's
   # rating moves at most a few times in its life.
   class ServerRatings
+    RATED_OUT = "this server rated it -1"
+
     def initialize(store:, ingest:, host:, settings:, clock: -> { Time.now.to_i })
       @store = store
       @ingest = ingest
@@ -104,9 +109,11 @@ module Agnostic
       if result.status == :accepted
         scores.each do |account, score|
           @store.save_published_rating(account, reputation: score["reputation"], trust: score["trust"], at: @clock.call)
-          next unless score["reputation"] == "-1"
-
-          @store.ignore(account, reason: "this server rated it -1", at: @clock.call, until_at: Store::FOREVER)
+          if score["reputation"] == "-1"
+            @store.ignore(account, reason: RATED_OUT, at: @clock.call, until_at: Store::FOREVER)
+          else
+            @store.forgive(account, reason: RATED_OUT)
+          end
         end
       end
       result

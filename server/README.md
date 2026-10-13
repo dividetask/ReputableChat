@@ -257,9 +257,12 @@ address its account declared. Every value is in `ratings:` in
 | the same, a year after | `established.rating`, 0.02 |
 | anything else | nothing published |
 
-A server this one rates -1 -- by reachability, or by an operator's hand -- is
-ignored from then on: its syncs are refused and it is not contacted, until
-an administrator brings it back with `bundle exec rake "forgive[<account>]"`.
+A server this one rates -1 -- by reachability, by the apps' nudges, or by an
+operator's hand -- is ignored for as long as that is what it publishes: its
+syncs are refused and it is not contacted. An administrator can bring it
+back with `bundle exec rake "forgive[<account>]"`; so can a later rating
+above -1, as when the app that nudged it down takes its nudge back or another
+app nudges it up. A server ignored for its clock stays ignored for that.
 Every other server, one that went offline included, comes back by itself.
 An account a server has published nothing about counts as 0. Its rating by
 reachability carries a trust of 0, always: that a server reliably produces
@@ -291,7 +294,8 @@ listener](#the-local-listener), the only place one is taken:
 What is published is the server's rating by reachability -- 0 where it has
 none -- plus every app's nudge, reputation and trust each summed and
 held between -1 and 1. Reaching -1 this way ignores the server as any -1
-does. The answer is the account's rating as it now stands.
+does, until the nudges raise it again or an administrator forgives it. The
+answer is the account's rating as it now stands.
 
 ### By hand
 

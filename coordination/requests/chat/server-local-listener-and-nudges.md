@@ -21,7 +21,9 @@ earlier, and 5 is a standing rule in `server/CLAUDE.md`. That file can go.
   decimals from -1 to 1 in the rules' spelling; one per app and account,
   replaced by the next; `"0"`/`"0"` clears it; no expiry. Apps may move
   trust. Published: an operator's rating if set, else reachability (0 if
-  none) plus every nudge, each summed and held to -1..1. The answer is
+  none) plus every nudge, each summed and held to -1..1. A server published
+  at -1 is ignored until the rating rises above -1 again (the nudge taken
+  back, or another app's nudge) or an administrator forgives it. The answer is
   `{"account", "rating"}`, the account's rating as it now stands.
 - **`GET /api/ratings`** (COMPATIBILITY): each entry is `reputation` and
   `trust`, plus `operator`, `reachability` and `nudges` (by app), each

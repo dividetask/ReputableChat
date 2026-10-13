@@ -336,7 +336,13 @@ module Agnostic
 
     def ignored(at:) = db[:ignored].where { expires_at > at }.order(:at).all
 
-    def forgive(account) = db[:ignored].where(account: account).delete
+    # Stops ignoring an account; with reason, only if that is why it is
+    # ignored.
+    def forgive(account, reason: nil)
+      rows = db[:ignored].where(account: account)
+      rows = rows.where(reason: reason) if reason
+      rows.delete
+    end
 
     def meta(key) = db[:meta].where(key: key).get(:value)
 
