@@ -42,7 +42,10 @@ module Agnostic
         rows(:endorsements, record, record.endorse) { |h| { record: record.digest, endorsed: h } }
         spent = Array(record.transfer&.fetch("in", nil))
         rows(:spends, record, spent) { |h| { record: record.digest, output: h, account: record.account } }
-        assign_generations(record) if record.heartbeat?
+        if record.heartbeat?
+          note_fork(record)
+          assign_generations(record)
+        end
       end
       record
     end
@@ -83,6 +86,30 @@ module Agnostic
         SELECT hash FROM h
       SQL
       db.fetch(sql).map { |row| row[:hash] }.to_set
+    end
+
+    def acks_of(hash) = db[:acks].where(child: hash).select_map(:parent)
+
+    # --- heartbeats, by account and beat index -----------------------------------
+
+    # The lowest beat index two of the account's heartbeats share, or
+    # infinity: below it the account's heartbeats are one line, each holding
+    # the one before.
+    def first_fork(account) = db[:beat_forks].where(account: account).get(:beat_index) || Float::INFINITY
+
+    def latest_beat_index(account) = db[:records].where(account: account, kind: "heartbeat").max(:beat_index) || 0
+
+    # The account's heartbeat at this index, below its first fork.
+    def beat_at(account, index) = db[:records].where(account: account, kind: "heartbeat", beat_index: index).get(:hash)
+
+    # The account's heartbeats at this index: one, unless its line forked there.
+    def beats_at(account, index)
+      db[:records].where(account: account, kind: "heartbeat", beat_index: index).order(:seq).all.map { |row| hydrate(row) }
+    end
+
+    # [hash, beat index] of the account's heartbeats from this index on.
+    def beats_from(account, index)
+      db[:records].where(account: account, kind: "heartbeat").where { beat_index >= index }.select_map(%i[hash beat_index])
     end
 
     # Every record whose history holds this one.
@@ -178,6 +205,13 @@ module Agnostic
         { account: account, record: h, generation: beat.beat_index, position: i }
       end
       db[:generations].insert_ignore.multi_insert(rows)
+    end
+
+    def note_fork(beat)
+      shared = db[:records].where(account: beat.account, kind: "heartbeat", beat_index: beat.beat_index).count > 1
+      return unless shared && beat.beat_index < first_fork(beat.account)
+
+      db[:beat_forks].insert_conflict(:replace).insert(account: beat.account, beat_index: beat.beat_index)
     end
 
     def generations_assigned?(beat) = !db[:generations].where(account: beat.account, record: beat.digest).empty?
@@ -386,6 +420,7 @@ module Agnostic
         index :account
         index :subject
         index %i[kind account]
+        index %i[account beat_index]
       end
       db.create_table?(:acks) do
         String :child, null: false
@@ -431,6 +466,19 @@ module Agnostic
         Integer :position, null: false
         primary_key %i[account record]
         index %i[account generation position]
+        index :record
+      end
+      db.alter_table(:generations) { add_index :record } unless db.indexes(:generations).values.any? { |i| i[:columns] == [:record] }
+      db.alter_table(:records) { add_index %i[account beat_index] } unless
+        db.indexes(:records).values.any? { |i| i[:columns] == %i[account beat_index] }
+      unless db.table_exists?(:beat_forks)
+        db.create_table(:beat_forks) do
+          String :account, primary_key: true
+          Integer :beat_index, null: false
+        end
+        db[:records].where(kind: "heartbeat").group(:account, :beat_index).having { count.function.* > 1 }
+                    .select_map(%i[account beat_index]).group_by(&:first)
+                    .each { |account, rows| db[:beat_forks].insert(account: account, beat_index: rows.map(&:last).min) }
       end
       {
         host: [String], source: [String, { null: false, default: "settings" }],

@@ -29,6 +29,7 @@ server/                   the agnostic server -- see server/README.md
   lib/agnostic/
     rules.rb              the rules, enforced: what a record may hold, and what its history must
     view.rb               the chain as one record sees it: keys, disputes, adjudicators, currency
+    history.rb            a record's history, from the nearest heartbeats and the generations behind them
     canonical.rb, record.rb, keys.rb, formats.rb   the kinds of value section 1 defines
     store.rb              records, their acks and indexes, generations, held records, peers
     ingest.rb             the one way in: accept, hold for missing ancestors, or refuse

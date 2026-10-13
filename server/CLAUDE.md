@@ -94,6 +94,13 @@ in a request to each app in `../coordination/requests/<app>/`:
   `spec/seed_spec.rb` holds it to the development genesis key. Change the
   domain or a parameter and the same phrase is a different account,
   stranding every existing one.
+- **Histories.** `lib/agnostic/history.rb` answers "is this in that
+  record's history" from the heartbeats' generations rather than by listing
+  the history, which holds only while an account's heartbeats are one line;
+  past a fork it lists the history in full. Get it wrong and the rules are
+  judged against the wrong history, and every signature still verifies.
+  `spec/history_spec.rb` holds every stored record's history to the history
+  listed in full.
 - **The local listener.** `lib/agnostic/local_listener.rb` tells a request on
   the apps' socket by the socket it arrived on, never by anything the request
   says. Trust a header or an address there and anyone behind a same-machine

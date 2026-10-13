@@ -453,9 +453,16 @@ decision someone may want to make differently.
 
 ## Known limits
 
-- **History is recomputed for each check** with a recursive query over the
-  acks, so checking gets slower as the chain grows. Fine at this size; it will
-  want caching before it is not.
+- **A forked publisher costs a full walk.** A record's history is answered
+  from the walk back to the nearest heartbeats and the generations behind
+  them, so a check costs what is new since the last heartbeats, not the whole
+  chain (`lib/agnostic/history.rb`). Behind a heartbeat of an account whose
+  heartbeats have forked -- two sharing a beat index -- the history is listed
+  in full instead, as it was before, and checks slow with the chain again.
+- **Disputes read all of an account's records.** Working out what disputes
+  an account lists everything it has published, which grows with the
+  account; it is read for quorums, endorsed spends and states, not on every
+  check.
 - **Any account may join.** `POST /api/introduce` takes any valid first
   identity declaration, limited only per caller's address, and storage grows
   without a retention policy. Who may post what is for the apps to decide.
