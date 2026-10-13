@@ -454,8 +454,8 @@ decision someone may want to make differently.
 - **History is recomputed for each check** with a recursive query over the
   acks, so checking gets slower as the chain grows. Fine at this size; it will
   want caching before it is not.
-- **Anyone may post**, with no rate limit beyond the size of a request and the
-  bound on held records. Storage grows without a retention policy.
-- **Peers are a fixed list.** There is no discovery.
-- **Files are not served.** Records name files by hash; something has to hold
-  the bytes, and that is not this version.
+- **Any account may join.** `POST /api/introduce` takes any valid first
+  identity declaration, limited only per caller's address, and storage grows
+  without a retention policy. Who may post what is for the apps to decide.
+- **Files are not served.** Records name files by hash; the apps beside the
+  server hold the bytes.
