@@ -182,8 +182,10 @@ records taken together hold a record and the heartbeat that orphaned it
 split, until a side is picked -- it has published nothing, not even its
 account's declaration, and it has not opened its port: catching up happens
 in `config.ru`, which Puma loads before it binds, so nobody can reach a
-server that is not ready. (In Puma's cluster mode that holds only with
-`preload_app!`.) The API also answers 503 if it is ever reached early. The check runs on every start, so a server that was
+server that is not ready. The server runs in Puma's single mode only, and
+refuses to start with workers (`-w`, `workers`, `WEB_CONCURRENCY`): it
+catches up and opens the local listener in one process, which workers would
+not inherit. The API also answers 503 if it is ever reached early. The check runs on every start, so a server that was
 offline through a split wakes up stopped rather than settling it alone.
 
 **Picking a side.** `bundle exec rake status` lists what split, and for each

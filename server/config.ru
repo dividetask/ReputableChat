@@ -4,10 +4,12 @@ $LOAD_PATH.unshift File.expand_path("lib", __dir__)
 
 require "agnostic/server"
 
+Agnostic::Server.single_mode!(Puma.cli_config&.options&.[](:workers)) if defined?(Puma.cli_config)
+
 # Catching up -- and, after a chain split, waiting for an administrator to
 # pick a side -- happens here, before Puma binds its port: Puma loads this
 # file first and listens after. A server not yet live is not listening, so
-# nobody can reach it. (In cluster mode this holds only with preload_app!.)
+# nobody can reach it. Single mode only: single_mode! refuses Puma workers.
 server = Agnostic::Server.new.prepare!
 # The socket the apps beside this server use: unsigned uploads, nudges.
 server.listen_locally

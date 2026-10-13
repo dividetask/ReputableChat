@@ -34,6 +34,19 @@ module Agnostic
 
     class BootError < StandardError; end
 
+    # Puma's cluster mode runs the app in several worker processes. The
+    # server catches up and opens the local listener while loading, in one
+    # process; workers would not inherit the listener's thread, so its socket
+    # would answer nobody. Refused at boot rather than left half working.
+    # workers: Puma's setting (-w, `workers`, WEB_CONCURRENCY).
+    def self.single_mode!(workers)
+      count = workers == :auto ? 2 : Integer(workers || 0, exception: false).to_i
+      return if count.zero?
+
+      raise BootError, "Puma is set to run #{workers} workers; this server runs in single mode only: " \
+                       "drop -w, `workers` and WEB_CONCURRENCY"
+    end
+
     attr_reader :settings, :store, :rules, :ingest, :host, :heartbeat, :peers, :genesis, :ratings, :state
 
     def initialize(settings: Settings.load, clock: -> { Time.now.to_i }, http: nil)
