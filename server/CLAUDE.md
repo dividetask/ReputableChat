@@ -39,7 +39,8 @@ in a request to each app in `../coordination/requests/<app>/`:
 - the development genesis record, its phrases, and the key they derive;
 - `GET /api/host`, `/api/genesis`, `/api/records`, `/api/states`,
   `/api/accounts`, `/api/keys/<pubkey>` and `/api/ratings`;
-  `POST /api/records` and `/api/contacts`; the signed-upload headers;
+  `POST /api/records`, `/api/contacts` and `/api/adjustments`; the
+  signed-upload headers; the local listener's socket and what it takes;
 - not listening, or answering 503, until the server is live.
 
 ## Things that break silently
@@ -93,6 +94,11 @@ in a request to each app in `../coordination/requests/<app>/`:
   `spec/seed_spec.rb` holds it to the development genesis key. Change the
   domain or a parameter and the same phrase is a different account,
   stranding every existing one.
+- **The local listener.** `lib/agnostic/local_listener.rb` tells a request on
+  the apps' socket by the socket it arrived on, never by anything the request
+  says. Trust a header or an address there and anyone behind a same-machine
+  reverse proxy uploads unsigned and moves ratings, and nothing visibly
+  breaks. `spec/local_listener_spec.rb` holds it to that.
 - **Signed uploads.** `lib/agnostic/upload_auth.rb` defines the bytes an
   uploader signs (`reputablechat:upload:v1`, method, path, ts, body hash).
   Every app that uploads signs the same bytes; change them and every upload

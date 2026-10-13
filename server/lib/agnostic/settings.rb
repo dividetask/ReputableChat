@@ -32,6 +32,9 @@ module Agnostic
         "reliable" => { "after_seconds" => 10_368_000, "rating" => "0.01" },
         "established" => { "after_seconds" => 31_536_000, "rating" => "0.02" }
       },
+      # The socket the apps beside this server use, in the host directory;
+      # empty for none.
+      "local" => { "socket" => "server.sock" },
       "limits" => { "request_bytes" => 8_388_608, "batch_records" => 500, "page_records" => 500, "sweep_records" => 500,
                      "sweep_requests_per_minute" => 60, "trusted_proxies" => [] }
     }.freeze
@@ -89,6 +92,12 @@ module Agnostic
     def host_dir
       dir = dig("host_dir")
       present?(dir) ? File.expand_path(File.join(dir, environment), ROOT) : data_dir
+    end
+
+    # Where the local listener's socket goes, or nil for none.
+    def local_socket
+      name = dig("local", "socket").to_s.strip
+      name.empty? ? nil : File.expand_path(name, host_dir)
     end
 
     def database_url = dig("database_url") || "sqlite://#{File.join(data_dir, 'server.db')}"

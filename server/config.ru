@@ -9,6 +9,8 @@ require "agnostic/server"
 # file first and listens after. A server not yet live is not listening, so
 # nobody can reach it. (In cluster mode this holds only with preload_app!.)
 server = Agnostic::Server.new.prepare!
+# The socket the apps beside this server use: unsigned uploads, adjustments.
+server.listen_locally
 # BACKGROUND=0 runs the API alone: no heartbeats, no syncing with peers.
 server.start unless ENV["BACKGROUND"] == "0"
 

@@ -309,6 +309,16 @@ module Agnostic
 
     def clear_rating_override(account) = db[:rating_overrides].where(account: account).delete
 
+    # What each app beside this server says an account's rating should move
+    # by: one per app and account, replaced by the next.
+    def adjustments = db[:adjustments].order(:account, :app).all
+
+    def adjust_rating(app, account, reputation:, trust:, at:)
+      db[:adjustments].insert_conflict(:replace).insert(app: app, account: account, reputation: reputation, trust: trust, at: at)
+    end
+
+    def clear_adjustment(app, account) = db[:adjustments].where(app: app, account: account).delete
+
     def save_published_rating(account, reputation:, trust:, at:)
       db[:published_ratings].insert_conflict(:replace).insert(account: account, reputation: reputation, trust: trust, at: at)
     end
@@ -444,6 +454,14 @@ module Agnostic
         String :reputation, null: false
         String :trust, null: false
         Integer :at, null: false
+      end
+      db.create_table?(:adjustments) do
+        String :app, null: false
+        String :account, null: false
+        String :reputation, null: false
+        String :trust, null: false
+        Integer :at, null: false
+        primary_key %i[app account]
       end
       db.create_table?(:ignored) do
         String :account, primary_key: true

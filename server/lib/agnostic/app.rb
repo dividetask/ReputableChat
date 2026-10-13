@@ -5,7 +5,9 @@ require "roda"
 require_relative "record"
 require_relative "rules"
 require_relative "accounts"
+require_relative "formats"
 require_relative "keys"
+require_relative "local_listener"
 require_relative "upload_auth"
 
 module Agnostic
@@ -21,17 +23,20 @@ module Agnostic
   #   GET  /api/accounts/<id>        an account's newest declaration and attestation, and latest record
   #   POST /api/accounts             {"accounts": [...]}: the same for several
   #   GET  /api/keys/<pubkey>        the account a working key signs for
-  #   GET  /api/ratings              this server's ratings of other accounts, by hand or by reachability
+  #   GET  /api/ratings              this server's ratings of other accounts, and what each is made of
   #   POST /api/contacts             an app beside this server reporting whether it reached a server
+  #   POST /api/adjustments          an app beside this server moving an account's rating (local listener only)
   #   GET  /api/frontier             records nothing here acknowledges yet
-  #   POST /api/records              {"records": [...]} or one record; each is checked (signed upload)
+  #   POST /api/records              {"records": [...]} or one record; each is checked (signed upload,
+  #                                  except on the local listener)
   #   POST /api/introduce            {"declaration": ...}: an account's first declaration, so it can sign uploads
   #   GET  /api/sweep                ?account=&generation=&part=: the chain in parts, for catching up
   #   POST /api/sync                 {"heartbeat": ...}: a peer's newest heartbeat, its clock checked (signed upload)
   #
   # A signed upload carries the headers UploadAuth names, signed by an account
   # on this server's chain with its current working or master key. Reading
-  # needs nothing.
+  # needs nothing. On the local listener (LocalListener), which only the apps
+  # beside this server can reach, uploads need no signature.
   class App < Roda
     plugin :json, classes: [Array, Hash]
     plugin :json_parser, content_type_regexp: %r{\Aapplication/json\b}i,
@@ -43,7 +48,8 @@ module Agnostic
     # Each server gets its own subclass carrying its parts, so two servers can
     # run in one process -- as they do in the peer specs.
     class << self
-      attr_accessor :store, :ingest, :host, :genesis, :settings, :clock, :accounts, :limiter, :ratings, :state
+      attr_accessor :store, :ingest, :host, :genesis, :settings, :clock, :accounts, :limiter, :ratings, :state,
+                    :local_socket
     end
 
     error do |e|
@@ -93,8 +99,9 @@ module Agnostic
 
         r.get("keys", String) { |pubkey| { "account" => accounts.account_for(pubkey) } }
 
-        # What this server rates each account it has an opinion of, and
-        # whether by hand or by reachability. The apps beside it read this to
+        # What this server rates each account it has an opinion of, and what
+        # that is made of: by hand, by reachability, and each app's
+        # adjustment. The apps beside it read this to
         # choose which of their peers to ask for things the chain does not
         # carry, such as files.
         r.get("ratings") { { "ratings" => server.ratings ? server.ratings.current : {} } }
@@ -106,11 +113,15 @@ module Agnostic
         # hold, so nobody else can move a rating this way.
         r.post("contacts") { report_contact(r) }
 
+        # An app beside this server moving an account's rating by its own
+        # judgement. Taken only on the local listener, so only those apps can.
+        r.post("adjustments") { adjust(r) }
+
         r.on "records" do
           r.is do
             r.get { page(r) }
             r.post do
-              uploader!(r)
+              uploader!(r) unless local?(r)
               post(r)
             end
           end
@@ -131,6 +142,39 @@ module Agnostic
     def accounts = server.accounts
 
     CONTACT = "reputablechat:contact:v1"
+
+    # Whether the request came in on the local listener's socket.
+    def local?(r) = LocalListener.local?(r.env, server.local_socket)
+
+    # An app's name, as the further part of its record types gives it (:chat).
+    APP_NAME = /\A[a-z][a-z0-9_]{0,31}\z/
+
+    # {"app", "account", "reputation", "trust"}: one adjustment per app and
+    # account, replacing the last; "0" and "0" clears it.
+    def adjust(r)
+      unless local?(r)
+        r.halt(403, { "error" => "adjustments are taken only on the local listener, from the apps beside this server" })
+      end
+      body = r.POST.is_a?(Hash) ? r.POST : {}
+      app = body["app"]
+      account = body["account"]
+      r.halt(400, { "error" => "app is an app's name, such as chat" }) unless app.is_a?(String) && app.match?(APP_NAME)
+      r.halt(400, { "error" => "account is not an account ID" }) unless Record.hash?(account)
+      r.halt(400, { "error" => "this server does not rate its own account" }) if account == server.host.id
+      %w[reputation trust].each do |name|
+        value = body[name]
+        next if Formats.decimal?(value) && Formats.decimal(value).abs <= 1
+
+        r.halt(400, { "error" => "#{name} is a decimal from -1 to 1, spelled as the rules spell one ('0.5', not '.5')" })
+      end
+
+      if body["reputation"] == "0" && body["trust"] == "0"
+        store.clear_adjustment(app, account)
+      else
+        store.adjust_rating(app, account, reputation: body["reputation"], trust: body["trust"], at: server.clock.call)
+      end
+      { "account" => account, "rating" => server.ratings&.current&.[](account) }
+    end
 
     def report_contact(r)
       body = r.POST.is_a?(Hash) ? r.POST : {}

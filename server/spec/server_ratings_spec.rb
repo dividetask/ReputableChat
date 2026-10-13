@@ -122,7 +122,8 @@ class ServerRatingsSpec < Minitest::Test
     contact(attempts: 100, successes: 95, first_success_at: @now - (400 * DAY))
     by_hand.set(beta, "-0.5", "1")
 
-    assert_equal({ "reputation" => "-0.5", "trust" => "1", "source" => "operator" }, @alpha.ratings.current[beta])
+    assert_equal({ "reputation" => "-0.5", "trust" => "1" }, @alpha.ratings.current[beta].slice("reputation", "trust"))
+    assert_equal({ "reputation" => "-0.5", "trust" => "1" }, @alpha.ratings.current[beta]["operator"])
     @alpha.ratings.publish
     assert_equal %w[-0.5 1], published
   end
@@ -133,7 +134,7 @@ class ServerRatingsSpec < Minitest::Test
     @alpha.ratings.publish
     by_hand.clear(beta)
 
-    assert_equal "reachability", @alpha.ratings.current[beta]["source"]
+    refute @alpha.ratings.current[beta].key?("operator")
     @alpha.ratings.publish
     assert_equal %w[0.02 0], published
   end
@@ -162,6 +163,55 @@ class ServerRatingsSpec < Minitest::Test
     response = Rack::MockRequest.new(@alpha.app).get("/api/ratings")
 
     assert_equal "0.4", JSON.parse(response.body).dig("ratings", beta, "reputation")
+  end
+
+  # --- what the apps beside the server adjust ----------------------------------
+
+  def adjust(app, reputation, trust = "0", account: beta)
+    @alpha.store.adjust_rating(app, account, reputation: reputation, trust: trust, at: @now)
+  end
+
+  # RULE (yours): what an app learns of a server is a separate fact from
+  # whether this server can reach it, so both count.
+  def test_an_apps_adjustment_adds_to_the_servers_own_rating
+    contact(attempts: 10, successes: 10, first_success_at: @now - (400 * DAY))
+    adjust("chat", "0.004")
+    assert_equal({ "reputation" => "0.024", "trust" => "0" }, @alpha.ratings.due[beta])
+  end
+
+  def test_an_adjustment_counts_where_the_server_has_no_rating_of_its_own
+    adjust("chat", "-0.01")
+    assert_equal "-0.01", rating
+  end
+
+  def test_every_apps_adjustment_is_summed_and_held_between_minus_one_and_one
+    adjust("chat", "0.8", "0.3")
+    adjust("forum", "0.7", "0.2")
+    assert_equal({ "reputation" => "1", "trust" => "0.5" }, @alpha.ratings.due[beta])
+  end
+
+  # RULE (yours): an app, which knows more than whether a server answers, may
+  # move trust; the server's own judgement never does.
+  def test_an_app_may_move_trust
+    adjust("chat", "0", "0.1")
+    assert_equal "0.1", @alpha.ratings.due.dig(beta, "trust")
+  end
+
+  def test_a_rating_by_hand_overrides_the_adjustments
+    adjust("chat", "0.5")
+    by_hand.set(beta, "-0.2", "0.1")
+    assert_equal({ "reputation" => "-0.2", "trust" => "0.1" }, @alpha.ratings.due[beta])
+  end
+
+  def test_the_ratings_say_what_each_is_made_of
+    contact(attempts: 10, successes: 10, first_success_at: @now - (400 * DAY))
+    adjust("chat", "0.004")
+    by_hand.set(beta, "0.4", "0")
+    entry = JSON.parse(Rack::MockRequest.new(@alpha.app).get("/api/ratings").body).dig("ratings", beta)
+    assert_equal({ "reputation" => "0.4", "trust" => "0",
+                   "operator" => { "reputation" => "0.4", "trust" => "0" },
+                   "reachability" => { "reputation" => "0.02", "trust" => "0" },
+                   "adjustments" => { "chat" => { "reputation" => "0.004", "trust" => "0" } } }, entry)
   end
 
   # --- what the apps beside the server report -----------------------------------
