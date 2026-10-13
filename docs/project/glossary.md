@@ -20,7 +20,7 @@ record, payload, signature, record hash, text, decimal, signing key, encryption 
 
 **Agnostic server** — the server in `server/`: it checks records against the rules, stores and serves them, publishes heartbeats, and exchanges records with other servers, and knows nothing about any app. [server/README.md](../../server/README.md)
 
-**Local listener** — the agnostic server's Unix socket in `host/<environment>/`, which only the apps beside it can open. Uploads on it need no signature, and it alone takes adjustments. [server/README.md](../../server/README.md)
+**Local listener** — the agnostic server's Unix socket in `host/<environment>/`, which only the apps beside it can open. Uploads on it need no signature, and it alone takes nudges. [server/README.md](../../server/README.md)
 
 **App** — a program that shows some of the chain's records to people, such as the chat or the forum, named by a further part of a record's type after the rules version: `reputablechat:message:v0.001:forum`. The chain ignores that part; each app documents what it means on its own branch. The rules acknowledge apps but do not define them.
 
@@ -48,7 +48,7 @@ record, payload, signature, record hash, text, decimal, signing key, encryption 
 
 **Trust multiplier** — what someone's *recommendations* are worth, as distinct from what they are worth. Compounds along a path; a zero prunes the branch while leaving that person visible.
 
-**Adjustment** — how far an app beside an agnostic server moves that server's rating of an account, reputation and trust, by what the app has learned of it (the chat: whether the server has the files it is asked for). Sent on the local listener; summed with the server's own rating by reachability. Not a record: the server publishes the sum in its own attestation. [server/README.md](../../server/README.md)
+**Nudge** — how far an app beside an agnostic server moves that server's rating of an account, reputation and trust, by what the app has learned of it (the chat: whether the server has the files it is asked for). Sent on the local listener; summed with the server's own rating by reachability. Not a record: the server publishes the sum in its own attestation. [server/README.md](../../server/README.md)
 
 **Derived cache** — an attestation's `derived` field, for accounts a reader's walk did not reach. A reader reaching for it has run out of its own reach, and either takes the number or leaves it. [reputation.md](reputation.md)
 
@@ -86,7 +86,7 @@ Do not reintroduce these; they each have a current name above.
 | comment, post (as a noun) | message |
 | emote (as a record), `emote:v1` | reaction |
 | announcement | message or notice |
-| adjustment (`adjustment:v1`, as a record) | nothing on the chain; a change waits in the vault for the next attestation. **Adjustment** now names only an app's move of its server's rating, above |
+| adjustment (`adjustment:v1`) | nothing on the chain; a change waits in the vault for the next attestation |
 | `author`, `publisher` (as a field name) | `pubkey` |
 | public key (as the account's identity) | account ID |
 | public key (as the key that is not the master key) | working key |

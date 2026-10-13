@@ -39,7 +39,7 @@ in a request to each app in `../coordination/requests/<app>/`:
 - the development genesis record, its phrases, and the key they derive;
 - `GET /api/host`, `/api/genesis`, `/api/records`, `/api/states`,
   `/api/accounts`, `/api/keys/<pubkey>` and `/api/ratings`;
-  `POST /api/records` and `/api/adjustments`; the
+  `POST /api/records` and `/api/nudges`; the
   signed-upload headers; the local listener's socket and what it takes;
 - not listening, or answering 503, until the server is live.
 

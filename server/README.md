@@ -268,12 +268,12 @@ publishing any other trust would suggest it does. An attestation holds
 only the ratings that changed since the last one, so most heartbeats publish
 none. It is signed just before a heartbeat, which then carries it.
 
-### Adjustments from the apps
+### Nudges from the apps
 
 An app beside the server learns what the server cannot -- the chat, whether
 another chat server has the files it is asked for -- and moves the server's
 rating of that account by its own judgement, computed and configured in the
-app. It sends an **adjustment** to `POST /api/adjustments` on the [local
+app. It sends a **nudge** to `POST /api/nudges` on the [local
 listener](#the-local-listener), the only place one is taken:
 
 ```json
@@ -285,18 +285,18 @@ listener](#the-local-listener), the only place one is taken:
 - `reputation` and `trust` are decimals from -1 to 1, spelled as the rules
   spell one. An app may move both: it knows more than whether a server
   answers.
-- One adjustment per app and account; a new one replaces the old, and
-  `"0"` and `"0"` clears it. Adjustments do not expire.
+- One nudge per app and account; a new one replaces the old, and
+  `"0"` and `"0"` clears it. Nudges do not expire.
 
 What is published is the server's rating by reachability -- 0 where it has
-none -- plus every app's adjustment, reputation and trust each summed and
+none -- plus every app's nudge, reputation and trust each summed and
 held between -1 and 1. Reaching -1 this way ignores the server as any -1
 does. The answer is the account's rating as it now stands.
 
 ### By hand
 
 The operator can set any account's rating, trust included, from the machine
-the server runs on. It overrides reachability and every adjustment until removed,
+the server runs on. It overrides reachability and every nudge until removed,
 and goes out in the attestation published with the next heartbeat; an
 account nobody has an opinion of any more is published as 0 with trust 0,
 since an attestation can amend an entry but not delete one.
@@ -311,12 +311,12 @@ The apps beside the server read the current ratings at `GET /api/ratings`:
 the chat uses them to choose which other chat servers to ask for files. Each
 account's entry is the rating published, `reputation` and `trust`, and what
 it is made of, each present only when there is one: `operator`,
-`reachability`, and `adjustments` by app.
+`reachability`, and `nudges` by app.
 
 ```json
 {"ratings": {"<account ID>": {"reputation": "0.024", "trust": "0",
   "reachability": {"reputation": "0.02", "trust": "0"},
-  "adjustments": {"chat": {"reputation": "0.004", "trust": "0"}}}}}
+  "nudges": {"chat": {"reputation": "0.004", "trust": "0"}}}}}
 ```
 
 ## Who may upload
@@ -358,7 +358,7 @@ so it is there however the public one was bound (`-b` or `-p` replace the
 binds a config file names).
 
 On it, `POST /api/records` needs no signature -- the records are judged
-against the rules exactly as anyone's are -- and `POST /api/adjustments` is
+against the rules exactly as anyone's are -- and `POST /api/nudges` is
 taken, which the public listener refuses with 403. Everything else is the
 same on both.
 
@@ -391,7 +391,7 @@ curl --unix-socket ../host/development/server.sock http://local/api/ratings
 | `GET /api/ratings` | this server's current ratings of other accounts, each by hand or by reachability |
 | `GET /api/frontier` | hashes of the records nothing here acknowledges |
 | `POST /api/records` | `{"records": [...]}`, or one record on its own; a signed upload, except on the local listener |
-| `POST /api/adjustments` | `{"app", "account", "reputation", "trust"}`: an app moving an account's rating; local listener only |
+| `POST /api/nudges` | `{"app", "account", "reputation", "trust"}`: an app moving an account's rating; local listener only |
 | `POST /api/introduce` | `{"declaration": ...}`: an account's first identity declaration, so it can sign uploads |
 | `GET /api/sweep?account=&generation=&part=` | one capped part of one generation of an account, and the `next` part to ask for; 429 when asked too often |
 | `POST /api/sync` | `{"heartbeat": ...}`: the uploader's own newest heartbeat; a signed upload; 403 when the peer is or becomes ignored |

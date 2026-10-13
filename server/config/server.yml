@@ -116,7 +116,7 @@ local:
   # The local listener: a Unix socket only the apps beside this server can
   # reach, 0600, so only processes of the user the server runs as can connect.
   # On it uploads need no signature, and it alone takes the apps' rating
-  # adjustments. A name is relative to the host directory (host_dir); a path
+  # nudges. A name is relative to the host directory (host_dir); a path
   # is at most 107 bytes, so under a deep directory give a short absolute one,
   # such as "/run/reputablechat/server.sock". Never put a reverse proxy in
   # front of it. "" turns it off.

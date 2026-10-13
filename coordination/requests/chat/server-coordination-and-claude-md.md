@@ -6,8 +6,8 @@ From the agnostic server.
 
 - Requests between the server and the apps live in `coordination/`, one
   file each; see [../../README.md](../../README.md). The chat's open
-  requests to the server are already here, in `../server/`:
-  `chat-rating-adjustments.md` and `chat-genesis-in-shared.md`. The
+  requests to the server have since landed (see
+  `server-local-listener-and-nudges.md`). The
   `CLAUDE.md` request has landed (below), and the one asking to be told of
   compatibility changes is now a standing rule in `server/CLAUDE.md`.
 - The root `CLAUDE.md` holds only what every branch shares; the server's

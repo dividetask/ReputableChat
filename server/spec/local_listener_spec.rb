@@ -5,7 +5,7 @@ require "servers"
 require "socket"
 
 # The apps beside a server reach it on a Unix socket only they can open. On
-# it uploads need no signature and adjustments are taken; on the public
+# it uploads need no signature and nudges are taken; on the public
 # listener neither. Which listener a request came in on is read from the
 # connection, never from the request.
 class LocalListenerSpec < Minitest::Test
@@ -44,7 +44,7 @@ class LocalListenerSpec < Minitest::Test
 
   def note = @beta.host.sign("message", { "ack" => [@beta.host.id], "body" => "hello", "ts" => Time.now.to_i })
 
-  def adjustment(**fields) = { "app" => "chat", "account" => @beta.host.id, "reputation" => "0.004", "trust" => "0" }
+  def nudge(**fields) = { "app" => "chat", "account" => @beta.host.id, "reputation" => "0.004", "trust" => "0" }
                              .merge(fields.transform_keys(&:to_s))
 
   def test_the_socket_is_in_the_host_directory
@@ -71,7 +71,7 @@ class LocalListenerSpec < Minitest::Test
     claims = { "REMOTE_ADDR" => "127.0.0.1", "HTTP_X_FORWARDED_FOR" => "127.0.0.1", "HTTP_HOST" => "localhost",
                "SERVER_PORT" => "0", "agnostic.local" => true }
     assert_equal 401, post("/api/records", { "records" => [note.to_wire] }, **claims).status
-    assert_equal 403, post("/api/adjustments", adjustment, **claims).status
+    assert_equal 403, post("/api/nudges", nudge, **claims).status
   end
 
   # A public listener on a Unix socket of its own -- a reverse proxy's, say --
@@ -79,31 +79,31 @@ class LocalListenerSpec < Minitest::Test
   def test_another_unix_socket_is_not_the_local_listener
     other = accepted_on(File.join(File.dirname(@path), "public.sock"))
     assert_equal 401, post("/api/records", { "records" => [note.to_wire] }, socket: other).status
-    assert_equal 403, post("/api/adjustments", adjustment, socket: other).status
+    assert_equal 403, post("/api/nudges", nudge, socket: other).status
   end
 
-  def test_adjustments_are_taken_only_on_the_local_listener
-    assert_equal 403, post("/api/adjustments", adjustment).status
-    assert_equal 200, post("/api/adjustments", adjustment, socket: accepted_on(@path)).status
+  def test_nudges_are_taken_only_on_the_local_listener
+    assert_equal 403, post("/api/nudges", nudge).status
+    assert_equal 200, post("/api/nudges", nudge, socket: accepted_on(@path)).status
   end
 
-  def test_an_adjustment_is_an_app_an_account_and_two_decimals_from_minus_one_to_one
+  def test_a_nudge_is_an_app_an_account_and_two_decimals_from_minus_one_to_one
     local = -> { accepted_on(@path) }
     [{ app: "Chat!" }, { account: "nobody" }, { account: @alpha.host.id }, { reputation: ".5" }, { reputation: "1.5" },
      { trust: "0.50" }, { trust: 0.5 }].each do |bad|
-      assert_equal 400, post("/api/adjustments", adjustment(**bad), socket: local.call).status, bad.inspect
+      assert_equal 400, post("/api/nudges", nudge(**bad), socket: local.call).status, bad.inspect
     end
   end
 
-  # RULE (yours): one adjustment per app and account, replaced by the next;
+  # RULE (yours): one nudge per app and account, replaced by the next;
   # "0" and "0" clears it.
-  def test_a_new_adjustment_replaces_the_last_and_zero_clears_it
-    post("/api/adjustments", adjustment, socket: accepted_on(@path))
-    post("/api/adjustments", adjustment(reputation: "0.006"), socket: accepted_on(@path))
-    assert_equal(["0.006"], @alpha.store.adjustments.map { |a| a[:reputation] })
+  def test_a_new_nudge_replaces_the_last_and_zero_clears_it
+    post("/api/nudges", nudge, socket: accepted_on(@path))
+    post("/api/nudges", nudge(reputation: "0.006"), socket: accepted_on(@path))
+    assert_equal(["0.006"], @alpha.store.nudges.map { |a| a[:reputation] })
 
-    post("/api/adjustments", adjustment(reputation: "0", trust: "0"), socket: accepted_on(@path))
-    assert_empty @alpha.store.adjustments
+    post("/api/nudges", nudge(reputation: "0", trust: "0"), socket: accepted_on(@path))
+    assert_empty @alpha.store.nudges
   end
 
   # The real thing: a socket only the server's user can open, answering HTTP.
@@ -112,13 +112,13 @@ class LocalListenerSpec < Minitest::Test
     assert_equal 0o600, File.stat(@path).mode & 0o777
     assert File.socket?(@path)
 
-    body = JSON.generate(adjustment)
+    body = JSON.generate(nudge)
     UNIXSocket.open(@path) do |s|
-      s.write("POST /api/adjustments HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\n" \
+      s.write("POST /api/nudges HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\n" \
               "Content-Length: #{body.bytesize}\r\nConnection: close\r\n\r\n#{body}")
       assert_match %r{\AHTTP/1\.1 200}, s.read
     end
-    assert_equal "0.004", @alpha.store.adjustments.first[:reputation]
+    assert_equal "0.004", @alpha.store.nudges.first[:reputation]
   end
 
   def test_an_empty_socket_setting_turns_the_listener_off

@@ -40,12 +40,12 @@ module Agnostic
     def list
       overrides = @store.rating_overrides.to_h { |o| [o[:account], o] }
       published = @store.published_ratings.to_h { |p| [p[:account], p] }
-      adjustments = @store.adjustments.group_by { |a| a[:account] }
-      (overrides.keys | published.keys | adjustments.keys).sort.map do |account|
+      nudges = @store.nudges.group_by { |a| a[:account] }
+      (overrides.keys | published.keys | nudges.keys).sort.map do |account|
         o = overrides[account]
         p = published[account]
         set = o ? "by hand #{o[:reputation]} (trust #{o[:trust]})" : "by reachability"
-        moved = Array(adjustments[account]).map { |a| ", #{a[:app]} moves it #{a[:reputation]} (trust #{a[:trust]})" }.join
+        moved = Array(nudges[account]).map { |a| ", #{a[:app]} moves it #{a[:reputation]} (trust #{a[:trust]})" }.join
         moved += " (overridden)" if o && !moved.empty?
         out = p ? "published #{p[:reputation]} (trust #{p[:trust]})" : "not yet published"
         "#{account}  #{set}#{moved}, #{out}"

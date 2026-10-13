@@ -36,9 +36,9 @@ server/                   the agnostic server -- see server/README.md
     seed.rb               seed phrases, derived the way a browser client derives them
     heartbeat.rb          heartbeats acknowledging the frontier
     peers.rb              syncing, catching up, learning servers, finding chain splits
-    server_ratings.rb     ratings of other servers: reachability plus the apps' adjustments, or by hand
+    server_ratings.rb     ratings of other servers: reachability plus the apps' nudges, or by hand
     upload_auth.rb        signed uploads: who may add records
-    local_listener.rb     the apps' Unix socket: unsigned uploads, adjustments
+    local_listener.rb     the apps' Unix socket: unsigned uploads, nudges
     app.rb                the API
   script/generate_genesis.rb  signs a genesis in the rules' format
 ```

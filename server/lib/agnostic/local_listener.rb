@@ -8,7 +8,7 @@ module Agnostic
   # the host account's directory, 0600, so only processes of the user the
   # server runs as can connect -- the same ones that can read the host
   # account's phrase. On it uploads need no signature, and the apps make the
-  # requests only they may make (POST /api/adjustments).
+  # requests only they may make (POST /api/nudges).
   #
   # It is its own Puma server, started by the agnostic server once it is live,
   # so it is there however Puma's public listener was bound (`-b` or `-p` on

@@ -117,7 +117,7 @@ task :unrate, [:account] do |_task, args|
   puts Agnostic::ManualRatings.open.clear(args[:account])
 end
 
-desc "List what this server rates each account: by hand, by reachability, and what the apps adjust"
+desc "List what this server rates each account: by hand, by reachability, and what the apps nudge"
 task :ratings do
   $LOAD_PATH.unshift File.expand_path("lib", __dir__)
   require "agnostic/manual_ratings"

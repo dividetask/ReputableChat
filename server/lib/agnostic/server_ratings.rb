@@ -18,13 +18,13 @@ module Agnostic
   # - Anything else: no opinion, and nothing is published.
   #
   # Each app beside the server can move an account's rating by its own
-  # judgement (POST /api/adjustments, on the local listener): reputation and
-  # trust, one adjustment per app and account. What is published is this
+  # judgement (POST /api/nudges, on the local listener): reputation and
+  # trust, one nudge per app and account. What is published is this
   # server's own rating -- 0 where it has none -- plus every app's
-  # adjustment, reputation and trust each summed and held between -1 and +1.
+  # nudge, reputation and trust each summed and held between -1 and +1.
   #
   # The operator can set any account's rating by hand, trust included (rake
-  # rate); that overrides everything above, adjustments included, until it is
+  # rate); that overrides everything above, nudges included, until it is
   # removed (rake unrate), and is published the same way.
   #
   # An account this server publishes a rating of -1 for, either way, is
@@ -45,21 +45,21 @@ module Agnostic
     end
 
     # What this server says of each account it has an opinion of, and where
-    # it came from: "operator", "reachability" and "adjustments" (by app),
+    # it came from: "operator", "reachability" and "nudges" (by app),
     # each present only when there is one. The operator's rating, when set,
-    # is what is said; otherwise reachability plus the adjustments.
+    # is what is said; otherwise reachability plus the nudges.
     def current
       contacts = @store.contacts.to_h { |c| [c[:account], c] }
       overrides = @store.rating_overrides.to_h { |o| [o[:account], o] }
-      adjustments = @store.adjustments.group_by { |a| a[:account] }
-      (contacts.keys | overrides.keys | adjustments.keys).each_with_object({}) do |account, out|
+      nudges = @store.nudges.group_by { |a| a[:account] }
+      (contacts.keys | overrides.keys | nudges.keys).each_with_object({}) do |account, out|
         next if account == @host.id
 
         parts = {}
         reachable = contacts[account] && rating_for(contacts[account])
         parts["reachability"] = { "reputation" => reachable, "trust" => trust } if reachable
-        if adjustments[account]
-          parts["adjustments"] = adjustments[account].to_h { |a| [a[:app], { "reputation" => a[:reputation], "trust" => a[:trust] }] }
+        if nudges[account]
+          parts["nudges"] = nudges[account].to_h { |a| [a[:app], { "reputation" => a[:reputation], "trust" => a[:trust] }] }
         end
         if (o = overrides[account])
           parts["operator"] = { "reputation" => o[:reputation], "trust" => o[:trust] }
@@ -131,7 +131,7 @@ module Agnostic
     private
 
     def combined(parts)
-      shares = [parts["reachability"], *parts.fetch("adjustments", {}).values].compact
+      shares = [parts["reachability"], *parts.fetch("nudges", {}).values].compact
       %w[reputation trust].to_h do |key|
         sum = shares.sum(BigDecimal("0")) { |share| Formats.decimal(share[key]) }
         [key, Formats.write(sum.clamp(BigDecimal("-1"), BigDecimal("1")))]
@@ -146,7 +146,7 @@ module Agnostic
     # Always 0 for reachability. This server judges only whether another
     # server stays online, and saying a server reliably produces heartbeats
     # must not read as saying its ratings are worth believing. Apps, which
-    # know more, may move trust by their adjustments.
+    # know more, may move trust by their nudges.
     TRUST = "0"
 
     def trust = TRUST

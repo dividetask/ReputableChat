@@ -23,7 +23,7 @@ module Agnostic
   #   POST /api/accounts             {"accounts": [...]}: the same for several
   #   GET  /api/keys/<pubkey>        the account a working key signs for
   #   GET  /api/ratings              this server's ratings of other accounts, and what each is made of
-  #   POST /api/adjustments          an app beside this server moving an account's rating (local listener only)
+  #   POST /api/nudges               an app beside this server moving an account's rating (local listener only)
   #   GET  /api/frontier             records nothing here acknowledges yet
   #   POST /api/records              {"records": [...]} or one record; each is checked (signed upload,
   #                                  except on the local listener)
@@ -99,14 +99,14 @@ module Agnostic
 
         # What this server rates each account it has an opinion of, and what
         # that is made of: by hand, by reachability, and each app's
-        # adjustment. The apps beside it read this to
+        # nudge. The apps beside it read this to
         # choose which of their peers to ask for things the chain does not
         # carry, such as files.
         r.get("ratings") { { "ratings" => server.ratings ? server.ratings.current : {} } }
 
         # An app beside this server moving an account's rating by its own
         # judgement. Taken only on the local listener, so only those apps can.
-        r.post("adjustments") { adjust(r) }
+        r.post("nudges") { nudge(r) }
 
         r.on "records" do
           r.is do
@@ -138,11 +138,11 @@ module Agnostic
     # An app's name, as the further part of its record types gives it (:chat).
     APP_NAME = /\A[a-z][a-z0-9_]{0,31}\z/
 
-    # {"app", "account", "reputation", "trust"}: one adjustment per app and
+    # {"app", "account", "reputation", "trust"}: one nudge per app and
     # account, replacing the last; "0" and "0" clears it.
-    def adjust(r)
+    def nudge(r)
       unless local?(r)
-        r.halt(403, { "error" => "adjustments are taken only on the local listener, from the apps beside this server" })
+        r.halt(403, { "error" => "nudges are taken only on the local listener, from the apps beside this server" })
       end
       body = r.POST.is_a?(Hash) ? r.POST : {}
       app = body["app"]
@@ -158,9 +158,9 @@ module Agnostic
       end
 
       if body["reputation"] == "0" && body["trust"] == "0"
-        store.clear_adjustment(app, account)
+        store.clear_nudge(app, account)
       else
-        store.adjust_rating(app, account, reputation: body["reputation"], trust: body["trust"], at: server.clock.call)
+        store.nudge_rating(app, account, reputation: body["reputation"], trust: body["trust"], at: server.clock.call)
       end
       { "account" => account, "rating" => server.ratings&.current&.[](account) }
     end
