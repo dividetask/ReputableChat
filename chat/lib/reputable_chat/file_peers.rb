@@ -33,10 +33,9 @@ module ReputableChat
   #   time a failure would cost -- it answered, so it loses less -- and a miss
   #   does not make the next failure's wait any longer.
   #
-  # Every outcome -- :reached, :missing or :unreached -- is reported to the
-  # agnostic server (reporter),
-  # where it counts toward the account's rating with that server's own
-  # contacts -- so what the chat learns outlasts a restart, and the next
+  # Every outcome -- :reached, :missing or :unreached -- goes to the reporter,
+  # which in a running server is Nudges: it moves the agnostic server's rating
+  # of the account, so what the chat learns outlasts a restart and the next
   # choice takes it into account.
   #
   # An address is looked up once, checked, and that address is the one

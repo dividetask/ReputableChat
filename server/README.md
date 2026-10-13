@@ -47,17 +47,23 @@ ancestors, how far ahead of the clock a record may be, request limits.
 
 ## The genesis
 
-`config/genesis/development.json` is the developer's first identity
-declaration in the rules' own format, signed with the development genesis key
-(public on purpose: its seed phrase is `spec/fixtures/development-genesis.seed`). Its `rules` field is
+`../shared/genesis/development.json` is the developer's first identity
+declaration in the rules' own format, signed with the development genesis key.
+It lives in `shared/` at the root, since the server and every app beside it
+must read the same one: two copies of a genesis are two chains the moment
+they differ. The development genesis account is public on purpose: its
+working and master phrases are `development.seed` and
+`development.master.seed` beside it, and its avatar `development.webp`. Its `rules` field is
 `docs/project/rules/v0.001.md` exactly, less its trailing newline, and a spec
 fails if the two drift.
 
 Production has no genesis yet, and a production server refuses to boot until
-one is placed at `config/genesis/production.json`. It also refuses one signed
+one is placed at `../shared/genesis/production.json` (or wherever `GENESIS`
+points). It also refuses one signed
 by the development key. `script/generate_genesis.rb` signs one from the
 genesis account's seed phrase (`--seed-file`, and `--master-seed-file` for its
-master key) and refuses to overwrite an existing genesis.
+master key), writes it to `shared/genesis/`, and refuses to overwrite an
+existing genesis.
 
 ## The host account
 
@@ -251,21 +257,50 @@ address its account declared. Every value is in `ratings:` in
 | the same, a year after | `established.rating`, 0.02 |
 | anything else | nothing published |
 
-A server this one rates -1 -- by reachability, or by an operator's hand -- is
-ignored from then on: its syncs are refused and it is not contacted, until
-an administrator brings it back with `bundle exec rake "forgive[<account>]"`.
+A server this one rates -1 -- by reachability, by the apps' nudges, or by an
+operator's hand -- is ignored for as long as that is what it publishes: its
+syncs are refused and it is not contacted. An administrator can bring it
+back with `bundle exec rake "forgive[<account>]"`; so can a later rating
+above -1, as when the app that nudged it down takes its nudge back or another
+app nudges it up. A server ignored for its clock stays ignored for that.
 Every other server, one that went offline included, comes back by itself.
-An account a server has published nothing about counts as 0. Each rating
-carries a trust of 0, always: that a server reliably produces heartbeats says
-nothing about whether its ratings are worth believing, and publishing any
-other trust would suggest it does. An attestation holds
+An account a server has published nothing about counts as 0. Its rating by
+reachability carries a trust of 0, always: that a server reliably produces
+heartbeats says nothing about whether its ratings are worth believing, and
+publishing any other trust would suggest it does. An attestation holds
 only the ratings that changed since the last one, so most heartbeats publish
 none. It is signed just before a heartbeat, which then carries it.
+
+### Nudges from the apps
+
+An app beside the server learns what the server cannot -- the chat, whether
+another chat server has the files it is asked for -- and moves the server's
+rating of that account by its own judgement, computed and configured in the
+app. It sends a **nudge** to `POST /api/nudges` on the [local
+listener](#the-local-listener), the only place one is taken:
+
+```json
+{"app": "chat", "account": "<account ID>", "reputation": "0.004", "trust": "0"}
+```
+
+- `app` names the app, as the further part of its record types does
+  (`:chat`): lowercase letters, digits and `_`.
+- `reputation` and `trust` are decimals from -1 to 1, spelled as the rules
+  spell one. An app may move both: it knows more than whether a server
+  answers.
+- One nudge per app and account; a new one replaces the old, and
+  `"0"` and `"0"` clears it. Nudges do not expire.
+
+What is published is the server's rating by reachability -- 0 where it has
+none -- plus every app's nudge, reputation and trust each summed and
+held between -1 and 1. Reaching -1 this way ignores the server as any -1
+does, until the nudges raise it again or an administrator forgives it. The
+answer is the account's rating as it now stands.
 
 ### By hand
 
 The operator can set any account's rating, trust included, from the machine
-the server runs on. It stands in for what reachability says until removed,
+the server runs on. It overrides reachability and every nudge until removed,
 and goes out in the attestation published with the next heartbeat; an
 account nobody has an opinion of any more is published as 0 with trust 0,
 since an attestation can amend an entry but not delete one.
@@ -277,7 +312,16 @@ bundle exec rake ratings                                     # what it says of w
 ```
 
 The apps beside the server read the current ratings at `GET /api/ratings`:
-the chat uses them to choose which other chat servers to ask for files.
+the chat uses them to choose which other chat servers to ask for files. Each
+account's entry is the rating published, `reputation` and `trust`, and what
+it is made of, each present only when there is one: `operator`,
+`reachability`, and `nudges` by app.
+
+```json
+{"ratings": {"<account ID>": {"reputation": "0.024", "trust": "0",
+  "reachability": {"reputation": "0.02", "trust": "0"},
+  "nudges": {"chat": {"reputation": "0.004", "trust": "0"}}}}}
+```
 
 ## Who may upload
 
@@ -303,8 +347,37 @@ say -- is told so (`"unknown_account": true`), and may send its first identity
 declaration, and nothing else, to `POST /api/introduce`. The declaration is
 checked like any record, its signature proving the key; once it is on the
 chain the account can sign uploads. This server does all of that by itself
-when it syncs. An app beside the server uploads its users' records the same
-way, signing as the host account the server shares with it.
+when it syncs. An app beside the server uploads on the local listener
+instead, and needs no signature there.
+
+### The local listener
+
+The apps beside the server reach it on a Unix socket only they can open:
+`server.sock` in the host directory (`host/<environment>/` at the root of
+the repository), 0600, so only processes of the user the server runs as can
+connect -- the same ones that could read the host account's phrase. Set it
+with `local.socket` in `config/server.yml`; `""` turns it off. It opens once
+the server is live, beside the public listener, and is its own Puma server,
+so it is there however the public one was bound (`-b` or `-p` replace the
+binds a config file names).
+
+On it, `POST /api/records` needs no signature -- the records are judged
+against the rules exactly as anyone's are -- and `POST /api/nudges` is
+taken, which the public listener refuses with 403. Everything else is the
+same on both.
+
+The server knows which listener a request came in on from the socket Puma
+accepted it on, never from anything the request says: `Host`,
+`X-Forwarded-*`, `SERVER_PORT` and the caller's address are all the client's
+to choose, and behind a reverse proxy on the same machine every outside
+request comes from 127.0.0.1. Point a reverse proxy only at the public
+listener. A socket's path is at most 107 bytes; under a deep directory, give
+`local.socket` a short absolute path such as `/run/reputablechat/server.sock`,
+or the server refuses to start.
+
+```bash
+curl --unix-socket ../host/development/server.sock http://local/api/ratings
+```
 
 ## The API
 
@@ -321,7 +394,8 @@ way, signing as the host account the server shares with it.
 | `GET /api/keys/<pubkey>` | the account a working key signs for, or null |
 | `GET /api/ratings` | this server's current ratings of other accounts, each by hand or by reachability |
 | `GET /api/frontier` | hashes of the records nothing here acknowledges |
-| `POST /api/records` | `{"records": [...]}`, or one record on its own; a signed upload |
+| `POST /api/records` | `{"records": [...]}`, or one record on its own; a signed upload, except on the local listener |
+| `POST /api/nudges` | `{"app", "account", "reputation", "trust"}`: an app moving an account's rating; local listener only |
 | `POST /api/introduce` | `{"declaration": ...}`: an account's first identity declaration, so it can sign uploads |
 | `GET /api/sweep?account=&generation=&part=` | one capped part of one generation of an account, and the `next` part to ask for; 429 when asked too often |
 | `POST /api/sync` | `{"heartbeat": ...}`: the uploader's own newest heartbeat; a signed upload; 403 when the peer is or becomes ignored |

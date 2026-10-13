@@ -13,7 +13,9 @@
 # and the rules -- and the host account signs what concerns one server, such as
 # an outage.
 #
-# Reads the seed written by `rake genesis` or `rake host`,
+# Reads the genesis account's seed from shared/genesis/ (development's is
+# committed; any other is the developer's to supply with --seed), or with
+# --host the host account's that the agnostic server wrote,
 # derives the same key the browser would from the same phrase, and talks to a
 # running server over the ordinary API. Nothing here is a back door: every
 # request is signed and the server verifies it exactly as it verifies a
@@ -480,7 +482,7 @@ module Tim
         --url URL           where to reach the server (default: --origin, else the
                             first origin in config/server.yml, else #{DEFAULT_URL})
         --origin ORIGIN     the origin inside the signature (default: the URL)
-        --seed FILE         seed file (default: config/genesis/<env>.seed,
+        --seed FILE         seed file (default: ../shared/genesis/<env>.seed,
                             or the agnostic server's host.seed with --host)
 
     TEXT

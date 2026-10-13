@@ -1,6 +1,6 @@
-# ReputableChat: the agnostic server
+# ReputableChat
 
-The chain that ReputableChat's apps are built on, and the server that holds it. This branch is that server alone: a server that only wants to run the chain needs nothing else. The apps -- the chat among them -- live on other branches, in their own directories beside `server/`, and merge this one.
+A chain of signed records, the agnostic server that holds it, and the apps built on it. The server is developed on the `Agnostic-Server-V0` branch, which holds nothing else, so a machine that only wants to run the chain needs only that branch. The apps -- the chat among them -- live on their own branches, in their own directories beside `server/`, and merge it.
 
 Every signed record names the most recent records its author had seen, which makes the history a chain: a record cannot be quietly removed, back-dated, or shown to one person and not another. Records are anchored into it only when somebody acknowledges them, so being unvouched for means being left out -- which is also what a sybil cannot buy its way past.
 
@@ -12,8 +12,10 @@ The server knows the chain and its rules and nothing about any app. It checks ev
 - **`docs/`**: the rules, the signed examples, and the design of the chain.
 - **`shared/`**: files every app on a server reads, such as the BIP39 wordlist.
 - **`host/`** (gitignored): the host account the server and its apps share, made on first boot.
+- **[`coordination/`](coordination/README.md)**: requests and todos passed between the server and the apps.
+- Each app: its own directory, on its own branch.
 
-## Running it
+## Running the server
 
 ```bash
 cd server
@@ -27,4 +29,4 @@ Settings are in `server/config/server.yml`, which documents each one.
 
 ## Design
 
-[glossary](docs/project/glossary.md) · [chain](docs/project/chain.md) · [architecture](docs/project/architecture.md) · [rules](docs/project/rules/v0.001.md) · [identity](docs/project/identity.md) · [reputation](docs/project/reputation.md)
+[glossary](docs/project/glossary.md) · [chain](docs/project/chain.md) · [server architecture](server/ARCHITECTURE.md) · [rules](docs/project/rules/v0.001.md) · [identity](docs/project/identity.md) · [reputation](docs/project/reputation.md)

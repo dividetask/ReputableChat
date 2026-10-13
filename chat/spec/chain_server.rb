@@ -24,17 +24,24 @@ module ChainServer
   # Where the server wrote its host account's working seed on first boot.
   def host_seed = File.join(@dir || (url && @dir), "development", "host.seed")
 
+  # Its local listener, which the chat talks to.
+  def socket = socket_in(@dir || (url && @dir))
+
+  # The local listener of the agnostic server whose host directory is dir.
+  def socket_in(dir) = File.join(dir, "development", "server.sock")
+
+  def client = ReputableChat::ChainClient.new(socket)
+
   # The chat's host account: the agnostic server's, derived once per run since
   # Argon2id is slow on purpose.
-  def host = @host ||= ReputableChat::Host.join(ReputableChat::ChainClient.new(url), seed_path: host_seed)
+  def host = @host ||= ReputableChat::Host.join(client, seed_path: host_seed)
 
   # The chat wired to it: the development genesis, which both commit, and a
   # fresh local database and mirror.
   def wire(app = ReputableChat::App, store: ReputableChat::Store::Database.new("sqlite:/"))
     app.store = store
     app.genesis = ReputableChat::Genesis.load(path: ReputableChat::Genesis.path("development"))
-    app.chain = ReputableChat::ChainClient.new(url)
-    app.chain.signer = host
+    app.chain = client
     app.host = host
     app.files = nil
     app.mirror = ReputableChat::Chain::Mirror.new(store, app.chain, chat_notices: ReputableChat::App::NOTICE_KINDS)
@@ -65,7 +72,8 @@ module ChainServer
 
     address = "http://127.0.0.1:#{port}"
     120.times do
-      return address if Net::HTTP.get_response(URI("#{address}/api")).is_a?(Net::HTTPSuccess)
+      return address if Net::HTTP.get_response(URI("#{address}/api")).is_a?(Net::HTTPSuccess) &&
+                        File.socket?(socket_in(dir))
     rescue Errno::ECONNREFUSED, Errno::ECONNRESET, EOFError
       sleep 0.5
     end

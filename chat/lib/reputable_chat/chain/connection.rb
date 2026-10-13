@@ -37,7 +37,7 @@ module ReputableChat
         theirs = chain.genesis["hash"]
         unless theirs == genesis.hash
           raise Mismatch, "the agnostic server at #{chain.url} runs genesis #{theirs}, but this chat's is " \
-                          "#{genesis.hash}. Both must commit the same config/genesis/<environment>.json."
+                          "#{genesis.hash}. Both must read the same shared/genesis/<environment>.json."
         end
       end
     end

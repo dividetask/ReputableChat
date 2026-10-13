@@ -15,7 +15,9 @@ module ReputableChat
   # hash before it has fetched anything -- a genesis you have to download from
   # the server is not a genesis.
   #
-  # Generated once by script/generate_genesis.rb and committed.
+  # One copy for the agnostic server and every app, in shared/genesis/ at the
+  # root of the repository; the agnostic server's script/generate_genesis.rb
+  # makes it.
   #
   # There are two of them, because a developer needs to be able to sign as the
   # genesis account and a production network needs nobody else to be able to.
@@ -25,7 +27,7 @@ module ReputableChat
   class Genesis
     include CommittedDeclaration
 
-    DIRECTORY = File.expand_path("../../config/genesis", __dir__)
+    DIRECTORY = File.expand_path("../../../shared/genesis", __dir__)
 
     class Missing < StandardError; end
     class Corrupt < StandardError; end
@@ -44,14 +46,13 @@ module ReputableChat
 
     def self.development_message
       "this is the development genesis, whose seed is committed to the repository and " \
-        "therefore public. Generate a production one with " \
-        "`RACK_ENV=production bundle exec rake genesis` and keep its seed out of git."
+        "therefore public. A production one is made with the agnostic server's " \
+        "script/generate_genesis.rb, into shared/genesis/, and its seed kept out of git."
     end
 
     def self.missing_message(path)
-      "no genesis record at #{path}. Generate one with " \
-        "`#{Environment.production? ? 'RACK_ENV=production ' : ''}bundle exec rake genesis` " \
-        "and commit it -- nothing can be acknowledged until it exists."
+      "no genesis record at #{path}. The agnostic server's script/generate_genesis.rb " \
+        "makes one into shared/genesis/ -- nothing can be acknowledged until it exists."
     end
 
     def initialize(record, path: Genesis.path) = adopt(record, path)

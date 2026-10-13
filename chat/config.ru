@@ -6,6 +6,7 @@ require "reputable_chat/app"
 require "reputable_chat/server_config"
 require "reputable_chat/genesis"
 require "reputable_chat/host"
+require "reputable_chat/nudges"
 
 settings = ReputableChat::ServerConfig.load
 
@@ -25,7 +26,7 @@ ReputableChat::App.genesis = ReputableChat::Genesis.current
 ReputableChat::App.genesis.install_icon(ReputableChat::App.images)
 # The chain is the agnostic server's. The chat refuses to run against one on
 # another genesis, and keeps a copy of the records it shows.
-ReputableChat::App.chain = ReputableChat::ChainClient.new(settings.fetch("chain_url"))
+ReputableChat::App.chain = ReputableChat::ChainClient.new(settings.fetch("chain_socket"))
 # Nothing happens, the port included, until the agnostic server is live:
 # Puma loads this file before it binds.
 ReputableChat::Chain::Connection.wait_until_live(ReputableChat::App.chain)
@@ -37,27 +38,23 @@ ReputableChat::App.mirror = ReputableChat::Chain::Mirror.new(
 # chat signs with that server's working seed, and refuses to run if the two
 # are not one account.
 ReputableChat::App.host = ReputableChat::Host.join(ReputableChat::App.chain, seed_path: settings.fetch("host_seed"))
-# The agnostic server takes records only in uploads signed by an account on
-# its chain; the chat signs its users' records, and its own, as the host
-# account.
-ReputableChat::App.chain.signer = ReputableChat::App.host
 # Announced to other chat servers on the first boot with an address, and again
 # only when the address changes, so they can fetch its people's files.
 ReputableChat::Chain::Service.announce!(chain: ReputableChat::App.chain, mirror: ReputableChat::App.mirror,
                                         host: ReputableChat::App.host, url: settings.fetch("url"))
+# What the chat learns fetching from other chat servers moves the agnostic
+# server's ratings of them, by nudges the chat computes.
+nudges = ReputableChat::Nudges.new(
+  store: ReputableChat::App.store, chain: ReputableChat::App.chain,
+  step: settings.fetch("file_peers").fetch("nudge_step"),
+  missing_penalty: settings.fetch("file_peers").fetch("missing_penalty")
+)
 ReputableChat::App.files = ReputableChat::FilePeers.new(
   mirror: ReputableChat::App.mirror, chain: ReputableChat::App.chain, images: ReputableChat::App.images,
   host: ReputableChat::App.host, allow_private: settings.fetch("allow_private_peers"),
   require_https: ReputableChat::Environment.production?,
   missing_penalty: settings.fetch("file_peers").fetch("missing_penalty"),
-  # What it finds counts toward each account's rating on the agnostic server.
-  # A report says reached or not, so a server without the file is reported as
-  # not reached until the chat sends adjustments instead
-  # (docs/agnostic-server-requests.md, 1).
-  reporter: lambda do |account, outcome|
-    report = ReputableChat::App.host.contact_report(account, reached: outcome == :reached)
-    ReputableChat::App.chain.report_contact(*report)
-  end
+  reporter: ->(account, outcome) { nudges.record(account, outcome) }
 )
 
 run ReputableChat::App.freeze.app

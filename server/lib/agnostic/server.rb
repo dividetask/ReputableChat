@@ -10,6 +10,7 @@ require_relative "app"
 require_relative "accounts"
 require_relative "heartbeat"
 require_relative "ingest"
+require_relative "local_listener"
 require_relative "peers"
 require_relative "record"
 require_relative "rate_limit"
@@ -63,6 +64,7 @@ module Agnostic
       klass.clock = @clock
       server = self
       klass.state = -> { server.state }
+      klass.local_socket = settings.local_socket
       trusted = settings.trusted_proxies
       # Rack takes a caller's address from X-Forwarded-For only past proxies
       # this filter trusts. Out of the box it trusts any private address, so
@@ -98,6 +100,23 @@ module Agnostic
         end
       end
       every(settings.integer("pending", "sweep_seconds")) { ingest.expire }
+      self
+    end
+
+    # Opens the local listener for the apps beside this server, once live.
+    # config.ru calls this after prepare!.
+    def listen_locally
+      path = settings.local_socket
+      return self unless path
+
+      # A socket's path is at most 107 bytes, and a deep install directory
+      # passes that; refused loudly, since the apps cannot work without it.
+      if path.bytesize > 107
+        raise BootError, "the local socket #{path} is over 107 bytes, too long for a Unix socket: " \
+                         "set local.socket in config/server.yml to a shorter absolute path, such as /run/reputablechat/server.sock"
+      end
+      @local = LocalListener.new(app, path).start
+      warn "apps beside this server: unix://#{path}"
       self
     end
 

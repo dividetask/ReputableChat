@@ -20,7 +20,10 @@ module ReputableChat
       "origin" => nil,
       "database_url" => "sqlite://data/reputablechat.db",
       "image_root" => "data/images",
-      "chain_url" => "http://localhost:9393",
+      # The agnostic server's local listener, which it opens once live in the
+      # host account's directory: a Unix socket only processes of its user
+      # can open, where the chat's uploads need no signature.
+      "chain_socket" => "../host/%{environment}/server.sock",
       # The agnostic server's working seed: the chat and the agnostic server
       # beside it are one account. %{environment} is development or production.
       "host_seed" => "../host/%{environment}/host.seed",
@@ -36,7 +39,7 @@ module ReputableChat
       "origin" => "ORIGIN",
       "database_url" => "DATABASE_URL",
       "image_root" => "IMAGE_ROOT",
-      "chain_url" => "CHAIN_URL",
+      "chain_socket" => "CHAIN_SOCKET",
       "host_seed" => "HOST_SEED",
       "url" => "PUBLIC_URL",
       "allow_private_peers" => "ALLOW_PRIVATE_PEERS"
@@ -62,8 +65,10 @@ module ReputableChat
     # Fetching files from other chat servers (FilePeers). missing_penalty is
     # how much a server that answered without the file is put off, as a
     # share of what a server that did not answer is: "0" not at all, "1" the
-    # same. MISSING_PENALTY overrides.
-    FILE_PEERS = { "missing_penalty" => "0.25" }.freeze
+    # same. nudge_step is the most the chat moves the agnostic server's rating
+    # of another chat server, either way (Nudges). MISSING_PENALTY and
+    # NUDGE_STEP override.
+    FILE_PEERS = { "missing_penalty" => "0.25", "nudge_step" => "0.01" }.freeze
 
     module_function
 
@@ -83,6 +88,7 @@ module ReputableChat
       environment = Environment.name
       settings.merge("origin" => Origin.list(settings["origin"]),
                      "host_seed" => File.expand_path(format(settings["host_seed"], environment: environment), root),
+                     "chain_socket" => File.expand_path(format(settings["chain_socket"], environment: environment), root),
                      "url" => present(settings["url"]&.to_s)&.chomp("/"),
                      "allow_private_peers" => flag(settings["allow_private_peers"], environment != Environment::PRODUCTION),
                      "limits" => limits(file["limits"] || {}, env),
@@ -101,14 +107,16 @@ module ReputableChat
       end
     end
 
-    # A penalty that is not a decimal from 0 to 1 falls back to the default,
+    # A value that is not a decimal from 0 to 1 falls back to the default,
     # for the same reason a bad limit does.
     def file_peers(file, env)
-      raw = env["MISSING_PENALTY"] || file["missing_penalty"]
-      penalty = raw.nil? ? nil : BigDecimal(raw.to_s.strip, exception: false)
-      penalty = nil unless penalty&.between?(0, 1)
+      FILE_PEERS.to_h do |key, fallback|
+        raw = env[key.upcase] || file[key]
+        value = raw.nil? ? nil : BigDecimal(raw.to_s.strip, exception: false)
+        value = nil unless value&.between?(0, 1)
 
-      { "missing_penalty" => penalty || BigDecimal(FILE_PEERS.fetch("missing_penalty")) }
+        [key, value || BigDecimal(fallback)]
+      end
     end
 
     def flag(value, fallback)

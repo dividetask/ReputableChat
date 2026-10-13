@@ -64,7 +64,7 @@ class OperatorSpec < Minitest::Test
     Dir.mktmpdir do |dir|
       error = assert_raises(Operator::MissingSeed) { Operator.seed_phrase(path: File.join(dir, "nope")) }
 
-      assert_match(/rake genesis/, error.message)
+      assert_match(%r{shared/genesis/.*--seed}, error.message)
     end
   end
 

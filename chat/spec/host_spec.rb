@@ -19,7 +19,7 @@ class HostSpec < Minitest::Test
 
   def app = ReputableChat::App.app
 
-  def chain = ReputableChat::ChainClient.new(ChainServer.url)
+  def chain = ChainServer.client
 
   # RULE (yours): the chat and its agnostic server share an account.
   def test_the_chat_signs_as_its_agnostic_servers_host_account
@@ -43,25 +43,10 @@ class HostSpec < Minitest::Test
     assert_match(/agnostic server writes it on its first boot/, error.message)
   end
 
-  # RULE (yours): what the chat learns reaching other servers goes to its
-  # agnostic server, signed by the account they share.
-  def test_a_contact_report_signed_by_the_shared_account_is_taken
-    other = "d" * 64
-    result = chain.report_contact(*ChainServer.host.contact_report(other, reached: false))
-
-    assert_equal true, result["recorded"]
-  end
-
-  # RULE: the agnostic server takes records only in uploads signed by an
-  # account on its chain; the chat's are signed by the host account.
-  def test_an_upload_must_be_signed_and_the_chats_are
-    unsigned = chain
-    error = assert_raises(ReputableChat::ChainClient::Unreachable) { unsigned.submit("{}", "x") }
-    assert_match(/401/, error.message)
-
-    signed = chain
-    signed.signer = ChainServer.host
-    assert_equal "refused", signed.submit("{}", "x").status, "signed, it reaches the rules, which refuse it"
+  # RULE (yours): the chat reaches its agnostic server through the local
+  # listener, where uploads need no signature: only the apps beside it can.
+  def test_the_chats_uploads_need_no_signature_on_the_local_listener
+    assert_equal "refused", chain.submit("{}", "x").status, "unsigned, it reaches the rules, which refuse it"
   end
 
   # RULE: the host account is served beside the genesis, so a new account can

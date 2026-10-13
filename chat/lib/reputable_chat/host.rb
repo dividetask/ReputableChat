@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
 require "base64"
-require "digest"
 require "ed25519"
 require "json"
 require_relative "operator"
@@ -62,25 +61,6 @@ module ReputableChat
     # What a client is given: the account and its declaration, enough to show
     # it as a default friend before anything else is fetched.
     def to_h = { "account" => account, "payload" => payload, "signature" => signature, "hash" => hash }
-
-    # A report for the agnostic server that this app did or did not reach
-    # another server's account: [payload, signature]. Not a record; it never
-    # leaves this machine.
-    def contact_report(account, reached:, at: Time.now.to_i)
-      sign({ "purpose" => "reputablechat:contact:v1", "account" => account, "reached" => reached, "ts" => at.to_i })
-    end
-
-    # The headers that make a request to the agnostic server a signed upload,
-    # which it requires before it takes records: the account, its working key,
-    # a timestamp and a signature over those with the method, path and the
-    # body's SHA-256. The agnostic server's UploadAuth checks them.
-    UPLOAD = "reputablechat:upload:v1"
-
-    def upload_headers(method, path, body, at: Time.now.to_i)
-      message = [UPLOAD, method.to_s.upcase, path, at.to_i.to_s, Digest::SHA256.hexdigest(body.to_s.b)].join("\n")
-      { "X-Reputablechat-Account" => account, "X-Reputablechat-Key" => pubkey,
-        "X-Reputablechat-Ts" => at.to_i.to_s, "X-Reputablechat-Signature" => sign_bytes(message) }
-    end
 
     # Signs a payload as the host account: [canonical payload, signature].
     def sign(payload)

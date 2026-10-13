@@ -75,6 +75,23 @@ module ReputableChat
           String   :value
         end
 
+        # How each attempt to fetch a file from another chat server went
+        # (FilePeers), kept for Nudges: reached, missing or unreached.
+        @db.create_table?(:fetch_outcomes) do
+          primary_key :id
+          String   :account, null: false, index: true
+          String   :outcome, null: false
+          Integer  :at, null: false, index: true
+        end
+
+        # The nudge last sent to the agnostic server for each account, as
+        # sent, so the same one is not sent again.
+        @db.create_table?(:nudges_sent) do
+          String   :account, primary_key: true
+          String   :reputation, null: false
+          String   :trust, null: false
+        end
+
         @db.create_table?(:nonces) do
           String   :nonce, primary_key: true
           Integer  :issued_at, null: false
@@ -104,6 +121,28 @@ module ReputableChat
 
       def sweep_nonces
         @db[:nonces].where { issued_at < (now - NONCE_TTL) }.delete
+      end
+
+      # --- fetches from other chat servers, and the nudges they come to -------
+
+      def record_fetch(account, outcome, at:)
+        @db[:fetch_outcomes].insert(account: account, outcome: outcome.to_s, at: at)
+      end
+
+      # [outcome, ...] for the account since `since`, as symbols.
+      def fetches_since(account, since)
+        @db[:fetch_outcomes].where(account: account).where { at >= since }.select_map(:outcome).map(&:to_sym)
+      end
+
+      def forget_fetches_before(cutoff) = @db[:fetch_outcomes].where { at < cutoff }.delete
+
+      # {account => {"reputation", "trust"}} for every nudge last sent.
+      def nudges_sent
+        @db[:nudges_sent].to_hash(:account).transform_values { |r| { "reputation" => r[:reputation], "trust" => r[:trust] } }
+      end
+
+      def save_nudge_sent(account, reputation:, trust:)
+        @db[:nudges_sent].insert_conflict(:replace).insert(account: account, reputation: reputation, trust: trust)
       end
 
       # --- records -------------------------------------------------------------

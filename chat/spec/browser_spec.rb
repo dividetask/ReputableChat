@@ -141,7 +141,7 @@ class BrowserSpec < Minitest::Test
         "DATABASE_URL" => "sqlite://#{@dir}/browser.db",
         "IMAGE_ROOT" => "#{@dir}/images",
         # The agnostic server the specs share, which holds the chain.
-        "CHAIN_URL" => ChainServer.url,
+        "CHAIN_SOCKET" => ChainServer.socket,
         "HOST_SEED" => ChainServer.host_seed },
       "bundle", "exec", "puma", "-p", @port.to_s, "-q",
       chdir: ROOT, out: File::NULL, err: File::NULL

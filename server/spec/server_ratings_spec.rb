@@ -122,7 +122,8 @@ class ServerRatingsSpec < Minitest::Test
     contact(attempts: 100, successes: 95, first_success_at: @now - (400 * DAY))
     by_hand.set(beta, "-0.5", "1")
 
-    assert_equal({ "reputation" => "-0.5", "trust" => "1", "source" => "operator" }, @alpha.ratings.current[beta])
+    assert_equal({ "reputation" => "-0.5", "trust" => "1" }, @alpha.ratings.current[beta].slice("reputation", "trust"))
+    assert_equal({ "reputation" => "-0.5", "trust" => "1" }, @alpha.ratings.current[beta]["operator"])
     @alpha.ratings.publish
     assert_equal %w[-0.5 1], published
   end
@@ -133,7 +134,7 @@ class ServerRatingsSpec < Minitest::Test
     @alpha.ratings.publish
     by_hand.clear(beta)
 
-    assert_equal "reachability", @alpha.ratings.current[beta]["source"]
+    refute @alpha.ratings.current[beta].key?("operator")
     @alpha.ratings.publish
     assert_equal %w[0.02 0], published
   end
@@ -164,31 +165,61 @@ class ServerRatingsSpec < Minitest::Test
     assert_equal "0.4", JSON.parse(response.body).dig("ratings", beta, "reputation")
   end
 
-  # --- what the apps beside the server report -----------------------------------
+  # --- what the apps beside the server nudge ----------------------------------
 
-  def report(reached:, key: nil, account: beta, ts: @now)
-    payload = JSON.generate("purpose" => "reputablechat:contact:v1", "account" => account, "reached" => reached, "ts" => ts)
-    signature = Agnostic::Keys.sign(key || @alpha.host.signing_key, payload)
-    Rack::MockRequest.new(@alpha.app).post("/api/contacts", input: JSON.generate("payload" => payload, "signature" => signature),
-                                                           "CONTENT_TYPE" => "application/json")
+  def nudge(app, reputation, trust = "0", account: beta)
+    @alpha.store.nudge_rating(app, account, reputation: reputation, trust: trust, at: @now)
   end
 
-  # RULE (yours): what the chat finds fetching files counts toward the
-  # account's rating, as the server's own contacts do.
-  def test_an_apps_report_counts_with_the_servers_own_contacts
-    before = @alpha.store.contact(beta)&.fetch(:attempts) || 0
-    assert_equal 200, report(reached: true).status
-    assert_equal 200, report(reached: false).status
-
-    contact = @alpha.store.contact(beta)
-    assert_equal before + 2, contact[:attempts]
+  # RULE (yours): what an app learns of a server is a separate fact from
+  # whether this server can reach it, so both count.
+  def test_an_apps_nudge_adds_to_the_servers_own_rating
+    contact(attempts: 10, successes: 10, first_success_at: @now - (400 * DAY))
+    nudge("chat", "0.004")
+    assert_equal({ "reputation" => "0.024", "trust" => "0" }, @alpha.ratings.due[beta])
   end
 
-  # Only the apps on this machine hold the host account's key, so nobody else
-  # can move a rating by reporting.
-  def test_a_report_not_signed_by_the_host_account_is_refused
-    assert_equal 403, report(reached: false, key: Ed25519::SigningKey.generate).status
-    assert_equal 400, report(reached: false, ts: @now - 3_600).status
+  def test_a_nudge_counts_where_the_server_has_no_rating_of_its_own
+    nudge("chat", "-0.01")
+    assert_equal "-0.01", rating
+  end
+
+  def test_every_apps_nudge_is_summed_and_held_between_minus_one_and_one
+    nudge("chat", "0.8", "0.3")
+    nudge("forum", "0.7", "0.2")
+    assert_equal({ "reputation" => "1", "trust" => "0.5" }, @alpha.ratings.due[beta])
+  end
+
+  # RULE (yours): an app, which knows more than whether a server answers, may
+  # move trust; the server's own judgement never does.
+  def test_an_app_may_move_trust
+    nudge("chat", "0", "0.1")
+    assert_equal "0.1", @alpha.ratings.due.dig(beta, "trust")
+  end
+
+  def test_a_rating_by_hand_overrides_the_nudges
+    nudge("chat", "0.5")
+    by_hand.set(beta, "-0.2", "0.1")
+    assert_equal({ "reputation" => "-0.2", "trust" => "0.1" }, @alpha.ratings.due[beta])
+  end
+
+  def test_the_ratings_say_what_each_is_made_of
+    contact(attempts: 10, successes: 10, first_success_at: @now - (400 * DAY))
+    nudge("chat", "0.004")
+    by_hand.set(beta, "0.4", "0")
+    entry = JSON.parse(Rack::MockRequest.new(@alpha.app).get("/api/ratings").body).dig("ratings", beta)
+    assert_equal({ "reputation" => "0.4", "trust" => "0",
+                   "operator" => { "reputation" => "0.4", "trust" => "0" },
+                   "reachability" => { "reputation" => "0.02", "trust" => "0" },
+                   "nudges" => { "chat" => { "reputation" => "0.004", "trust" => "0" } } }, entry)
+  end
+
+  # RULE (yours): an app moves a rating only by its nudge, on the local
+  # listener; the contact reports that came before are gone, so nothing is
+  # counted twice.
+  def test_an_app_has_no_other_way_to_move_a_rating
+    response = Rack::MockRequest.new(@alpha.app).post("/api/contacts", input: "{}", "CONTENT_TYPE" => "application/json")
+    assert_equal 404, response.status
   end
 end
 
@@ -224,6 +255,43 @@ class RatedOutSpec < Minitest::Test
 
     @alpha.store.forgive(@beta.host.id)
     assert_equal 200, offer
+  end
+
+  def nudge(app, reputation)
+    @alpha.store.nudge_rating(app, @beta.host.id, reputation: reputation, trust: "0", at: @now)
+    @alpha.ratings.publish
+  end
+
+  def ignored? = @alpha.store.ignored?(@beta.host.id, at: @now)
+
+  # RULE (yours): an app may nudge a server to -1, and it is ignored like any
+  # server rated -1; but the app may take its nudge back, or another app
+  # nudge it up, and once the rating is above -1 it is no longer ignored,
+  # with no administrator needed.
+  def test_a_server_nudged_to_minus_one_is_ignored_until_the_app_takes_it_back
+    nudge("chat", "-1")
+    assert ignored?
+    assert_equal 403, offer
+
+    nudge("chat", "0")
+    refute ignored?
+    assert_equal 200, offer
+  end
+
+  def test_a_server_nudged_to_minus_one_is_let_back_in_when_another_app_nudges_it_up
+    nudge("chat", "-1")
+    assert ignored?
+
+    nudge("forum", "0.1")
+    assert_equal "-0.9", @alpha.store.published_rating(@beta.host.id)[:reputation]
+    refute ignored?
+  end
+
+  # A rating above -1 lifts only the ignore that a -1 rating put there.
+  def test_a_rating_above_minus_one_does_not_lift_an_ignore_for_the_clock
+    @alpha.store.ignore(@beta.host.id, reason: "its clock is off", at: @now, until_at: @now + DAY)
+    nudge("chat", "0.1")
+    assert ignored?
   end
 
   def test_a_server_that_went_offline_is_not_ignored

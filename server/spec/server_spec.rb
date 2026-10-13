@@ -7,7 +7,7 @@ require "servers"
 class ServerSpec < Minitest::Test
   include Servers
 
-  GENESIS = File.expand_path("../config/genesis/development.json", __dir__)
+  GENESIS = File.expand_path("../../shared/genesis/development.json", __dir__)
   RULES   = File.expand_path("../../docs/project/rules/v0.001.md", __dir__)
 
   def committed_genesis = Agnostic::Record.from_wire(JSON.parse(File.read(GENESIS)))

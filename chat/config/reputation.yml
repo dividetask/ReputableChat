@@ -64,7 +64,7 @@ attestation:
   # readers, never an input to their own scores; see docs/project/chain.md.
   published_hops: 3
   # Republish the whole attestation after either limit, whichever comes first,
-  # superseding every adjustment against the previous revision.
+  # superseding every change against the previous revision.
   #
   # Both are floors on when pending changes get published, not schedules. With
   # nothing pending, nothing is published: a second document stating exactly

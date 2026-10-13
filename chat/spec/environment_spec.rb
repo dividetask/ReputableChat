@@ -91,30 +91,33 @@ class EnvironmentSpec < Minitest::Test
   # --- what git will and will not carry -----------------------------------
 
   # RULE: the development seed is committed on purpose, so a fresh clone can
-  # sign as the genesis account without being handed a secret.
+  # sign as the genesis account without being handed a secret. It is the one
+  # in shared/genesis/ every app and the agnostic server read.
   def test_the_development_seed_is_committed
-    refute ignored?("config/genesis/development.seed"),
-           "development's seed must not be ignored -- a clone needs it"
-    assert File.exist?(Operator.path_for(Environment::DEVELOPMENT))
+    path = Operator.path_for(Environment::DEVELOPMENT)
+
+    refute ignored?(path), "development's seed must not be ignored -- a clone needs it"
+    assert File.exist?(path)
   end
 
   # RULE: every other seed is ignored. The rule is written as "ignore all, then
   # un-ignore development", so a new environment is refused by default rather
   # than committed by omission.
   def test_every_other_seed_is_ignored
+    directory = File.dirname(Operator.path_for(Environment::DEVELOPMENT))
     %w[production staging whatever].each do |environment|
-      assert ignored?("config/genesis/#{environment}.seed"),
-             "#{environment}'s seed must be ignored"
-      assert ignored?("config/genesis/#{environment}.master.seed"),
+      assert ignored?(File.join(directory, "#{environment}.seed")), "#{environment}'s seed must be ignored"
+      assert ignored?(File.join(directory, "#{environment}.master.seed")),
              "#{environment}'s master seed must be ignored"
     end
+    assert ignored?("config/anything.seed"), "a seed anywhere in the chat must be ignored"
   end
 
   def test_no_seed_but_developments_is_tracked
-    tracked, = Open3.capture2("git", "ls-files", "config/genesis/")
+    tracked, = Open3.capture2("git", "ls-files", "--full-name", "../")
     seeds = tracked.split("\n").grep(/\.seed\z/)
 
-    assert_equal ["config/genesis/development.master.seed", "config/genesis/development.seed"], seeds
+    assert_equal ["shared/genesis/development.master.seed", "shared/genesis/development.seed"], seeds.sort
   end
 
   def ignored?(path)

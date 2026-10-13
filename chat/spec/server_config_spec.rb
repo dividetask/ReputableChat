@@ -83,8 +83,9 @@ class ServerConfigSpec < Minitest::Test
       "origin" => [], "limits" => ReputableChat::ServerConfig::LIMITS,
       # Resolved: the agnostic server's seed in this environment, beside the chat.
       "host_seed" => File.expand_path("../../host/development/host.seed", __dir__),
+      "chain_socket" => File.expand_path("../../host/development/server.sock", __dir__),
       "allow_private_peers" => true,
-      "file_peers" => { "missing_penalty" => BigDecimal(ReputableChat::ServerConfig::FILE_PEERS["missing_penalty"]) }
+      "file_peers" => ReputableChat::ServerConfig::FILE_PEERS.transform_values { |v| BigDecimal(v) }
     )
 
     assert_equal expected, Settings.load(path: File.join(@dir, "absent.yml"), env: {})

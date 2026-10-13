@@ -61,7 +61,7 @@ class BootSpec < Minitest::Test
       Process.spawn(
         { "RACK_ENV" => "development", "SESSION_SECRET" => SecureRandom.hex(64), "ORIGIN" => nil,
           "DATABASE_URL" => "sqlite://#{dir}/chat.db", "IMAGE_ROOT" => "#{dir}/images",
-          "CHAIN_URL" => "http://127.0.0.1:#{chain_port}",
+          "CHAIN_SOCKET" => ChainServer.socket_in(dir),
           "HOST_SEED" => File.join(dir, "development", "host.seed"),
           "BUNDLE_GEMFILE" => File.join(ROOT, "Gemfile") },
         "bundle", "exec", "puma", "-b", "tcp://127.0.0.1:#{port}", "-q",

@@ -24,7 +24,7 @@ module ReputableChat
   # that it is the same thing a person would type into the UI and there is only
   # one secret to look after rather than two.
   module Operator
-    DIRECTORIES = { genesis: File.expand_path("../../config/genesis", __dir__) }.freeze
+    DIRECTORIES = { genesis: File.expand_path("../../../shared/genesis", __dir__) }.freeze
     DIRECTORY = DIRECTORIES.fetch(:genesis)
     HELPER    = File.expand_path("../../script/derive_key.mjs", __dir__)
 
@@ -64,9 +64,10 @@ module ReputableChat
     end
 
     def missing_message(path)
-      "no seed at #{path}. `bundle exec rake genesis` or `bundle exec rake host` writes " \
-        "one. Outside development it is gitignored and never committed, so a fresh clone " \
-        "does not have it."
+      "no seed at #{path}. Development's genesis seed is committed in shared/genesis/; " \
+        "any other is gitignored and never committed, so a fresh clone does not have it: " \
+        "pass the one you keep with --seed. The host account's is written by the agnostic " \
+        "server on its first boot."
     end
 
     # Written 0600 before anything is put in it, so the secret is never briefly

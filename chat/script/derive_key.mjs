@@ -1,6 +1,6 @@
-// The half of genesis generation that Ruby cannot do: Argon2id and Ed25519
-// signing. Driven by script/generate_genesis.rb, which owns the canonical
-// serialization and the payload shape.
+// What Ruby cannot do for the genesis account driven from a terminal
+// (Operator, script/tim.rb): Argon2id and Ed25519 signing. Ruby owns the
+// canonical serialization and the payload shape.
 //
 // This runs the REAL client derivation -- the vendored hash-wasm build the
 // browser loads, the same KDF parameters out of config/reputation.yml, and

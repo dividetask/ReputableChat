@@ -4,33 +4,36 @@ The root `CLAUDE.md` applies here too: how to talk to the user, the agnostic
 server, the rules. This file is the chat's. **Paths in it are inside `chat/`**
 unless they start with `../`.
 
-`chat/` is this branch's. `server/`, `shared/`, `docs/project/rules/` and
-the root files come from the agnostic server's branch,
+`chat/` is this branch's. `server/`, `shared/`, `docs/project/rules/`,
+`coordination/` and the root files come from the agnostic server's branch,
 `Agnostic-Server-V0`, which this one merges from time to time. Change those
 there, not here, and keep the chat compatible with them. Exceptions, kept on
-this branch: `docs/project/apps/`, and the chat's lines in the root
+this branch: `docs/project/apps/`, and the chat's line in the root
 `.gitignore`. **Merging that branch:** `git merge --no-commit`, then put back
 anything of ours it would delete (`git checkout HEAD -- chat docs/project/apps`)
 before committing.
 
+**Asking the server for something:** a file in
+`../coordination/requests/server/chat-<short-name>.md`, as
+`../coordination/README.md` describes. Requests to the chat arrive in
+`../coordination/requests/chat/` with each merge: do what they say, then
+delete them, saying so in the commit message.
+
 ## Commands
 
-The chat runs beside an agnostic server at `chain_url`
-(http://localhost:9393), and waits for it to be live before it opens its port.
+The chat runs beside an agnostic server and talks to it only through the
+server's local listener, a Unix socket at `../host/<environment>/server.sock`
+(`chain_socket`, `CHAIN_SOCKET`). The server opens it once it is live, and
+the chat waits for it before it opens its own port.
 
 ```bash
-# In chat/, beside an agnostic server at chain_url (http://localhost:9393):
-#   cd server && bundle exec puma
+# In chat/, beside an agnostic server (cd server && bundle exec puma):
 bundle exec rake spec       # full suite; starts its own agnostic server
                             # (browser tests skip without `npm install`)
 npm install                 # once, for the browser tests
 bundle exec rake curve      # print current curve and ladder
 bundle exec rake dump       # readable dump of the database
 bundle exec rake "dump[messages,reactions]"   # just those sections
-bundle exec rake genesis    # development genesis (already committed)
-RACK_ENV=production bundle exec rake genesis   # production genesis (once, ever)
-# Handle, bio and icon: run the script directly with --handle, --bio, --icon.
-bundle exec ruby script/generate_genesis.rb --host --production --handle Ops --icon ops.png
 
 # The genesis account from a terminal, against a running server; --host signs
 # as the host account instead.
@@ -56,12 +59,12 @@ and [../docs/project/chain.md](../docs/project/chain.md).
   agree, and both must be what the rules say: SHA-256 over the payload, a
   newline and the signature, with nothing in front. If they drift, every `ack` points at a record the other side cannot
   find and no reference resolves. `spec/record_parity_spec.rb` guards it.
-- **The genesis record.** `config/genesis/<environment>.json` is the bottom of
-  the chain. Regenerating one orphans every record that acknowledged the old
-  one, which is the whole chain. `script/generate_genesis.rb` refuses to
-  overwrite either it or the seed beside it.
+- **The genesis record.** `../shared/genesis/<environment>.json` is the
+  bottom of the chain, the one copy the agnostic server and every app read;
+  the agnostic server's branch makes and keeps it. Regenerating one orphans
+  every record that acknowledged the old one, which is the whole chain.
 - **Two accounts.** The genesis account is the developer's.
-  `config/genesis/development.seed` and the `.master.seed` beside it are
+  `../shared/genesis/development.seed` and the `.master.seed` beside it are
   **committed on purpose** — that identity is public, so a fresh clone can
   sign as it without being handed a secret. It has a working key and a master
   key, from two separate seed phrases. Every other seed is gitignored, 0600,
@@ -118,17 +121,15 @@ and [../docs/project/chain.md](../docs/project/chain.md).
   field is `docs/project/rules/v0.001.md`, stripped of surrounding whitespace.
   Edit that file and `spec/chain_spec.rb` fails until the genesis is
   regenerated, which orphans everything that acknowledged it.
-- **One chain, two copies of its genesis.** `config/genesis/development.json`
-  must be the same record as `../server/config/genesis/development.json`, and
-  `config/genesis/development.seed` the same phrase as the agnostic server's
-  `../server/spec/fixtures/development-genesis.seed`: two genesis records are
-  two chains, and the chat would refuse to boot against its own agnostic
-  server. `spec/compatibility_spec.rb` fails when they differ. The agnostic
-  server's copies are the other branch's; when they change, regenerate this
-  one to match.
 - **The host account** is the agnostic server's, made on its first boot into
   `../host/<environment>/`. The chat reads the working phrase, `host.seed`,
-  and nothing else there.
+  and talks to the server through `server.sock` beside it; it must run as the
+  same user, since both are 0600.
+- **Nudges** (`nudges.rb`) are the chat's say in the agnostic server's
+  ratings of other chat servers: what its fetches from them came to, sent
+  over the socket. The server adds them to its own reachability rating; an
+  operator's rating by hand overrides both. The chat never sends a nudge for
+  anything but what it learned itself.
 - **One home per rule.** A rule written in two places gets edited in one of
   them, and the two copies then disagree about which records are valid. That
   happened three times in one afternoon of editing, each time as a paraphrase
@@ -143,9 +144,9 @@ and [../docs/project/chain.md](../docs/project/chain.md).
 - **The seed derivation, in three places.** `seed.kdf` in
   `config/reputation.yml`, `public/js/identity.js` and the agnostic server's
   `../server/lib/agnostic/seed.rb` must derive the same key from the same
-  phrase, or one phrase is a different account in each.
-  `spec/compatibility_spec.rb` derives the server's development phrase in the
-  chat and expects the key the server's genesis declares.
+  phrase, or one phrase is a different account in each. Every spec that
+  starts a real agnostic server would fail if they differed: the chat
+  refuses to boot when its host seed is not the account the server names.
 
 ## Code conventions
 

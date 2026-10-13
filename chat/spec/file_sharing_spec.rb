@@ -9,7 +9,6 @@ require "securerandom"
 require "socket"
 require "tmpdir"
 require "reputable_chat/chain_client"
-require "reputable_chat/host"
 require "reputable_chat/store/images"
 
 # Two real chat servers sharing files, each beside its own agnostic server.
@@ -55,7 +54,7 @@ class FileSharingSpec < Minitest::Test
       Process.spawn(
         { "RACK_ENV" => "development", "SESSION_SECRET" => SecureRandom.hex(64), "ORIGIN" => nil,
           "DATABASE_URL" => "sqlite://#{dir}/chat.db", "IMAGE_ROOT" => "#{dir}/images",
-          "CHAIN_URL" => chain, "HOST_SEED" => File.join(dir, "development", "host.seed"),
+          "CHAIN_SOCKET" => ChainServer.socket_in(dir), "HOST_SEED" => File.join(dir, "development", "host.seed"),
           # Loopback is a private address; development allows it, and this
           # says so rather than relying on the default.
           "PUBLIC_URL" => url, "ALLOW_PRIVATE_PEERS" => "1",
@@ -84,17 +83,16 @@ class FileSharingSpec < Minitest::Test
     raise "the chat server at #{url} did not start; its log:\n#{File.read(log)}"
   end
 
-  # Uploaded as the receiving side's host account, which the agnostic server
-  # there knows: it takes records only in signed uploads.
+  # Uploaded through the receiving side's local listener, as an app beside
+  # it would: the public port takes records only signed by an account on its
+  # chain, which is syncing's business.
   def self.copy_records(from:, to:)
     page = JSON.parse(Net::HTTP.get(URI("#{from.chain}/api/records?since=0&limit=500")))
-    signer = ReputableChat::Host.join(ReputableChat::ChainClient.new(to.chain),
-                                      seed_path: File.join(to.dir, "development", "host.seed"))
-    body = JSON.generate("records" => page.fetch("records"))
-    uri = URI("#{to.chain}/api/records")
-    headers = { "Content-Type" => "application/json" }.merge(signer.upload_headers("POST", uri.path, body))
-    response = Net::HTTP.post(uri, body, headers)
-    raise "#{to.chain} refused the records from #{from.chain}: #{response.body}" unless response.is_a?(Net::HTTPSuccess)
+    client = ReputableChat::ChainClient.new(ChainServer.socket_in(to.dir))
+    page.fetch("records").each do |record|
+      result = client.submit(record["payload"], record["signature"])
+      raise "#{to.chain} refused #{record['hash']}: #{result.problems.join('; ')}" if result.status == "refused"
+    end
   end
 
   def image(fill)

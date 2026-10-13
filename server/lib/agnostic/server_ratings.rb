@@ -17,19 +17,30 @@ module Agnostic
   #   year) have.
   # - Anything else: no opinion, and nothing is published.
   #
-  # The operator can set any account's rating by hand, trust included (rake
-  # rate); that stands in for the rating above until it is removed (rake
-  # unrate), and is published the same way.
+  # Each app beside the server can move an account's rating by its own
+  # judgement (POST /api/nudges, on the local listener): reputation and
+  # trust, one nudge per app and account. What is published is this
+  # server's own rating -- 0 where it has none -- plus every app's
+  # nudge, reputation and trust each summed and held between -1 and +1.
   #
-  # An account this server publishes a rating of -1 for, either way, is
-  # ignored from then on -- no contact either way -- until an administrator
-  # forgives it (rake forgive). Every other server can come back by itself.
+  # The operator can set any account's rating by hand, trust included (rake
+  # rate); that overrides everything above, nudges included, until it is
+  # removed (rake unrate), and is published the same way.
+  #
+  # An account this server publishes a rating of -1 for, however it came to
+  # -1, is ignored -- no contact either way -- for as long as that is what it
+  # publishes: until an administrator forgives it (rake forgive), or a later
+  # rating above -1 is published, as when an app takes its nudge back or
+  # another app nudges it up. A server ignored for its clock stays ignored
+  # for its own reasons. Every other server can come back by itself.
   #
   # It is published as an attestation of the host account, holding only the
   # ratings that changed since the last one -- a later attestation amends the
   # earlier ones rather than replacing them -- so one is rare: a server's
   # rating moves at most a few times in its life.
   class ServerRatings
+    RATED_OUT = "this server rated it -1"
+
     def initialize(store:, ingest:, host:, settings:, clock: -> { Time.now.to_i })
       @store = store
       @ingest = ingest
@@ -38,18 +49,28 @@ module Agnostic
       @clock = clock
     end
 
-    # What this server says of each account it has an opinion of: an
-    # operator's rating where there is one, else what reachability says.
+    # What this server says of each account it has an opinion of, and where
+    # it came from: "operator", "reachability" and "nudges" (by app),
+    # each present only when there is one. The operator's rating, when set,
+    # is what is said; otherwise reachability plus the nudges.
     def current
       contacts = @store.contacts.to_h { |c| [c[:account], c] }
       overrides = @store.rating_overrides.to_h { |o| [o[:account], o] }
-      (contacts.keys | overrides.keys).each_with_object({}) do |account, out|
+      nudges = @store.nudges.group_by { |a| a[:account] }
+      (contacts.keys | overrides.keys | nudges.keys).each_with_object({}) do |account, out|
         next if account == @host.id
 
+        parts = {}
+        reachable = contacts[account] && rating_for(contacts[account])
+        parts["reachability"] = { "reputation" => reachable, "trust" => trust } if reachable
+        if nudges[account]
+          parts["nudges"] = nudges[account].to_h { |a| [a[:app], { "reputation" => a[:reputation], "trust" => a[:trust] }] }
+        end
         if (o = overrides[account])
-          out[account] = { "reputation" => o[:reputation], "trust" => o[:trust], "source" => "operator" }
-        elsif (rating = contacts[account] && rating_for(contacts[account]))
-          out[account] = { "reputation" => rating, "trust" => trust, "source" => "reachability" }
+          parts["operator"] = { "reputation" => o[:reputation], "trust" => o[:trust] }
+          out[account] = parts["operator"].merge(parts)
+        elsif parts.any?
+          out[account] = combined(parts).merge(parts)
         end
       end
     end
@@ -88,9 +109,11 @@ module Agnostic
       if result.status == :accepted
         scores.each do |account, score|
           @store.save_published_rating(account, reputation: score["reputation"], trust: score["trust"], at: @clock.call)
-          next unless score["reputation"] == "-1"
-
-          @store.ignore(account, reason: "this server rated it -1", at: @clock.call, until_at: Store::FOREVER)
+          if score["reputation"] == "-1"
+            @store.ignore(account, reason: RATED_OUT, at: @clock.call, until_at: Store::FOREVER)
+          else
+            @store.forgive(account, reason: RATED_OUT)
+          end
         end
       end
       result
@@ -114,14 +137,23 @@ module Agnostic
 
     private
 
+    def combined(parts)
+      shares = [parts["reachability"], *parts.fetch("nudges", {}).values].compact
+      %w[reputation trust].to_h do |key|
+        sum = shares.sum(BigDecimal("0")) { |share| Formats.decimal(share[key]) }
+        [key, Formats.write(sum.clamp(BigDecimal("-1"), BigDecimal("1")))]
+      end
+    end
+
     def reliable?(contact)
       ratio = @settings.decimal("ratings", "reliable_ratio", minimum: 0)
       BigDecimal(contact[:successes]) >= ratio * contact[:attempts]
     end
 
-    # Always 0. This server judges only whether another server stays online,
-    # and saying a server reliably produces heartbeats must not read as
-    # saying its ratings are worth believing.
+    # Always 0 for reachability. This server judges only whether another
+    # server stays online, and saying a server reliably produces heartbeats
+    # must not read as saying its ratings are worth believing. Apps, which
+    # know more, may move trust by their nudges.
     TRUST = "0"
 
     def trust = TRUST

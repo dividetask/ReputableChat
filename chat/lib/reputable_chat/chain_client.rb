@@ -2,7 +2,7 @@
 
 require "json"
 require "net/http"
-require "uri"
+require "socket"
 
 module ReputableChat
   # The chat's line to its agnostic server, which holds the chain: it judges
@@ -10,7 +10,12 @@ module ReputableChat
   # servers and says where each record stands. The chat checks nothing the
   # rules decide; it passes a record on and reads the answer.
   #
-  # See server/README.md for the API.
+  # It talks to the agnostic server over that server's local listener: a Unix
+  # socket in the host account's directory, which only processes able to read
+  # the host account's phrase can open. There uploads need no signature, and
+  # only there are nudges taken. The server opens it once it is live.
+  #
+  # See ../server/README.md for the API.
   class ChainClient
     class Unreachable < StandardError; end
     # Not answering yet: not listening, or answering 503 while it catches up
@@ -24,30 +29,52 @@ module ReputableChat
       def accepted? = status == "accepted"
     end
 
-    attr_reader :url
-    # Signs what this client uploads: the host account the chat shares with
-    # its agnostic server (Host#upload_headers), which only accepts records
-    # from an account on its chain. Set once the host account is joined.
-    attr_accessor :signer
+    # Net::HTTP over a Unix socket: the same requests, a different wire.
+    class SocketHTTP < Net::HTTP
+      # Net::HTTP.new passes an address and a port; here the address is the
+      # socket's path, and there is no port.
+      def initialize(path, _port = nil)
+        super("localhost", nil)
+        @socket_path = path
+      end
 
-    def initialize(url, http: nil)
-      @url = url.to_s.chomp("/")
+      def connect
+        @socket = Net::BufferedIO.new(UNIXSocket.new(@socket_path), read_timeout: @read_timeout,
+                                                                    write_timeout: @write_timeout,
+                                                                    continue_timeout: @continue_timeout,
+                                                                    debug_output: @debug_output)
+        on_connect
+      end
+    end
+
+    # The socket's path.
+    attr_reader :socket
+
+    def initialize(socket, http: nil)
+      @socket = socket.to_s
       @http = http
     end
+
+    # What error messages call it.
+    def url = "the socket #{socket}"
 
     def genesis = get("/api/genesis")
 
     # The agnostic server's host account, which the chat shares.
     def host = get("/api/host")
 
-    # The agnostic server's ratings of other accounts: account => reputation,
-    # trust, and whether set by hand or by reachability.
+    # The agnostic server's ratings of other accounts: account => the
+    # reputation and trust it publishes, and what they came from (operator,
+    # reachability, and nudges by app), each only when present.
     def ratings = get("/api/ratings")["ratings"]
 
-    # Tells the agnostic server whether this app reached another server's
-    # account, so it counts toward that account's rating. Signed by the host
-    # account the two share; see Host#contact_report.
-    def report_contact(payload, signature) = post("/api/contacts", { "payload" => payload, "signature" => signature })
+    # Moves the agnostic server's rating of an account by this app's own
+    # judgement: one nudge per app and account, replacing the last; "0" and
+    # "0" takes it back. Decimals from -1 to 1, spelled as the rules spell
+    # one. Answers the account's rating as it now stands.
+    def nudge(app:, account:, reputation:, trust:)
+      post("/api/nudges", { "app" => app, "account" => account, "reputation" => reputation, "trust" => trust })
+    end
 
     def submit(payload, signature)
       result = post("/api/records", { "payload" => payload, "signature" => signature })["results"].first
@@ -88,10 +115,10 @@ module ReputableChat
 
     def post(path, body) = request(:post, path, body, missing: :raise)
 
-    # An injected `http` answers (method, url, body) with [status, parsed
+    # An injected `http` answers (method, path, body) with [status, parsed
     # body], so a spec can put the server in the same process.
     def request(method, path, body, missing:)
-      status, parsed = @http ? @http.call(method, "#{url}#{path}", body) : over_the_network(method, path, body)
+      status, parsed = @http ? @http.call(method, path, body) : over_the_socket(method, path, body)
       return nil if status == 404 && missing.nil?
       return parsed if status.between?(200, 299)
       raise NotReady, "the agnostic server at #{url} is not live: #{parsed['error']}" if status == 503
@@ -99,21 +126,23 @@ module ReputableChat
       raise Unreachable, "the agnostic server at #{url} answered #{status} to #{path}: #{parsed['error']}"
     end
 
-    # A POST is signed when there is a signer, over the exact bytes sent.
-    def over_the_network(method, path, body)
-      uri = URI("#{url}#{path}")
-      request = method == :get ? Net::HTTP::Get.new(uri) : Net::HTTP::Post.new(uri)
+    def over_the_socket(method, path, body)
+      request = method == :get ? Net::HTTP::Get.new(path) : Net::HTTP::Post.new(path)
       if body
         request["Content-Type"] = "application/json"
         request.body = JSON.generate(body)
-        @signer&.upload_headers("POST", uri.path, request.body)&.each { |name, value| request[name] = value }
       end
-      response = Net::HTTP.start(uri.host, uri.port, use_ssl: uri.scheme == "https",
-                                                     open_timeout: 5, read_timeout: 30) { |h| h.request(request) }
+      http = SocketHTTP.new(socket)
+      http.open_timeout = 5
+      http.read_timeout = 30
+      response = http.start { |h| h.request(request) }
       [response.code.to_i, JSON.parse(response.body.to_s.empty? ? "{}" : response.body)]
-    rescue Errno::ECONNREFUSED, Errno::EHOSTUNREACH, SocketError, Net::OpenTimeout => e
-      raise NotReady, "the agnostic server at #{url} cannot be reached (#{e.class}). " \
-                         "Start it (cd server && bundle exec puma), or set CHAIN_URL."
+    rescue Errno::EACCES
+      raise Unreachable, "this process may not open the agnostic server's local socket #{socket}: the chat must " \
+                         "run as the user the agnostic server runs as"
+    rescue Errno::ENOENT, Errno::ECONNREFUSED, Errno::ENOTSOCK, Net::OpenTimeout => e
+      raise NotReady, "the agnostic server's local socket #{socket} cannot be opened (#{e.class}). Start it " \
+                      "(cd server && bundle exec puma): it opens the socket once it is live. Or set CHAIN_SOCKET."
     rescue JSON::ParserError
       raise Unreachable, "the agnostic server at #{url} did not answer #{path} with JSON"
     end

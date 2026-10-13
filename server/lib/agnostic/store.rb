@@ -309,6 +309,16 @@ module Agnostic
 
     def clear_rating_override(account) = db[:rating_overrides].where(account: account).delete
 
+    # What each app beside this server says an account's rating should move
+    # by: one per app and account, replaced by the next.
+    def nudges = db[:nudges].order(:account, :app).all
+
+    def nudge_rating(app, account, reputation:, trust:, at:)
+      db[:nudges].insert_conflict(:replace).insert(app: app, account: account, reputation: reputation, trust: trust, at: at)
+    end
+
+    def clear_nudge(app, account) = db[:nudges].where(app: app, account: account).delete
+
     def save_published_rating(account, reputation:, trust:, at:)
       db[:published_ratings].insert_conflict(:replace).insert(account: account, reputation: reputation, trust: trust, at: at)
     end
@@ -326,7 +336,13 @@ module Agnostic
 
     def ignored(at:) = db[:ignored].where { expires_at > at }.order(:at).all
 
-    def forgive(account) = db[:ignored].where(account: account).delete
+    # Stops ignoring an account; with reason, only if that is why it is
+    # ignored.
+    def forgive(account, reason: nil)
+      rows = db[:ignored].where(account: account)
+      rows = rows.where(reason: reason) if reason
+      rows.delete
+    end
 
     def meta(key) = db[:meta].where(key: key).get(:value)
 
@@ -444,6 +460,14 @@ module Agnostic
         String :reputation, null: false
         String :trust, null: false
         Integer :at, null: false
+      end
+      db.create_table?(:nudges) do
+        String :app, null: false
+        String :account, null: false
+        String :reputation, null: false
+        String :trust, null: false
+        Integer :at, null: false
+        primary_key %i[app account]
       end
       db.create_table?(:ignored) do
         String :account, primary_key: true

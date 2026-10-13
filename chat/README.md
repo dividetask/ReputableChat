@@ -19,7 +19,7 @@ cd server && bundle install && bundle exec puma     # the agnostic server, on 93
 cd chat && bundle install && bundle exec rake spec && bundle exec puma
 ```
 
-The chat listens on 9292 and finds its agnostic server at `http://localhost:9393` (`chain_url` in `config/server.yml`, or `CHAIN_URL`), and waits for it to be live before opening its own port. On one machine they can share an address on different ports, or share a port behind a reverse proxy under different hostnames: each announces its own address, the agnostic server on its host account's identity declaration and the chat on its `service` notice, so other servers never confuse the two. They share one host account, kept in `host/` at the root, outside both. The chat's specs start agnostic servers of their own. `bundle exec rake curve` prints the current curve and ladder.
+The chat listens on 9292 and talks to its agnostic server only through that server's local listener, a Unix socket in `host/<environment>/` (`chain_socket` in `config/server.yml`, or `CHAIN_SOCKET`), which the agnostic server opens once it is live; the chat waits for it before opening its own port, and must run as the same user. On one machine they can share an address on different ports, or share a port behind a reverse proxy under different hostnames: each announces its own address, the agnostic server on its host account's identity declaration and the chat on its `service` notice, so other servers never confuse the two. They share one host account, kept in `host/` at the root, outside both. The chat's specs start agnostic servers of their own. `bundle exec rake curve` prints the current curve and ladder.
 
 ## Deploying
 
@@ -30,7 +30,7 @@ Two things that bite:
 - **Behind a reverse proxy, pass the browser's address through.** No domain or IP needs configuring: the server signs logins in at whatever address it was reached at. Behind a proxy that means the proxy must forward `Host` and `X-Forwarded-Proto` -- Caddy does by default; nginx needs `proxy_set_header Host $host;` and `proxy_set_header X-Forwarded-Proto $scheme;`. Otherwise every login fails, and the error names both addresses. Setting `origin` (or `ORIGIN`) pins the accepted addresses instead, which also stops a malicious server relaying a `tim.rb` login.
 - **`SESSION_SECRET` is environment-only**, because `config/server.yml` is in the repository. Without it a random secret is generated at boot, which is fine locally and signs everyone out on every restart.
 
-The genesis account has to exist before the server will start. `bundle exec rake genesis` makes one; every client needs the same hash before it has fetched anything, so it is committed rather than downloaded.
+The genesis account has to exist before the server will start. It is `shared/genesis/<environment>.json` at the root, the one copy the agnostic server and every app read, made by the agnostic server's `script/generate_genesis.rb`; every client needs the same hash before it has fetched anything, so it is committed rather than downloaded.
 
 ## How it fits together
 

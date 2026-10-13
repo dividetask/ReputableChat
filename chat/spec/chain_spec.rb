@@ -236,7 +236,7 @@ class ChainSpec < Minitest::Test
         ReputableChat::Genesis.load(path: File.join(dir, "nothing.json"))
       end
 
-      assert_match(/rake genesis/, error.message)
+      assert_match(%r{generate_genesis\.rb makes one into shared/genesis/}, error.message)
     end
   end
 
