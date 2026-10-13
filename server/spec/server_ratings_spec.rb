@@ -214,31 +214,12 @@ class ServerRatingsSpec < Minitest::Test
                    "adjustments" => { "chat" => { "reputation" => "0.004", "trust" => "0" } } }, entry)
   end
 
-  # --- what the apps beside the server report -----------------------------------
-
-  def report(reached:, key: nil, account: beta, ts: @now)
-    payload = JSON.generate("purpose" => "reputablechat:contact:v1", "account" => account, "reached" => reached, "ts" => ts)
-    signature = Agnostic::Keys.sign(key || @alpha.host.signing_key, payload)
-    Rack::MockRequest.new(@alpha.app).post("/api/contacts", input: JSON.generate("payload" => payload, "signature" => signature),
-                                                           "CONTENT_TYPE" => "application/json")
-  end
-
-  # RULE (yours): what the chat finds fetching files counts toward the
-  # account's rating, as the server's own contacts do.
-  def test_an_apps_report_counts_with_the_servers_own_contacts
-    before = @alpha.store.contact(beta)&.fetch(:attempts) || 0
-    assert_equal 200, report(reached: true).status
-    assert_equal 200, report(reached: false).status
-
-    contact = @alpha.store.contact(beta)
-    assert_equal before + 2, contact[:attempts]
-  end
-
-  # Only the apps on this machine hold the host account's key, so nobody else
-  # can move a rating by reporting.
-  def test_a_report_not_signed_by_the_host_account_is_refused
-    assert_equal 403, report(reached: false, key: Ed25519::SigningKey.generate).status
-    assert_equal 400, report(reached: false, ts: @now - 3_600).status
+  # RULE (yours): an app moves a rating only by its adjustment, on the local
+  # listener; the contact reports that came before are gone, so nothing is
+  # counted twice.
+  def test_an_app_has_no_other_way_to_move_a_rating
+    response = Rack::MockRequest.new(@alpha.app).post("/api/contacts", input: "{}", "CONTENT_TYPE" => "application/json")
+    assert_equal 404, response.status
   end
 end
 

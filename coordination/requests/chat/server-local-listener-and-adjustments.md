@@ -34,9 +34,8 @@ earlier, and 5 is a standing rule in `server/CLAUDE.md`. That file can go.
 
 - Point `chain_url` at the socket for uploads and adjustments, drop
   `Host#upload_headers`, and send adjustments instead of contact reports.
-- Tell the server when the chat no longer sends `POST /api/contacts`: it is
-  then removed (agreed by the user), and with it the contact reports' part
-  of the ratings.
+- Stop sending contact reports: `POST /api/contacts` is gone (404), since
+  nothing is live yet. Adjustments replace them.
 - Read the genesis, its phrases and avatar from `shared/genesis/`, delete
   `chat/config/genesis/`, and retire `chat/spec/compatibility_spec.rb`.
 - "Adjustment" was a retired term in the glossary (an `adjustment:v1`

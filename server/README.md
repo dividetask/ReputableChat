@@ -392,7 +392,6 @@ curl --unix-socket ../host/development/server.sock http://local/api/ratings
 | `GET /api/frontier` | hashes of the records nothing here acknowledges |
 | `POST /api/records` | `{"records": [...]}`, or one record on its own; a signed upload, except on the local listener |
 | `POST /api/adjustments` | `{"app", "account", "reputation", "trust"}`: an app moving an account's rating; local listener only |
-| `POST /api/contacts` | `{"payload", "signature"}`: an app's report of reaching a server, signed by the host account |
 | `POST /api/introduce` | `{"declaration": ...}`: an account's first identity declaration, so it can sign uploads |
 | `GET /api/sweep?account=&generation=&part=` | one capped part of one generation of an account, and the `next` part to ask for; 429 when asked too often |
 | `POST /api/sync` | `{"heartbeat": ...}`: the uploader's own newest heartbeat; a signed upload; 403 when the peer is or becomes ignored |

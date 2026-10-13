@@ -6,7 +6,6 @@ require_relative "record"
 require_relative "rules"
 require_relative "accounts"
 require_relative "formats"
-require_relative "keys"
 require_relative "local_listener"
 require_relative "upload_auth"
 
@@ -24,7 +23,6 @@ module Agnostic
   #   POST /api/accounts             {"accounts": [...]}: the same for several
   #   GET  /api/keys/<pubkey>        the account a working key signs for
   #   GET  /api/ratings              this server's ratings of other accounts, and what each is made of
-  #   POST /api/contacts             an app beside this server reporting whether it reached a server
   #   POST /api/adjustments          an app beside this server moving an account's rating (local listener only)
   #   GET  /api/frontier             records nothing here acknowledges yet
   #   POST /api/records              {"records": [...]} or one record; each is checked (signed upload,
@@ -106,13 +104,6 @@ module Agnostic
         # carry, such as files.
         r.get("ratings") { { "ratings" => server.ratings ? server.ratings.current : {} } }
 
-        # An app beside this server -- the chat fetching files -- reporting
-        # whether it reached another server's account. Counted with this
-        # server's own contacts, so it moves that account's rating. Signed with
-        # the host account's working key, which only the apps on this machine
-        # hold, so nobody else can move a rating this way.
-        r.post("contacts") { report_contact(r) }
-
         # An app beside this server moving an account's rating by its own
         # judgement. Taken only on the local listener, so only those apps can.
         r.post("adjustments") { adjust(r) }
@@ -140,8 +131,6 @@ module Agnostic
     def store = server.store
 
     def accounts = server.accounts
-
-    CONTACT = "reputablechat:contact:v1"
 
     # Whether the request came in on the local listener's socket.
     def local?(r) = LocalListener.local?(r.env, server.local_socket)
@@ -174,30 +163,6 @@ module Agnostic
         store.adjust_rating(app, account, reputation: body["reputation"], trust: body["trust"], at: server.clock.call)
       end
       { "account" => account, "rating" => server.ratings&.current&.[](account) }
-    end
-
-    def report_contact(r)
-      body = r.POST.is_a?(Hash) ? r.POST : {}
-      payload = body["payload"]
-      fields = begin
-        payload.is_a?(String) ? JSON.parse(payload) : nil
-      rescue JSON::ParserError
-        nil
-      end
-      unless fields.is_a?(Hash) && fields["purpose"] == CONTACT && Keys.verify(server.host.pubkey, body["signature"].to_s, payload)
-        r.halt(403, { "error" => "a contact report is signed by this server's host account" })
-      end
-
-      account = fields["account"]
-      r.halt(400, { "error" => "account is not an account ID" }) unless Record.hash?(account)
-      r.halt(400, { "error" => "reached is true or false" }) unless [true, false].include?(fields["reached"])
-      unless fields["ts"].is_a?(Integer) && (fields["ts"] - server.clock.call).abs <= 600
-        r.halt(400, { "error" => "ts is more than 600 seconds from this server's clock" })
-      end
-      r.halt(400, { "error" => "this server does not rate its own account" }) if account == server.host.id
-
-      store.record_contact(account, success: fields["reached"], at: server.clock.call)
-      { "recorded" => true }
     end
 
     def bounded!(r, list, name)
