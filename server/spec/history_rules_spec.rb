@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "spec_helper"
+require "agnostic/accounts"
 
 # The rules that turn on a record's history (sections 2, 3, 7, 8, 10 and 11).
 class HistoryRulesSpec < Minitest::Test
@@ -99,9 +100,10 @@ class HistoryRulesSpec < Minitest::Test
     refuse(notice("tim", tim, "quorum", ack: [quorum.digest], target: [theirs.digest]), /already void/)
   end
 
-  # A quorum confirms the record it names and the disputed records in its
-  # history, and voids only the other disputed records: A -> B -> C -> D in
-  # one line, then A -> F and D -> G concurrent with each other.
+  # A quorum confirms the record it names and the records it relies on, and
+  # voids what conflicts with them: A -> B -> C -> D in one line, each signed
+  # with the key the one before introduced, then A -> F and D -> G
+  # concurrent with each other.
   def test_a_quorum_confirms_the_line_it_names_and_voids_only_the_rival
     ab = accept(notice("carol", @carol, "key-change", ack: [@carol], body: pub("carol-b")))
     bc = accept(notice("carol-b", @carol, "key-change", ack: [ab.digest], body: pub("carol-c")))
@@ -117,6 +119,81 @@ class HistoryRulesSpec < Minitest::Test
       refuse(post(obsolete_or_void, @carol, ack: [quorum.digest]), /neither the account's last confirmed key/)
     end
     refuse(notice("tim", tim, "quorum", ack: [quorum.digest], target: [af.digest]), /already void/)
+  end
+
+  def state(record) = Agnostic::Accounts.new(store: @store, genesis: @genesis).state(record.digest)
+
+  def endorse_and_settle(*named, ack: named)
+    endorsement = accept(post("tim", tim, ack: ack.map(&:digest), endorse: named.map(&:digest).sort, ts: @now += 1))
+    accept(notice("tim", tim, "quorum", ack: [endorsement.digest], target: named.map(&:digest).sort,
+                                        endorse: [endorsement.digest], ts: @now += 1))
+  end
+
+  # RULE (yours): acknowledging a record is not confirming it. A quorum
+  # confirms what it names and what that relies on, and nothing else: the
+  # owner's key change acknowledges the message the notice disowns, and the
+  # message is void all the same.
+  def test_a_quorum_confirms_what_it_names_and_what_that_relies_on_and_nothing_else
+    stolen = accept(post("carol", @carol, ack: [@carol], body: "send me your coins"))
+    disowned = accept(notice("carol", @carol, "compromised", ack: [stolen.digest], target: [stolen.digest]))
+    change = accept(notice("carol", @carol, "key-change", ack: [disowned.digest], body: pub("carol-new")))
+    assert_equal "disputed", state(stolen)
+
+    endorse_and_settle(disowned, change)
+    assert_equal "void", state(stolen), "acknowledged by the change, but the change does not rely on it"
+    assert_equal "confirmed", state(disowned)
+    assert_equal "confirmed", state(change)
+  end
+
+  # RULE (yours): a compromised notice conflicts with each record it names.
+  # Confirm the notice and they are void; confirm them and the notice is.
+  def test_confirming_what_a_notice_names_voids_the_notice
+    mine = accept(post("carol", @carol, ack: [@carol], body: "really mine"))
+    false_alarm = accept(notice("tim", tim, "compromised", ack: [mine.digest], target: [mine.digest]))
+    assert_equal "disputed", state(mine)
+    assert_equal "disputed", state(false_alarm)
+
+    endorse_and_settle(mine)
+    assert_equal "confirmed", state(mine)
+    assert_equal "void", state(false_alarm)
+  end
+
+  # RULE (yours): the server polices what it enforces -- keys, spends -- by
+  # itself; anything else is disputed only when a notice names it.
+  def test_a_dispute_over_keys_leaves_the_accounts_other_records_alone
+    note = accept(post("carol", @carol, ack: [@carol], body: "an ordinary message"))
+    accept(notice("carol", @carol, "key-change", ack: [note.digest], body: pub("carol-a")))
+    accept(notice("carol", @carol, "key-change", ack: [note.digest], body: pub("carol-b"), ts: @now + 1))
+
+    assert_equal "valid", state(note)
+  end
+
+  # RULE (yours): a record relying on a disputed record is disputed with it,
+  # and void with it.
+  def test_a_record_shares_the_fate_of_the_change_whose_key_signs_it
+    mine = accept(notice("carol", @carol, "key-change", ack: [@carol], body: pub("carol-new")))
+    theirs = accept(notice("carol", @carol, "key-change", ack: [@carol], body: pub("carol-thief"), ts: @now + 1))
+    signed = accept(post("carol-thief", @carol, ack: [theirs.digest], body: "with the stolen key"))
+    assert_equal "disputed", state(signed)
+
+    endorse_and_settle(mine, ack: [mine, signed])
+    assert_equal "void", state(theirs)
+    assert_equal "void", state(signed)
+  end
+
+  # RULE (yours): a quorum may name several records, each endorsed by more
+  # than half of the adjudicators, but never two that conflict.
+  def test_a_quorum_names_several_records_but_no_two_that_conflict
+    mine = accept(notice("carol", @carol, "key-change", ack: [@carol], body: pub("carol-new")))
+    theirs = accept(notice("carol", @carol, "key-change", ack: [@carol], body: pub("carol-thief"), ts: @now + 1))
+    both = accept(post("tim", tim, ack: [mine.digest, theirs.digest], endorse: [mine.digest, theirs.digest].sort))
+    refuse(notice("tim", tim, "quorum", ack: [both.digest], target: [mine.digest, theirs.digest].sort,
+                                        endorse: [both.digest]), /two records that conflict/)
+
+    note = accept(post("carol", @carol, ack: [@carol], body: "unendorsed", ts: @now + 2))
+    one = accept(post("tim", tim, ack: [mine.digest, note.digest], endorse: [mine.digest], ts: @now + 3))
+    refuse(notice("tim", tim, "quorum", ack: [one.digest], target: [mine.digest, note.digest].sort,
+                                        endorse: [one.digest]), /each record it names/)
   end
 
   def test_compromised_is_signed_by_the_account_or_one_of_its_adjudicators

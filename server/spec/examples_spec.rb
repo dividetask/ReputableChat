@@ -44,24 +44,27 @@ class ExamplesSpec < Minitest::Test
     Examples.broken.each { |name, record| refuse(record, expected.fetch(name)) }
   end
 
-  # The states the examples describe in prose. Dana's change is confirmed, and
-  # with it the thief's change it superseded, which was never disputed; the
-  # thief's message, which was, is void. Of Alice's double spend the payment
-  # stands and the lunch is void. Alice's own earlier key change is in the
-  # history of the one her quorum named, so it is confirmed too, and the
-  # release she signed with its key is untouched.
+  # The states the examples describe in prose. Dana's change is confirmed; the
+  # thief's change it superseded and acknowledged is neither confirmed nor
+  # void, since her change does not rely on it and nothing disputed it: it is
+  # valid, and its key obsolete. The thief's message, which contested hers,
+  # is void. Of Alice's double spend the payment stands and the lunch is void.
+  # Alice's earlier working-key change is in the history of the change her
+  # quorum named, but that one is signed with her master key and does not
+  # rely on it: it stays valid, its key obsolete, and the release she signed
+  # with that key is untouched.
   def test_the_states_the_examples_describe
     load_examples
     accounts = Agnostic::Accounts.new(store: @store, genesis: @genesis)
     state = ->(prefix) { accounts.state(Examples.records.find { |r| r.digest.start_with?(prefix) }.digest) }
 
-    assert_equal "confirmed", state.call("2e59fd55"), "the thief's key change, superseded by Dana's"
+    assert_equal "valid", state.call("2e59fd55"), "the thief's key change, which Dana's acknowledges but does not rely on"
     assert_equal "void", state.call("a14714e2"), "the thief's message"
     assert_equal "confirmed", state.call("e39a3e42"), "Dana's key change"
     assert_equal "confirmed", state.call("9cb36d78"), "Alice's payment"
     assert_equal "void", state.call("9cfb8f27"), "Alice's lunch"
     assert_equal "void", state.call("35eb6dbc"), "the change made with Alice's stolen master key"
-    assert_equal "confirmed", state.call("f2409cdf"), "Alice's earlier change, in the named one's history"
+    assert_equal "valid", state.call("f2409cdf"), "Alice's earlier change, which the named one does not rely on"
     assert_equal "valid", state.call("1045791a"), "the release Alice signed with that change's key"
   end
 end

@@ -125,8 +125,11 @@ class RecordRulesSpec < Minitest::Test
 
   # --- sections 3 to 10 -------------------------------------------------------
 
-  def test_an_identity_declaration_has_a_handle_of_1_to_64_bytes
+  # The handle, like the bio, is optional; where there is one it is 1 to 64
+  # bytes.
+  def test_an_identity_declaration_may_have_a_handle_of_1_to_64_bytes
     refuse(declare_record("dave", title: "x" * 65), /handle/)
+    accept(sign("dave", { "ack" => [tim], "type" => "reputablechat:identity:#{version}" }))
   end
 
   def test_adjudicators_are_at_most_16_account_ids

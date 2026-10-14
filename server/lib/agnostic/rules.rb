@@ -157,8 +157,9 @@ module Agnostic
 
     # Section 3.
     def identity_structure(record, problems)
-      problems.push("an identity declaration's title, its handle, must be 1 to 64 bytes") unless
-        Formats.text?(record["title"], min: 1, max: 64)
+      if record.key?("title") && !Formats.text?(record["title"], min: 1, max: 64)
+        problems.push("an identity declaration's title, its handle, must be 1 to 64 bytes")
+      end
       problems.push("epubkey must be an encryption key") if record.key?("epubkey") && !Formats.encryption_key?(record["epubkey"])
       return unless record.key?("adjudicators")
 
@@ -209,7 +210,7 @@ module Agnostic
       when "key-change", "master-key-change"
         problems.push("a #{record['kind']} notice's body is the new key and nothing else") unless Formats.signing_key?(record["body"])
       when "quorum"
-        problems.push("a quorum names exactly one record in target") unless record.target.size == 1
+        problems.push("a quorum names at least one record in target") if record.target.empty?
       end
     end
 
@@ -313,7 +314,9 @@ module Agnostic
       return if record.first_declaration?
 
       first = view.include?(record["id"]) ? store.fetch(record["id"]) : nil
-      problems.push("id names no first identity declaration in this record's history") unless first&.first_declaration?
+      return problems.push("id names no first identity declaration in this record's history") unless first&.first_declaration?
+
+      relies(record, first.digest)
     end
 
     # Section 2, working key: which keys may sign, and when signing contests.
@@ -329,6 +332,7 @@ module Agnostic
         end
 
         key = record[field]
+        relies(record, *keys.introduced(field, key))
         # The changes it contests: the newest of this kind, whose key it is not
         # signing with. Kept by hash, so a quorum can settle the contest by
         # naming either side.
@@ -380,24 +384,28 @@ module Agnostic
       end
     end
 
+    # A quorum names records of one account -- its own, or compromised
+    # notices about it -- no two of them conflicting and none already void,
+    # and each must pass the master key and the count.
     def quorum(record, view, problems)
-      named_hash = record.target.first
-      named = view.include?(named_hash) && store.fetch(named_hash)
-      return problems.push("a quorum names a record in its history") unless named
+      named = record.target.map { |h| view.include?(h) && store.fetch(h) }
+      return problems.push("a quorum names records in its history") unless named.all?
 
-      subject = named.subject
+      subjects = named.map(&:subject).uniq
+      return problems.push("a quorum names records of one account") unless subjects.size == 1
+
+      subject = subjects.first
       record.subject = subject
-      keys = view.keys(subject)
       disputes = view.disputes(subject)
-      key_change = KeyState::FIELDS.key?(named.notice_kind) && named.account == subject
+      return problems.push("a quorum names a record that is already void") if named.any? { |n| disputes.void?(n.digest) }
+      if named.combination(2).any? { |a, b| disputes.conflict?(a.digest, b.digest) }
+        return problems.push("a quorum names two records that conflict")
+      end
 
-      # Which record a quorum should name is described in section 7, but its
-      # validity turns only on the count and the master key: the example chain
-      # names a spend whose rival is outside the quorum's own history.
-      return problems.push("a quorum names a key change that is already void") if key_change && keys.void?(named.digest)
-
-      master_only(named, view, disputes, problems)
-      count(record, named, view, disputes, problems)
+      named.each do |n|
+        master_only(n, view, disputes, problems)
+        count(record, n, view, disputes, problems)
+      end
     end
 
     # The master key prevails through the quorum: once a master-signed key
@@ -428,8 +436,14 @@ module Agnostic
                        .map(&:account).uniq
       return if !counted.empty? && endorsing.size * 2 > counted.size
 
-      problems.push("a quorum needs more than half of the account's adjudicators to have endorsed what it names " \
-           "(#{endorsing.size} of #{counted.size})")
+      problems.push("a quorum needs more than half of the account's adjudicators to have endorsed each record it " \
+                    "names (#{endorsing.size} of #{counted.size} for #{named.digest[0, 8]})")
+    end
+
+    # Section 8: a record relies on another when it would not be valid without
+    # it. Noted as the check finds it, for a quorum to confirm with it.
+    def relies(record, *hashes)
+      record.facts["relies"] = (Array(record.facts["relies"]) | hashes.compact).sort
     end
 
     # Section 11.
@@ -440,6 +454,9 @@ module Agnostic
       record.facts["issues"] = true if issues && record.kind == "identity"
       unless view.currency?(currency) || record.facts["issues"]
         return problems.push("the transfer moves #{currency[0, 8]}, which is not a currency as seen by this record")
+      end
+      if issues && record.kind != "identity"
+        relies(record, *view.records_of(record.account, kind: "identity").select { |r| r.facts["issues"] }.map(&:digest))
       end
 
       Array(t["out"]).each do |o|
@@ -461,6 +478,7 @@ module Agnostic
         next problems.push("the transfer spends an output already spent in its history") unless
           view.spenders(hash, record.account).empty?
 
+        relies(record, hash)
         total += value
       end
       return unless record.transfer.key?("out")

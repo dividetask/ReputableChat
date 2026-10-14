@@ -89,7 +89,7 @@ module Agnostic
 
     def disputes(account) = memo(:disputes, account) { Disputes.new(self, account) }
 
-    def disputed?(account) = disputes(account).unsettled.any?
+    def disputed?(account) = disputes(account).any?
 
     def adjudicators(account) = memo(:adjudicators, account) { Adjudicators.new(self, account).in_force }
 
@@ -108,16 +108,15 @@ module Agnostic
   class KeyState
     FIELDS = { "key-change" => "pubkey", "master-key-change" => "mpubkey" }.freeze
 
-    attr_reader :confirmed, :tentative, :voided, :confirmed_records
+    attr_reader :confirmed, :tentative
 
     def initialize(view, account)
       @view = view
-      first = view.store.fetch(account)
-      @confirmed = { "pubkey" => first&.[]("pubkey"), "mpubkey" => first&.[]("mpubkey") }
+      @first = view.store.fetch(account)
+      @confirmed = { "pubkey" => @first&.[]("pubkey"), "mpubkey" => @first&.[]("mpubkey") }
       @tentative = { "pubkey" => [], "mpubkey" => [] }
-      @voided = Set.new
-      @confirmed_records = Set.new
-      replay(account)
+      @changes = FIELDS.to_h { |kind, field| [field, view.records_of(account, kind: "notice", notice_kind: kind)] }
+      settle(view.disputes(account))
     end
 
     # The account's last confirmed key of this kind, and every tentative
@@ -127,8 +126,7 @@ module Agnostic
     # The latest key of this kind: the newest tentative change's, or the last
     # confirmed one where nothing is tentative.
     def current(field)
-      changes = tentative[field]
-      leaves = changes.reject { |c| changes.any? { |o| o != c && @view.histories.ancestor?(c.digest, o.digest) } }
+      leaves = current_changes(field)
       leaves.empty? ? [confirmed[field]].compact : leaves.map { |c| c["body"] }.uniq
     end
 
@@ -138,114 +136,171 @@ module Agnostic
       changes.reject { |c| changes.any? { |o| o != c && @view.histories.ancestor?(c.digest, o.digest) } }
     end
 
-    def void?(hash) = voided.include?(hash)
-
-    # The keys of void key changes: whatever they sign is void too (section 8).
-    def void_keys
-      @view.store.fetch_many(voided.to_a).select { |c| FIELDS.key?(c.notice_kind) }.map { |c| c["body"] }.to_set
+    # The records that introduced this key: the first declaration that set
+    # it, or the changes of this kind that moved to it. A record signed with
+    # it relies on them (section 8).
+    def introduced(field, key)
+      from_first = @first && @first[field] == key ? [@first.digest] : []
+      from_first + @changes[field].select { |c| c["body"] == key }.map(&:digest)
     end
 
     private
 
-    def replay(account)
-      changes = FIELDS.keys.flat_map { |kind| @view.records_of(account, kind: "notice", notice_kind: kind) }
-      quorums = @view.about(account, "quorum")
-      (changes + quorums).sort_by(&:seq).each do |record|
-        field = FIELDS[record.notice_kind]
-        next @tentative[field] << record if field
-
-        confirm(record)
-      end
-    end
-
-    # A quorum confirms the record it names and the disputed records in its
-    # history, and voids the other disputed records it settles; it voids
-    # nothing else (section 8). Naming a key change also confirms the earlier
-    # changes of that kind along its acks, whose keys are then obsolete
-    # (section 7): neither tentative nor void, and no longer able to sign.
-    def confirm(quorum)
-      named = @view.store.fetch(quorum.target.first)
-      return unless named
-
-      kept = ->(c) { c.digest == named.digest || @view.histories.ancestor?(c.digest, named.digest) }
-      settled = @view.disputes(named.account).causes.select { |cause| Disputes.settles?(@view, quorum, named, cause) }
-      settled.flat_map(&:records).each do |r|
-        kept.call(r) ? @confirmed_records << r.digest : @voided << r.digest
-      end
-      @confirmed_records << named.digest
-
-      field = FIELDS[named.notice_kind]
-      @confirmed[field] = named["body"] if field
-      FIELDS.each_value do |f|
-        @tentative[f] = @tentative[f].reject do |c|
-          (f == field && kept.call(c) && @confirmed_records << c.digest) || @voided.include?(c.digest)
+    # A confirmed change's key is the confirmed key of its kind. It and every
+    # earlier change of that kind along its acks are obsolete: neither
+    # tentative nor void, and no longer able to sign (section 7). Void
+    # changes sign nothing.
+    def settle(disputes)
+      @changes.each do |field, changes|
+        confirmed = changes.select { |c| disputes.confirmed?(c.digest) }
+        newest = confirmed.reject { |c| confirmed.any? { |o| o != c && @view.histories.ancestor?(c.digest, o.digest) } }
+        @confirmed[field] = newest.max_by(&:seq)["body"] unless newest.empty?
+        @tentative[field] = changes.reject do |c|
+          disputes.void?(c.digest) ||
+            confirmed.any? { |o| o.digest == c.digest || @view.histories.ancestor?(c.digest, o.digest) }
         end
       end
     end
   end
 
-  # What disputes an account (section 8), and which of those no later quorum
-  # has settled.
+  # What is disputed, confirmed and void among an account's records, as a
+  # view sees them (section 8).
+  #
+  # Records conflict in pairs: two concurrent changes of the same key; a
+  # record and the key change it contests; a compromised notice and each
+  # record it names; two concurrent records each endorsing a different spend
+  # of the same output of the account's own currency; and two concurrent
+  # spends of one output, which the currency's issuer settles rather than a
+  # quorum (section 11).
+  #
+  # A quorum confirms the records it names and every record of the account
+  # they rely on, and nothing else. A record that conflicts with a confirmed
+  # one is void, and so is a record that relies on a void one. A record is
+  # disputed while it is in a conflict neither side of which is settled, or
+  # while it relies on a disputed record. The account is disputed while any
+  # of its records is.
   class Disputes
-    Cause = Struct.new(:reason, :records)
-
-    attr_reader :causes, :unsettled
+    attr_reader :confirmed, :void, :disputed
 
     def initialize(view, account)
       @view = view
       @account = account
-      @causes = compromised + contests + key_conflicts + spend_conflicts + endorsement_conflicts
-      quorums = view.about(account, "quorum")
-      @unsettled = @causes.reject do |cause|
-        quorums.any? { |q| (named = view.store.fetch(q.target.first)) && Disputes.settles?(view, q, named, cause) }
-      end
+      @records = view.records_of(account)
+      @relies = @records.to_h { |r| [r.digest, Array(r.facts["relies"])] }
+      @pairs = contests + key_conflicts + notices + endorsement_conflicts
+      @spends = spend_conflicts
+      @confirmed = Set.new
+      @void = Set.new
+      view.about(account, "quorum").sort_by(&:seq).each { |q| q.target.each { |h| confirm(h) if view.include?(h) } }
+      issuer_choices
+      spread_void
+      @disputed = disputed_records
     end
 
-    # A quorum settles a cause when it names one of the cause's records or one
-    # in the named record's history -- the rest are decided by that, whether
-    # or not the quorum's history holds them -- or when its history holds all
-    # of them.
-    def self.settles?(view, quorum, named, cause)
-      cause.records.any? { |r| r.digest == named.digest || view.histories.ancestor?(r.digest, named.digest) } ||
-        cause.records.all? { |r| view.histories.of(quorum.digest).include?(r.digest) }
-    end
+    def confirmed?(hash) = confirmed.include?(hash)
 
-    def records = unsettled.flat_map(&:records).uniq(&:digest)
+    def void?(hash) = void.include?(hash)
 
-    # The records that conflict with this one, in any cause.
+    def disputed?(hash) = disputed.include?(hash)
+
+    def any? = !disputed.empty?
+
+    def conflict?(a, b) = (@pairs + @spends).any? { |x, y| [x.digest, y.digest].sort == [a, b].sort }
+
+    # The disputed records.
+    def records = disputed.filter_map { |h| record(h) }
+
+    # The records that conflict with this one.
     def conflicting_with(record)
-      causes.select { |c| c.reason == :conflict && c.records.any? { |r| r.digest == record.digest } }
-            .flat_map(&:records).reject { |r| r.digest == record.digest }.uniq(&:digest)
+      (@pairs + @spends).filter_map do |a, b|
+        if a.digest == record.digest then b
+        elsif b.digest == record.digest then a
+        end
+      end.uniq(&:digest)
     end
 
     private
 
-    def compromised = @view.about(@account, "compromised").map { |n| Cause.new(:compromised, [n]) }
+    def record(hash) = (@by_hash ||= (@records + (@pairs + @spends).flatten).to_h { |r| [r.digest, r] })[hash]
+
+    def confirm(hash)
+      stack = [hash]
+      while (h = stack.pop)
+        next unless @confirmed.add?(h)
+
+        stack.concat(@relies.fetch(h, []).select { |r| @relies.key?(r) })
+      end
+    end
+
+    # Section 11: the issuer confirms the spend it endorses, while its own
+    # account is not disputed as the endorsing record sees it, and the
+    # other spend is void.
+    def issuer_choices
+      @spends.each do |a, b|
+        chosen = [a, b].find { |s| chosen_by_issuer?(s) }
+        next unless chosen
+
+        @confirmed << chosen.digest
+        @void << (chosen == a ? b : a).digest
+      end
+    end
+
+    def chosen_by_issuer?(spend)
+      issuer = spend.transfer["currency"]
+      @view.endorsers(spend.digest).any? { |e| e.account == issuer && !@view.as_seen_by(e.digest).disputed?(issuer) }
+    end
+
+    def spread_void
+      loop do
+        before = @void.size
+        @pairs.each do |a, b|
+          @void << b.digest if confirmed?(a.digest) && !confirmed?(b.digest)
+          @void << a.digest if confirmed?(b.digest) && !confirmed?(a.digest)
+        end
+        @records.each { |r| @void << r.digest if @relies[r.digest].any? { |h| void?(h) } }
+        break if @void.size == before
+      end
+    end
+
+    def disputed_records
+      settled = ->(r) { confirmed?(r.digest) || void?(r.digest) }
+      out = Set.new
+      (@pairs + @spends).each { |a, b| out.merge([a.digest, b.digest]) unless settled.call(a) || settled.call(b) }
+      @records.each do |r|
+        out << r.digest if !settled.call(r) && @relies[r.digest].any? { |h| out.include?(h) }
+      end
+      out
+    end
 
     def contests
-      @view.records_of(@account).select { |r| r.facts["contests"] }.map do |r|
-        contested = Array(r.facts["contests"]).filter_map { |h| h.is_a?(String) ? @view.store.fetch(h) : nil }
-        Cause.new(:contest, [r, *contested])
+      @records.select { |r| r.facts["contests"] }.flat_map do |r|
+        Array(r.facts["contests"]).filter_map { |h| h.is_a?(String) && (c = @view.store.fetch(h)) ? [r, c] : nil }
+      end
+    end
+
+    def notices
+      @view.about(@account, "compromised").flat_map do |n|
+        @view.store.fetch_many(n.target).map { |t| [n, t] }
       end
     end
 
     def key_conflicts
       KeyState::FIELDS.keys.flat_map do |kind|
-        pairs(@view.records_of(@account, kind: "notice", notice_kind: kind))
+        concurrent_pairs(@view.records_of(@account, kind: "notice", notice_kind: kind))
       end
     end
 
     def spend_conflicts
-      spends = @view.records_of(@account).select { |r| r.transfer&.key?("in") }
+      spends = @records.select { |r| r.transfer&.key?("in") }
       by_output = spends.flat_map { |r| r.transfer["in"].map { |o| [o, r] } }.group_by(&:first)
-      by_output.values.flat_map { |entries| pairs(entries.map(&:last)) }
+      by_output.values.flat_map { |entries| concurrent_pairs(entries.map(&:last).uniq(&:digest)) }
     end
 
     # Each of two concurrent records endorses a different spend of the same
     # output of the account's own currency.
     def endorsement_conflicts
       choices = []
-      @view.records_of(@account).each do |r|
+      @records.each do |r|
         r.endorse.each do |e|
           spend = @view.store.fetch(e)
           next unless spend&.transfer&.key?("in")
@@ -261,15 +316,13 @@ module Agnostic
           next if s1 == s2 || r1.digest == r2.digest
           next unless @view.histories.concurrent?(r1.digest, r2.digest)
 
-          Cause.new(:conflict, [r1, r2])
+          [r1, r2]
         end
       end
     end
 
-    def pairs(records)
-      records.combination(2).filter_map do |a, b|
-        Cause.new(:conflict, [a, b]) if @view.histories.concurrent?(a.digest, b.digest)
-      end
+    def concurrent_pairs(records)
+      records.combination(2).select { |a, b| @view.histories.concurrent?(a.digest, b.digest) }
     end
   end
 

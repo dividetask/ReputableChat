@@ -424,11 +424,16 @@ decision someone may want to make differently.
 - **A key or signature has one spelling.** Base64url that decodes to the right
   length but would re-encode differently is refused, as is padding.
 - **Integers stop at 2^53 - 1**, the largest JavaScript reads exactly.
-- **A quorum names exactly one record**, and its validity turns on the count
-  and the master-key condition only. Section 7 also says what a quorum should
-  name when no key change is in dispute, but the example chain's second quorum
-  names a spend whose rival is outside the quorum's own history, so that
-  sentence is read as describing the usual case rather than as a condition.
+- **What a record relies on** is what its check used to pass it: the
+  account's first declaration its `id` names, the records that introduced the
+  key it is signed with, the records whose outputs it spends, and, for an
+  issuing transfer, the declarations that made the account a currency. They
+  are noted with the record when it is stored, and a quorum confirms them with
+  what it names. A quorum confirms only the account's own records: another
+  account's record relied on, such as a payment's source, is settled in that
+  account's disputes.
+- **Two spends of one output** are left to the issuer. A quorum may confirm a
+  spend, but voids its rival only through the issuer's choice (section 11).
 - **"Current keys"** are the newest: a key change is signed with the newest
   working or master key, and a master key change with the newest master key.
   Signing with an allowed key that is not the newest is what contests.

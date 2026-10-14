@@ -33,17 +33,18 @@ module Agnostic
 
     private
 
+    # A record's state as everything here sees it. Its dispute is its
+    # subject's: an adjudicator's compromised notice is settled with the
+    # account it names.
     def state_in(view, record)
       hash = record.digest
-      keys = view.keys(record.account)
-      return "void" if keys.void?(hash)
-      return "void" if record.signer && keys.void_keys.include?(record.signer)
-      return "void" if spend_lost?(record, view)
-      return "confirmed" if keys.confirmed_records.include?(hash)
-      return "disputed" if view.disputed?(record.account)
+      disputes = view.disputes(record.subject || record.account)
+      return "void" if disputes.void?(hash)
+      return "confirmed" if disputes.confirmed?(hash)
+      return "disputed" if disputes.disputed?(hash)
 
       field = KeyState::FIELDS[record.notice_kind]
-      return "tentative" if field && keys.tentative[field].any? { |c| c.digest == hash }
+      return "tentative" if field && view.keys(record.account).tentative[field].any? { |c| c.digest == hash }
 
       "valid"
     end
@@ -87,19 +88,6 @@ module Agnostic
       histories = Histories.new(@store)
       tips = records.reject { |r| records.any? { |o| o.digest != r.digest && histories.ancestor?(r.digest, o.digest) } }
       tips.max_by { |r| [r.ts.to_i, r.digest] }
-    end
-
-    # The issuer endorsed the other spend of an output this one spends.
-    def spend_lost?(record, view)
-      spent = Array(record.transfer&.fetch("in", nil))
-      return false if spent.empty?
-
-      issuer = record.transfer["currency"]
-      spent.any? do |output|
-        (view.spenders(output, record.account).map(&:digest) - [record.digest]).any? do |rival|
-          view.endorsers(rival).any? { |e| e.account == issuer }
-        end
-      end
     end
   end
 end
