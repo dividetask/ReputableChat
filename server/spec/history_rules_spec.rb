@@ -79,11 +79,11 @@ class HistoryRulesSpec < Minitest::Test
 
   def test_a_quorum_needs_more_than_half_of_the_adjudicators
     change = accept(notice("carol", @carol, "key-change", ack: [@carol], body: pub("carol-new")))
-    refuse(notice("tim", tim, "quorum", ack: [change.digest], target: [change.digest]), /more than half/)
+    refuse(notice("carol-new", @carol, "quorum", ack: [change.digest], target: [change.digest]), /more than half/)
 
     endorsement = accept(post("tim", tim, ack: [change.digest], body: "Confirmed with Carol.", endorse: [change.digest]))
-    quorum = accept(notice("tim", tim, "quorum", ack: [endorsement.digest], target: [change.digest],
-                                                 endorse: [endorsement.digest]))
+    quorum = accept(notice("carol-new", @carol, "quorum", ack: [endorsement.digest], target: [change.digest],
+                                                       endorse: [endorsement.digest]))
 
     refuse(post("carol", @carol, ack: [quorum.digest]), /neither the account's last confirmed key/)
     accept(post("carol-new", @carol, ack: [quorum.digest]))
@@ -93,8 +93,8 @@ class HistoryRulesSpec < Minitest::Test
     mine = accept(notice("carol", @carol, "key-change", ack: [@carol], body: pub("carol-new")))
     theirs = accept(notice("carol", @carol, "key-change", ack: [@carol], body: pub("carol-thief"), ts: @now + 1))
     endorsement = accept(post("tim", tim, ack: [mine.digest, theirs.digest], endorse: [mine.digest]))
-    quorum = accept(notice("tim", tim, "quorum", ack: [endorsement.digest], target: [mine.digest],
-                                                 endorse: [endorsement.digest]))
+    quorum = accept(notice("carol-new", @carol, "quorum", ack: [endorsement.digest], target: [mine.digest],
+                                                       endorse: [endorsement.digest]))
 
     refuse(post("carol-thief", @carol, ack: [quorum.digest]), /neither the account's last confirmed key/)
     refuse(notice("tim", tim, "quorum", ack: [quorum.digest], target: [theirs.digest]), /already void/)
@@ -111,8 +111,8 @@ class HistoryRulesSpec < Minitest::Test
     af = accept(notice("carol", @carol, "key-change", ack: [@carol], body: pub("carol-f"), ts: @now + 1))
     dg = accept(notice("carol-d", @carol, "key-change", ack: [cd.digest], body: pub("carol-g")))
     endorsement = accept(post("tim", tim, ack: [af.digest, dg.digest], endorse: [dg.digest]))
-    quorum = accept(notice("tim", tim, "quorum", ack: [endorsement.digest], target: [dg.digest],
-                                                 endorse: [endorsement.digest]))
+    quorum = accept(notice("carol-g", @carol, "quorum", ack: [endorsement.digest], target: [dg.digest],
+                                                     endorse: [endorsement.digest]))
 
     accept(post("carol-g", @carol, ack: [quorum.digest]))
     %w[carol-c carol-f].each do |obsolete_or_void|
@@ -123,10 +123,12 @@ class HistoryRulesSpec < Minitest::Test
 
   def state(record) = Agnostic::Accounts.new(store: @store, genesis: @genesis).state(record.digest)
 
-  def endorse_and_settle(*named, ack: named)
+  # Tim, the adjudicator, endorses; the account posts the quorum, signed
+  # with a key the quorum leaves it.
+  def endorse_and_settle(*named, signer:, ack: named)
     endorsement = accept(post("tim", tim, ack: ack.map(&:digest), endorse: named.map(&:digest).sort, ts: @now += 1))
-    accept(notice("tim", tim, "quorum", ack: [endorsement.digest], target: named.map(&:digest).sort,
-                                        endorse: [endorsement.digest], ts: @now += 1))
+    accept(notice(signer, @carol, "quorum", ack: [endorsement.digest], target: named.map(&:digest).sort,
+                                           endorse: [endorsement.digest], ts: @now += 1))
   end
 
   # RULE (yours): acknowledging a record is not confirming it. A quorum
@@ -139,7 +141,7 @@ class HistoryRulesSpec < Minitest::Test
     change = accept(notice("carol", @carol, "key-change", ack: [disowned.digest], body: pub("carol-new")))
     assert_equal "disputed", state(stolen)
 
-    endorse_and_settle(disowned, change)
+    endorse_and_settle(disowned, change, signer: "carol-new")
     assert_equal "void", state(stolen), "acknowledged by the change, but the change does not rely on it"
     assert_equal "confirmed", state(disowned)
     assert_equal "confirmed", state(change)
@@ -153,7 +155,7 @@ class HistoryRulesSpec < Minitest::Test
     assert_equal "disputed", state(mine)
     assert_equal "disputed", state(false_alarm)
 
-    endorse_and_settle(mine)
+    endorse_and_settle(mine, signer: "carol")
     assert_equal "confirmed", state(mine)
     assert_equal "void", state(false_alarm)
   end
@@ -176,7 +178,7 @@ class HistoryRulesSpec < Minitest::Test
     signed = accept(post("carol-thief", @carol, ack: [theirs.digest], body: "with the stolen key"))
     assert_equal "disputed", state(signed)
 
-    endorse_and_settle(mine, ack: [mine, signed])
+    endorse_and_settle(mine, signer: "carol-new", ack: [mine, signed])
     assert_equal "void", state(theirs)
     assert_equal "void", state(signed)
   end
@@ -194,6 +196,62 @@ class HistoryRulesSpec < Minitest::Test
     one = accept(post("tim", tim, ack: [mine.digest, note.digest], endorse: [mine.digest], ts: @now + 3))
     refuse(notice("tim", tim, "quorum", ack: [one.digest], target: [mine.digest, note.digest].sort,
                                         endorse: [one.digest]), /each record it names/)
+  end
+
+  # RULE (yours): the account posts its quorum, with a key the quorum leaves
+  # it -- so a thief can post one only where the thief wins -- and an
+  # adjudicator does not post it at all.
+  def test_the_winner_posts_the_quorum
+    mine = accept(notice("carol", @carol, "key-change", ack: [@carol], body: pub("carol-new")))
+    theirs = accept(notice("carol", @carol, "key-change", ack: [@carol], body: pub("carol-thief"), ts: @now + 1))
+    endorsement = accept(post("tim", tim, ack: [mine.digest, theirs.digest], endorse: [mine.digest]))
+    quorum = ->(signer, account = @carol) do
+      notice(signer, account, "quorum", ack: [endorsement.digest], target: [mine.digest], endorse: [endorsement.digest])
+    end
+
+    refuse(quorum.call("carol-thief"), /does not void or make obsolete/)
+    refuse(quorum.call("tim", tim), /posted by its account/)
+    accept(quorum.call("carol-new"))
+  end
+
+  # RULE (yours): a quorum must confirm something not already confirmed, so
+  # one posted after another, repeating it, is refused.
+  def test_a_quorum_repeating_an_earlier_one_is_refused
+    mine = accept(notice("carol", @carol, "key-change", ack: [@carol], body: pub("carol-new")))
+    first = endorse_and_settle(mine, signer: "carol-new")
+    refuse(notice("carol-new", @carol, "quorum", ack: [first.digest], target: [mine.digest], endorse: first.endorse,
+                                                 ts: @now += 1), /not already confirmed/)
+  end
+
+  # RULE (yours): a dispute reaches the records of other accounts that rely
+  # on it. Bob pays Carol, then disowns the payment; Carol's spend of what he
+  # paid her is disputed with it. She may post the quorum that settles it,
+  # but only once six heartbeats of one author hold the endorsement, so Bob
+  # can post first.
+  def test_an_account_relying_on_a_dispute_may_settle_it_after_six_heartbeats
+    arcade = issue_to_bob.digest
+    paid = accept(spend(arcade, arcade, ack: [arcade]))
+    onward = accept(post("carol", @carol, ack: [paid.digest], transfer: { "currency" => arcade, "in" => [paid.digest],
+                                                                         "out" => [{ "to" => @carol, "value" => "1" }] }))
+    disowned = accept(notice("bob", @bob, "compromised", ack: [onward.digest], target: [paid.digest]))
+    assert_equal "disputed", state(onward), "it relies on Bob's disputed payment"
+
+    endorsement = accept(post("tim", tim, ack: [disowned.digest], endorse: [paid.digest]))
+    settle = ->(ack) do
+      notice("carol", @carol, "quorum", ack: ack, target: [paid.digest], endorse: [endorsement.digest], ts: @now += 1)
+    end
+    refuse(settle.call([endorsement.digest]), /six heartbeats/)
+
+    host = declare("host", ack: [endorsement.digest]).digest
+    beats = []
+    6.times do
+      ack = beats.empty? ? [host] : [beats.last.digest]
+      beats << accept(post("host", host, ack: ack, ts: @now += 480, type: "reputablechat:heartbeat:#{version}"))
+    end
+    accept(settle.call([beats.last.digest]))
+    assert_equal "confirmed", state(paid)
+    assert_equal "void", state(disowned)
+    assert_equal "valid", state(onward)
   end
 
   def test_compromised_is_signed_by_the_account_or_one_of_its_adjudicators

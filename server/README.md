@@ -432,6 +432,14 @@ decision someone may want to make differently.
   what it names. A quorum confirms only the account's own records: another
   account's record relied on, such as a payment's source, is settled in that
   account's disputes.
+- **"Six heartbeats from a single author that hold every endorsement"** is
+  checked on the author's sixth-newest heartbeat in the quorum's history:
+  each heartbeat acknowledges the one before, so if that one holds the
+  endorsements, the five after it do.
+- **"A record the quorum settles"** is one of the account's records, or a
+  notice about it, that is disputed before the quorum and confirmed or void
+  with it counted. Only a record relying on one of those directly makes its
+  account one that may post.
 - **Two spends of one output** are left to the issuer. A quorum may confirm a
   spend, but voids its rival only through the issuer's choice (section 11).
 - **"Current keys"** are the newest: a key change is signed with the newest

@@ -87,9 +87,23 @@ module Agnostic
 
     def keys(account) = memo(:keys, account) { KeyState.new(self, account) }
 
+    def deciding(hash, from)
+      return from if from&.holds?(hash)
+
+      record = memo(:record, hash) { store.fetch(hash) }
+      record && disputes(record.subject || record.account)
+    end
+
     def disputes(account) = memo(:disputes, account) { Disputes.new(self, account) }
 
     def disputed?(account) = disputes(account).any?
+
+    # A record's fate, decided by the dispute of the account it belongs to,
+    # or that a notice names. from: the Disputes asking, which answers for
+    # its own account's records (a quorum being checked counts there).
+    def void?(hash, from = nil) = deciding(hash, from)&.void?(hash) || false
+
+    def record_disputed?(hash, from = nil) = deciding(hash, from)&.disputed?(hash) || false
 
     def adjudicators(account) = memo(:adjudicators, account) { Adjudicators.new(self, account).in_force }
 
@@ -110,13 +124,15 @@ module Agnostic
 
     attr_reader :confirmed, :tentative
 
-    def initialize(view, account)
+    # disputes: whose settlement to read; a quorum being checked passes the
+    # one that counts it.
+    def initialize(view, account, disputes: view.disputes(account))
       @view = view
       @first = view.store.fetch(account)
       @confirmed = { "pubkey" => @first&.[]("pubkey"), "mpubkey" => @first&.[]("mpubkey") }
       @tentative = { "pubkey" => [], "mpubkey" => [] }
       @changes = FIELDS.to_h { |kind, field| [field, view.records_of(account, kind: "notice", notice_kind: kind)] }
-      settle(view.disputes(account))
+      settle(disputes)
     end
 
     # The account's last confirmed key of this kind, and every tentative
@@ -175,53 +191,80 @@ module Agnostic
   #
   # A quorum confirms the records it names and every record of the account
   # they rely on, and nothing else. A record that conflicts with a confirmed
-  # one is void, and so is a record that relies on a void one. A record is
-  # disputed while it is in a conflict neither side of which is settled, or
-  # while it relies on a disputed record. The account is disputed while any
-  # of its records is.
+  # one is void, and so is a record that relies on a void one, of any
+  # account. A record is disputed while it is in a conflict neither side of
+  # which is settled, or while it relies on a disputed record, of any
+  # account. The account is disputed while any of its records is.
+  #
+  # extra: a quorum not yet stored, counted as if it were -- what checking a
+  # quorum needs, since whether it is valid turns on what it would settle.
   class Disputes
-    attr_reader :confirmed, :void, :disputed
+    attr_reader :confirmed
 
-    def initialize(view, account)
+    def initialize(view, account, extra: nil)
       @view = view
       @account = account
       @records = view.records_of(account)
+      @notices = view.about(account, "compromised")
       @relies = @records.to_h { |r| [r.digest, Array(r.facts["relies"])] }
-      @pairs = contests + key_conflicts + notices + endorsement_conflicts
+      @pairs = contests + key_conflicts + notice_pairs + endorsement_conflicts
       @spends = spend_conflicts
       @confirmed = Set.new
-      @void = Set.new
-      view.about(account, "quorum").sort_by(&:seq).each { |q| q.target.each { |h| confirm(h) if view.include?(h) } }
+      @void = {}
+      @disputed = {}
+      quorums = view.about(account, "quorum") + [extra].compact
+      quorums.sort_by { |q| q.seq || Float::INFINITY }.each { |q| q.target.each { |h| confirm(h) if view.include?(h) } }
       issuer_choices
-      spread_void
-      @disputed = disputed_records
     end
 
-    def confirmed?(hash) = confirmed.include?(hash)
+    def confirmed?(hash) = @confirmed.include?(hash)
 
-    def void?(hash) = void.include?(hash)
+    # Void: it conflicts with a confirmed record, or relies on a void one.
+    def void?(hash)
+      return @void[hash] if @void.key?(hash)
 
-    def disputed?(hash) = disputed.include?(hash)
+      @void[hash] = (@lost&.include?(hash) || partners(hash).any? { |p| confirmed?(p.digest) && !confirmed?(hash) } ||
+                     relies(hash).any? { |h| @view.void?(h, self) }) || false
+    end
 
-    def any? = !disputed.empty?
+    def settled?(hash) = confirmed?(hash) || void?(hash)
+
+    # Disputed: in a conflict neither side of which is settled, or relying
+    # on a disputed record.
+    def disputed?(hash)
+      return @disputed[hash] if @disputed.key?(hash)
+
+      @disputed[hash] = !settled?(hash) &&
+                        (partners(hash).any? { |p| !settled?(p.digest) } || relies(hash).any? { |h| @view.record_disputed?(h, self) })
+    end
+
+    # The account's records and the notices about it.
+    def all = @records + @notices
+
+    def any? = all.any? { |r| disputed?(r.digest) }
+
+    # The disputed records.
+    def records = all.select { |r| disputed?(r.digest) }
 
     def conflict?(a, b) = (@pairs + @spends).any? { |x, y| [x.digest, y.digest].sort == [a, b].sort }
 
-    # The disputed records.
-    def records = disputed.filter_map { |h| record(h) }
-
     # The records that conflict with this one.
-    def conflicting_with(record)
-      (@pairs + @spends).filter_map do |a, b|
-        if a.digest == record.digest then b
-        elsif b.digest == record.digest then a
-        end
-      end.uniq(&:digest)
-    end
+    def conflicting_with(record) = partners(record.digest)
+
+    # Whether this account's dispute decides the record: its own, or a notice
+    # about it.
+    def holds?(hash) = all.any? { |r| r.digest == hash }
 
     private
 
-    def record(hash) = (@by_hash ||= (@records + (@pairs + @spends).flatten).to_h { |r| [r.digest, r] })[hash]
+    def partners(hash)
+      (@partners ||= (@pairs + @spends).each_with_object(Hash.new { |h, k| h[k] = [] }) do |(a, b), out|
+        out[a.digest] << b
+        out[b.digest] << a
+      end)[hash].uniq(&:digest)
+    end
+
+    def relies(hash) = @relies.fetch(hash) { Array(@view.store.fetch(hash)&.facts&.[]("relies")) }
 
     def confirm(hash)
       stack = [hash]
@@ -234,14 +277,15 @@ module Agnostic
 
     # Section 11: the issuer confirms the spend it endorses, while its own
     # account is not disputed as the endorsing record sees it, and the
-    # other spend is void.
+    # other spend is lost.
     def issuer_choices
+      @lost = Set.new
       @spends.each do |a, b|
         chosen = [a, b].find { |s| chosen_by_issuer?(s) }
         next unless chosen
 
         @confirmed << chosen.digest
-        @void << (chosen == a ? b : a).digest
+        @lost << (chosen == a ? b : a).digest
       end
     end
 
@@ -250,39 +294,13 @@ module Agnostic
       @view.endorsers(spend.digest).any? { |e| e.account == issuer && !@view.as_seen_by(e.digest).disputed?(issuer) }
     end
 
-    def spread_void
-      loop do
-        before = @void.size
-        @pairs.each do |a, b|
-          @void << b.digest if confirmed?(a.digest) && !confirmed?(b.digest)
-          @void << a.digest if confirmed?(b.digest) && !confirmed?(a.digest)
-        end
-        @records.each { |r| @void << r.digest if @relies[r.digest].any? { |h| void?(h) } }
-        break if @void.size == before
-      end
-    end
-
-    def disputed_records
-      settled = ->(r) { confirmed?(r.digest) || void?(r.digest) }
-      out = Set.new
-      (@pairs + @spends).each { |a, b| out.merge([a.digest, b.digest]) unless settled.call(a) || settled.call(b) }
-      @records.each do |r|
-        out << r.digest if !settled.call(r) && @relies[r.digest].any? { |h| out.include?(h) }
-      end
-      out
-    end
-
     def contests
       @records.select { |r| r.facts["contests"] }.flat_map do |r|
         Array(r.facts["contests"]).filter_map { |h| h.is_a?(String) && (c = @view.store.fetch(h)) ? [r, c] : nil }
       end
     end
 
-    def notices
-      @view.about(@account, "compromised").flat_map do |n|
-        @view.store.fetch_many(n.target).map { |t| [n, t] }
-      end
-    end
+    def notice_pairs = @notices.flat_map { |n| @view.store.fetch_many(n.target).map { |t| [n, t] } }
 
     def key_conflicts
       KeyState::FIELDS.keys.flat_map do |kind|

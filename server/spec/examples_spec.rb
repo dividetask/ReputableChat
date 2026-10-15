@@ -58,11 +58,11 @@ class ExamplesSpec < Minitest::Test
     accounts = Agnostic::Accounts.new(store: @store, genesis: @genesis)
     state = ->(prefix) { accounts.state(Examples.records.find { |r| r.digest.start_with?(prefix) }.digest) }
 
-    assert_equal "valid", state.call("2e59fd55"), "the thief's key change, which Dana's acknowledges but does not rely on"
-    assert_equal "void", state.call("a14714e2"), "the thief's message"
-    assert_equal "confirmed", state.call("e39a3e42"), "Dana's key change"
-    assert_equal "confirmed", state.call("9cb36d78"), "Alice's payment"
-    assert_equal "void", state.call("9cfb8f27"), "Alice's lunch"
+    assert_equal "valid", state.call("e9425194"), "the thief's key change, which Dana's acknowledges but does not rely on"
+    assert_equal "void", state.call("55016e59"), "the thief's message"
+    assert_equal "confirmed", state.call("fadd29fb"), "Dana's key change"
+    assert_equal "confirmed", state.call("3e886f60"), "Alice's payment"
+    assert_equal "void", state.call("20a0f926"), "Alice's lunch"
     assert_equal "void", state.call("35eb6dbc"), "the change made with Alice's stolen master key"
     assert_equal "valid", state.call("f2409cdf"), "Alice's earlier change, which the named one does not rely on"
     assert_equal "valid", state.call("1045791a"), "the release Alice signed with that change's key"

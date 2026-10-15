@@ -30,6 +30,7 @@ module Agnostic
     HEARTBEAT_FIELDS = %w[type id pubkey mpubkey ack body ts endorse].freeze
     HEARTBEAT_FLOOR = 480
     SPLIT_BEATS = 256
+    QUORUM_BEATS = 6
     TRANSFER_FIELDS = %w[currency in out].freeze
 
     Verdict = Struct.new(:problems, :missing) do
@@ -386,7 +387,11 @@ module Agnostic
 
     # A quorum names records of one account -- its own, or compromised
     # notices about it -- no two of them conflicting and none already void,
-    # and each must pass the master key and the count.
+    # and each must pass the master key and the count. It must confirm
+    # something not already confirmed. The account posts it, with a key the
+    # quorum does not void or make obsolete; an account with a record relying
+    # on what it settles may post it once six heartbeats of one author hold
+    # every endorsement it counts.
     def quorum(record, view, problems)
       named = record.target.map { |h| view.include?(h) && store.fetch(h) }
       return problems.push("a quorum names records in its history") unless named.all?
@@ -402,9 +407,49 @@ module Agnostic
         return problems.push("a quorum names two records that conflict")
       end
 
-      named.each do |n|
+      counted = named.flat_map do |n|
         master_only(n, view, disputes, problems)
         count(record, n, view, disputes, problems)
+      end
+      return unless problems.empty?
+
+      after = Disputes.new(view, subject, extra: record)
+      if (after.confirmed - disputes.confirmed).empty?
+        return problems.push("a quorum confirms something not already confirmed")
+      end
+
+      quorum_author(record, view, subject, disputes, after, counted.uniq, problems)
+    end
+
+    def quorum_author(record, view, subject, before, after, endorsements, problems)
+      if record.account == subject
+        keys = KeyState.new(view, subject, disputes: after)
+        return if keys.allowed(record.signer_field).include?(record.signer)
+
+        return problems.push("a quorum is signed with a key the quorum does not void or make obsolete")
+      end
+
+      settled = before.all.map(&:digest).select { |h| !before.settled?(h) && after.settled?(h) }
+      relying = view.records_of(record.account).any? { |r| (Array(r.facts["relies"]) & settled).any? }
+      unless relying
+        return problems.push("a quorum is posted by its account, or by an account with a record relying on what it settles")
+      end
+      return if six_heartbeats?(view, endorsements)
+
+      problems.push("an account other than the quorum's posts it only once six heartbeats of one author hold " \
+                    "every endorsement it counts")
+    end
+
+    # Six heartbeats of one author hold every endorsement: below a fork, the
+    # sixth-newest in this history holding them means the five after it do.
+    def six_heartbeats?(view, endorsements)
+      store.heartbeat_authors.any? do |author|
+        newest = view.newest_beat(author)
+        next false unless newest && newest >= QUORUM_BEATS
+
+        view.within(store.beats_at(author, newest - QUORUM_BEATS + 1)).any? do |beat|
+          view.histories.of(beat.digest).among(endorsements).size == endorsements.size
+        end
       end
     end
 
@@ -431,13 +476,14 @@ module Agnostic
         group.count { |g| view.endorsers(g.digest).any? { |e| e.account == a } } > 1
       end
       counted = adjudicators - doubled
-      endorsing = store.fetch_many(record.endorse)
-                       .select { |e| e.endorse.include?(named.digest) && counted.include?(e.account) }
-                       .map(&:account).uniq
-      return if !counted.empty? && endorsing.size * 2 > counted.size
+      endorsements = store.fetch_many(record.endorse)
+                          .select { |e| e.endorse.include?(named.digest) && counted.include?(e.account) }
+      endorsing = endorsements.map(&:account).uniq
+      return endorsements.map(&:digest) if !counted.empty? && endorsing.size * 2 > counted.size
 
       problems.push("a quorum needs more than half of the account's adjudicators to have endorsed each record it " \
                     "names (#{endorsing.size} of #{counted.size} for #{named.digest[0, 8]})")
+      []
     end
 
     # Section 8: a record relies on another when it would not be valid without
