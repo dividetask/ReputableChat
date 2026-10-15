@@ -414,8 +414,10 @@ module Agnostic
       return unless problems.empty?
 
       after = Disputes.new(view, subject, extra: record)
-      if (after.confirmed - disputes.confirmed).empty?
-        return problems.push("a quorum confirms something not already confirmed")
+      fresh = after.confirmed - disputes.confirmed
+      return problems.push("a quorum confirms something not already confirmed") if fresh.empty?
+      if fresh.any? { |h| disputes.undecided_spend?(h) }
+        return problems.push("a quorum confirms neither of two spends of an output until the issuer chooses")
       end
 
       quorum_author(record, view, subject, disputes, after, counted.uniq, problems)

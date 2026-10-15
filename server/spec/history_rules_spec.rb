@@ -297,6 +297,17 @@ class HistoryRulesSpec < Minitest::Test
     refuse(spend(arcade, arcade, ack: [paid.digest], ts: @now + 1), /already spent/)
   end
 
+  # RULE (yours): a double spend is the issuer's to settle; a quorum cannot
+  # confirm either spend until the issuer has chosen.
+  def test_a_quorum_does_not_confirm_a_double_spend_the_issuer_has_not_settled
+    arcade = issue_to_bob.digest
+    one = accept(spend(arcade, arcade, ack: [arcade]))
+    two = accept(spend(arcade, arcade, ack: [arcade], keep: "98", ts: @now + 1))
+    endorsement = accept(post("tim", tim, ack: [one.digest, two.digest], endorse: [one.digest]))
+    refuse(notice("bob", @bob, "quorum", ack: [endorsement.digest], target: [one.digest], endorse: [endorsement.digest]),
+           /until the issuer chooses/)
+  end
+
   def test_a_spend_of_another_currency_is_refused
     arcade = issue_to_bob.digest
     refuse(spend(arcade, tim, ack: [arcade]), /not a currency|another currency/)

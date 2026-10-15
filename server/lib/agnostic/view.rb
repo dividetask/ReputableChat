@@ -246,6 +246,9 @@ module Agnostic
     # The disputed records.
     def records = all.select { |r| disputed?(r.digest) }
 
+    # One of two spends of an output that the issuer has not chosen between.
+    def undecided_spend?(hash) = @spends.any? { |a, b| [a.digest, b.digest].include?(hash) && !confirmed?(a.digest) && !confirmed?(b.digest) }
+
     def conflict?(a, b) = (@pairs + @spends).any? { |x, y| [x.digest, y.digest].sort == [a, b].sort }
 
     # The records that conflict with this one.
