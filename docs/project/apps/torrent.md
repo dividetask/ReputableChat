@@ -15,7 +15,7 @@ A public tracker site has two problems the chain already answers.
 
 A message whose type carries `torrent` and which has no target. It must carry a `file`, and the first file is the torrent's **info dictionary**.
 
-A BitTorrent v2 infohash is the SHA-256 of the bencoded info dictionary. That is exactly how the rules name a file, so the infohash *is* the file's name: `file: ["<infohash>.info"]`. Any BitTorrent v2 client can join the swarm from it, and a client that holds those bytes can check them against the record without trusting whoever served them. `.torrent` is not usable as the extension, since the rules allow at most five characters.
+A BitTorrent v2 infohash is the SHA-256 of the bencoded info dictionary. That is exactly how the rules name a file, so the infohash *is* the file's name: `file: ["<infohash>.info"]`. Any BitTorrent v2 client can join the swarm from it, and a client that holds those bytes can check them against the record without trusting whoever served them.
 
 Only v2 and hybrid torrents can be listed. A v1-only torrent is named by SHA-1, which is not a File.
 
