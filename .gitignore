@@ -1,6 +1,17 @@
+# Runtime state: each server's database lives here.
 data/
 tmp/
 *.db
 *.sqlite3
 .bundle/
 vendor/bundle/
+# Seeds are secrets. The one exception is the development genesis account's
+# two phrases, public on purpose, un-ignored by name. Production's phrases
+# never enter the repository.
+*.seed
+!/shared/genesis/development.seed
+!/shared/genesis/development.master.seed
+
+# The host account a server and its apps share: made on the agnostic server's
+# first boot, never committed.
+/host/

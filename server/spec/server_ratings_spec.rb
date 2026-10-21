@@ -1,0 +1,307 @@
+# frozen_string_literal: true
+
+require_relative "spec_helper"
+require "servers"
+require "agnostic/manual_ratings"
+
+# What a server says of other servers, from whether it could reach them at the
+# addresses their accounts declared.
+class ServerRatingsSpec < Minitest::Test
+  include Servers
+
+  DAY = 86_400
+
+  def setup
+    @now = Time.now.to_i
+    @alpha = boot("alpha", clock: -> { @now }, host: { "url" => "http://alpha" })
+    @beta = boot("beta", peers: ["alpha"], clock: -> { @now }, host: { "url" => "http://beta" })
+    @beta.beat_and_sync # alpha learns of beta from its records
+  end
+
+  def beta = @beta.host.id
+
+  def rating(account = beta) = @alpha.ratings.due.dig(account, "reputation")
+
+  def contact(**values)
+    @alpha.store.record_contact(beta, success: false, at: @now)
+    @alpha.store.db[:contacts].where(account: beta).update(values)
+  end
+
+  def test_an_address_that_never_worked_is_rated_minus_one_once_forgotten
+    network.apps.delete("http://beta")
+    @alpha.peers.pull_all
+    assert_nil rating, "rated before it was forgotten"
+
+    @now += 8 * DAY
+    @alpha.peers.pull_all
+    assert_equal "-1", rating
+  end
+
+  def test_an_address_that_worked_then_went_offline_is_rated_a_little_below_zero
+    @alpha.peers.pull_all
+    network.apps.delete("http://beta")
+    @now += 8 * DAY
+    @alpha.peers.pull_all
+    assert_equal "-0.01", rating
+  end
+
+  def test_a_reliable_server_is_rated_a_little_after_four_months_and_a_little_more_after_a_year
+    contact(attempts: 100, successes: 95, first_success_at: @now)
+    @now += 119 * DAY
+    assert_nil rating
+    @now += DAY
+    assert_equal "0.01", rating
+    @now += 245 * DAY
+    assert_equal "0.02", rating
+  end
+
+  def test_an_unreliable_server_is_not_rated
+    contact(attempts: 100, successes: 80, first_success_at: @now - (400 * DAY))
+    assert_nil rating
+  end
+
+  def test_ratings_are_published_as_an_attestation_only_when_they_change
+    contact(attempts: 10, successes: 10, first_success_at: @now - (400 * DAY))
+    result = @alpha.ratings.publish
+    assert_equal :accepted, result.status
+
+    attestation = @alpha.store.fetch(result.hash)
+    assert_equal({ beta => { "reputation" => "0.02", "trust" => "0" } }, attestation["scores"])
+    assert_nil @alpha.ratings.publish, "an unchanged rating was published again"
+  end
+
+  def test_the_ratings_are_configurable
+    settings = Agnostic::Settings.new({ "ratings" => { "trust" => "1", "never_reached" => "-0.5" } }, env: {})
+    ratings = Agnostic::ServerRatings.new(store: @alpha.store, ingest: @alpha.ingest, host: @alpha.host, settings: settings,
+                                          clock: -> { @now })
+    contact(offline: true)
+    assert_equal({ "reputation" => "-0.5", "trust" => "0" }, ratings.due[beta], "trust is never anything but 0")
+  end
+
+  # --- withdrawing an address -----------------------------------------------------
+
+  def redeclare(**fields)
+    latest = @beta.store.by_account(beta).max_by(&:seq)
+    record = @beta.host.sign("identity", { "ack" => [latest.digest], "title" => "beta", "body" => "", "ts" => @now }
+                                           .merge(fields.transform_keys(&:to_s)))
+    assert_equal :accepted, @beta.ingest.submit(record).status
+    assert_equal :accepted, @alpha.ingest.submit(record).status
+  end
+
+  def test_a_declaration_without_a_url_removes_the_server
+    assert_includes @alpha.peers.urls, "http://beta"
+    redeclare
+    refute_includes @alpha.peers.urls, "http://beta"
+  end
+
+  def test_a_declaration_with_a_new_url_replaces_the_old_one
+    redeclare(url: "http://beta-two")
+    refute_includes @alpha.peers.urls, "http://beta"
+    assert_includes @alpha.peers.urls, "http://beta-two"
+  end
+
+  # --- timing ---------------------------------------------------------------------
+
+  def test_the_server_waits_until_its_next_heartbeat_is_due
+    assert_equal 600, @beta.heartbeat.seconds_until_due
+    @now += 599
+    assert_nil @beta.beat_and_sync
+    @now += 1
+    assert_equal :accepted, @beta.beat_and_sync.status
+  end
+
+  # --- ratings by hand ------------------------------------------------------------
+
+  def by_hand = Agnostic::ManualRatings.new(@alpha.store, clock: -> { @now })
+
+  def published(account = beta) = @alpha.store.published_rating(account)&.values_at(:reputation, :trust)
+
+  # The operator decides, trust included, and the server publishes it as it
+  # would its own rating.
+  def test_a_rating_by_hand_stands_in_for_reachability_trust_included
+    contact(attempts: 100, successes: 95, first_success_at: @now - (400 * DAY))
+    by_hand.set(beta, "-0.5", "1")
+
+    assert_equal({ "reputation" => "-0.5", "trust" => "1" }, @alpha.ratings.current[beta].slice("reputation", "trust"))
+    assert_equal({ "reputation" => "-0.5", "trust" => "1" }, @alpha.ratings.current[beta]["operator"])
+    @alpha.ratings.publish
+    assert_equal %w[-0.5 1], published
+  end
+
+  def test_removing_a_rating_by_hand_hands_it_back_to_reachability
+    contact(attempts: 100, successes: 95, first_success_at: @now - (400 * DAY))
+    by_hand.set(beta, "-0.5", "1")
+    @alpha.ratings.publish
+    by_hand.clear(beta)
+
+    refute @alpha.ratings.current[beta].key?("operator")
+    @alpha.ratings.publish
+    assert_equal %w[0.02 0], published
+  end
+
+  # An attestation amends an entry but cannot delete one, so an account
+  # nobody has an opinion of any more is published as 0 with trust 0.
+  def test_removing_the_only_opinion_publishes_zero
+    stranger = "c" * 64
+    by_hand.set(stranger, "0.3", "0.5")
+    @alpha.ratings.publish
+    by_hand.clear(stranger)
+    @alpha.ratings.publish
+
+    assert_equal %w[0 0], published(stranger)
+  end
+
+  def test_a_rating_by_hand_is_a_decimal_from_minus_one_to_one_for_an_account
+    assert_raises(ArgumentError) { by_hand.set("not an account", "0.5", "1") }
+    %w[.5 1.5 0.50].each { |bad| assert_raises(ArgumentError) { by_hand.set(beta, bad, "1") } }
+    assert_raises(ArgumentError) { by_hand.set(beta, "0.5", "2") }
+  end
+
+  # The apps beside the server read its ratings to choose their own peers.
+  def test_the_ratings_are_served_to_the_apps_beside_the_server
+    by_hand.set(beta, "0.4", "0")
+    response = Rack::MockRequest.new(@alpha.app).get("/api/ratings")
+
+    assert_equal "0.4", JSON.parse(response.body).dig("ratings", beta, "reputation")
+  end
+
+  # --- what the apps beside the server nudge ----------------------------------
+
+  def nudge(app, reputation, trust = "0", account: beta)
+    @alpha.store.nudge_rating(app, account, reputation: reputation, trust: trust, at: @now)
+  end
+
+  # RULE (yours): what an app learns of a server is a separate fact from
+  # whether this server can reach it, so both count.
+  def test_an_apps_nudge_adds_to_the_servers_own_rating
+    contact(attempts: 10, successes: 10, first_success_at: @now - (400 * DAY))
+    nudge("chat", "0.004")
+    assert_equal({ "reputation" => "0.024", "trust" => "0" }, @alpha.ratings.due[beta])
+  end
+
+  def test_a_nudge_counts_where_the_server_has_no_rating_of_its_own
+    nudge("chat", "-0.01")
+    assert_equal "-0.01", rating
+  end
+
+  def test_every_apps_nudge_is_summed_and_held_between_minus_one_and_one
+    nudge("chat", "0.8", "0.3")
+    nudge("forum", "0.7", "0.2")
+    assert_equal({ "reputation" => "1", "trust" => "0.5" }, @alpha.ratings.due[beta])
+  end
+
+  # RULE (yours): an app, which knows more than whether a server answers, may
+  # move trust; the server's own judgement never does.
+  def test_an_app_may_move_trust
+    nudge("chat", "0", "0.1")
+    assert_equal "0.1", @alpha.ratings.due.dig(beta, "trust")
+  end
+
+  def test_a_rating_by_hand_overrides_the_nudges
+    nudge("chat", "0.5")
+    by_hand.set(beta, "-0.2", "0.1")
+    assert_equal({ "reputation" => "-0.2", "trust" => "0.1" }, @alpha.ratings.due[beta])
+  end
+
+  def test_the_ratings_say_what_each_is_made_of
+    contact(attempts: 10, successes: 10, first_success_at: @now - (400 * DAY))
+    nudge("chat", "0.004")
+    by_hand.set(beta, "0.4", "0")
+    entry = JSON.parse(Rack::MockRequest.new(@alpha.app).get("/api/ratings").body).dig("ratings", beta)
+    assert_equal({ "reputation" => "0.4", "trust" => "0",
+                   "operator" => { "reputation" => "0.4", "trust" => "0" },
+                   "reachability" => { "reputation" => "0.02", "trust" => "0" },
+                   "nudges" => { "chat" => { "reputation" => "0.004", "trust" => "0" } } }, entry)
+  end
+
+  # RULE (yours): an app moves a rating only by its nudge, on the local
+  # listener; the contact reports that came before are gone, so nothing is
+  # counted twice.
+  def test_an_app_has_no_other_way_to_move_a_rating
+    response = Rack::MockRequest.new(@alpha.app).post("/api/contacts", input: "{}", "CONTENT_TYPE" => "application/json")
+    assert_equal 404, response.status
+  end
+end
+
+# A server rated -1 is ignored until an administrator brings it back; any
+# other comes back by itself.
+class RatedOutSpec < Minitest::Test
+  include Servers
+
+  DAY = 86_400
+
+  def setup
+    @now = Time.now.to_i
+    @alpha = boot("alpha", clock: -> { @now }, host: { "url" => "http://alpha" })
+    @beta = boot("beta", peers: ["alpha"], clock: -> { @now }, host: { "url" => "http://beta" })
+    @beta.beat_and_sync
+  end
+
+  def offer
+    beat = @beta.host.sign("heartbeat", { "ack" => [@beta.heartbeat.previous.digest], "body" => "", "ts" => @now })
+    signed_post(@alpha, "/api/sync", { "heartbeat" => beat.to_wire }, signer: @beta.host, ts: @now).status
+  end
+
+  def test_a_server_rated_minus_one_is_ignored_until_forgiven
+    network.apps.delete("http://beta")
+    @alpha.peers.pull_all
+    @now += 8 * DAY
+    @alpha.peers.pull_all
+    @alpha.ratings.publish
+
+    assert @alpha.store.ignored?(@beta.host.id, at: @now + (10 * 365 * DAY)), "the ignore ran out"
+    assert_equal 403, offer
+    refute_includes @alpha.peers.urls, "http://beta"
+
+    @alpha.store.forgive(@beta.host.id)
+    assert_equal 200, offer
+  end
+
+  def nudge(app, reputation)
+    @alpha.store.nudge_rating(app, @beta.host.id, reputation: reputation, trust: "0", at: @now)
+    @alpha.ratings.publish
+  end
+
+  def ignored? = @alpha.store.ignored?(@beta.host.id, at: @now)
+
+  # RULE (yours): an app may nudge a server to -1, and it is ignored like any
+  # server rated -1; but the app may take its nudge back, or another app
+  # nudge it up, and once the rating is above -1 it is no longer ignored,
+  # with no administrator needed.
+  def test_a_server_nudged_to_minus_one_is_ignored_until_the_app_takes_it_back
+    nudge("chat", "-1")
+    assert ignored?
+    assert_equal 403, offer
+
+    nudge("chat", "0")
+    refute ignored?
+    assert_equal 200, offer
+  end
+
+  def test_a_server_nudged_to_minus_one_is_let_back_in_when_another_app_nudges_it_up
+    nudge("chat", "-1")
+    assert ignored?
+
+    nudge("forum", "0.1")
+    assert_equal "-0.9", @alpha.store.published_rating(@beta.host.id)[:reputation]
+    refute ignored?
+  end
+
+  # A rating above -1 lifts only the ignore that a -1 rating put there.
+  def test_a_rating_above_minus_one_does_not_lift_an_ignore_for_the_clock
+    @alpha.store.ignore(@beta.host.id, reason: "its clock is off", at: @now, until_at: @now + DAY)
+    nudge("chat", "0.1")
+    assert ignored?
+  end
+
+  def test_a_server_that_went_offline_is_not_ignored
+    @alpha.peers.pull_all
+    network.apps.delete("http://beta")
+    @now += 8 * DAY
+    @alpha.peers.pull_all
+    @alpha.ratings.publish
+
+    refute @alpha.store.ignored?(@beta.host.id, at: @now)
+    assert_equal 200, offer, "a server that comes back is let back in"
+  end
+end
